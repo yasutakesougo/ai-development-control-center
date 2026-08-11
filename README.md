@@ -42,7 +42,7 @@ Cloudflare Version ID: d13218f0-f2ef-4f79-803c-ab4e310d2bde
 npm run verify: 39 / 39 PASS
 PR #9: MERGED (MVP-3-APPROVAL-INTENT-UI-V1)
 merged HEAD: 924a9d815e6a756249a6ab20903ef1fed260fd4e
-current main: a0735568180c6cd956f66a186a3efedcef1fc4b0
+deployed runtime baseline: a0735568180c6cd956f66a186a3efedcef1fc4b0
 
 /api/status:
   evidenceState = CONFIRMED
