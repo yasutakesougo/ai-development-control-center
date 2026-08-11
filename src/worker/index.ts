@@ -1,8 +1,10 @@
 import { resolveHumanAction } from "../domain/humanActionResolver";
 import { handleAuthStatus } from "./auth/authStatus";
 import { observeRepository } from "./github/readOnlyAdapter";
+import { handleLedgerRecordPost, handleLedgerRecordsGet, type LedgerApiEnv } from "./ledger/recordsApi";
+import { buildStatusPayload } from "./statusApi";
 
-interface Env {
+interface Env extends LedgerApiEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   GITHUB_TOKEN?: string;
   /** Cloudflare Access team domain / JWT issuer. Optional until Access is configured. */
@@ -24,31 +26,18 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/status") {
       const facts = await observeRepository(TARGET_REPOSITORY, env);
       const action = resolveHumanAction(facts);
+      const payload = await buildStatusPayload(facts, action);
+      return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
+    }
 
-      return Response.json(
-        {
-          action,
-          developmentStatus: {
-            repository: facts.repository,
-            main: facts.currentMain ? "Observed" : "Unknown",
-            openPrCount: facts.openPullRequests?.length ?? null,
-            evidenceState: facts.evidenceState,
-          },
-          evidence:
-            facts.openPullRequests?.map((pr) => ({
-              pr: pr.number,
-              draft: pr.draft,
-              ci: pr.ci,
-              review: pr.review,
-              mergeState: pr.mergeState,
-              humanDecision: pr.humanDecisionEvidence.state,
-              humanDecisionSource: pr.humanDecisionEvidence.source,
-              sourceRefs: pr.sourceRefs,
-            })) ?? null,
-          observedAt: facts.observedAt,
-        },
-        { headers: { "Cache-Control": "no-store" } },
-      );
+    if (url.pathname === "/api/ledger/records") {
+      if (request.method === "POST") {
+        return handleLedgerRecordPost(request, env, {
+          observe: () => observeRepository(TARGET_REPOSITORY, env),
+        });
+      }
+      if (request.method === "GET") return handleLedgerRecordsGet(request, env);
+      return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, POST" } });
     }
 
     if (url.pathname.startsWith("/api/")) {
