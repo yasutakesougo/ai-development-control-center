@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   buildApprovalIntentFingerprint,
   isApprovalIntentUiAllowed,
@@ -8,7 +8,17 @@ import {
   type ApprovalIntentDraft,
 } from "../domain/approvalIntent";
 import type { HumanAction } from "../domain/humanAction";
+import {
+  applyLedgerOutcome,
+  beginLedgerSubmission,
+  retryableAttempt,
+  type LedgerSubmissionAttempt,
+  type LedgerSubmissionState,
+} from "../domain/ledgerSubmission";
 import { ApprovalIntentPanel } from "./ApprovalIntentPanel";
+import { fetchLedgerHistory, postLedgerRecord, type LedgerHistoryResult } from "./ledgerApi";
+import { LedgerHistoryPanel } from "./LedgerHistoryPanel";
+import { LedgerRecordControls } from "./LedgerRecordControls";
 
 type PrEvidence = {
   pr: number;
@@ -31,6 +41,8 @@ type StatusResponse = {
   };
   evidence: PrEvidence[] | null;
   observedAt: string;
+  /** Server-computed; present only when a recordable decision candidate exists. */
+  decisionFingerprint?: string;
 };
 
 const fallback: HumanAction = {
@@ -45,34 +57,42 @@ export function App() {
   const [data, setData] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [intentDraft, setIntentDraft] = useState<ApprovalIntentDraft | null>(null);
+  const [submission, setSubmission] = useState<LedgerSubmissionState>({ phase: "IDLE" });
+  const [history, setHistory] = useState<LedgerHistoryResult | null>(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/status", { cache: "no-store" });
+      if (!response.ok) throw new Error("status request failed");
+      setData((await response.json()) as StatusResponse);
+    } catch {
+      setData({
+        action: fallback,
+        developmentStatus: {
+          repository: "severe-behavior-support-spfx",
+          main: "Unknown",
+          openPrCount: null,
+          evidenceState: "ERROR",
+        },
+        evidence: null,
+        observedAt: new Date().toISOString(),
+      });
+    }
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    setHistory(await fetchLedgerHistory());
+  }, []);
 
   useEffect(() => {
-    fetch("/api/status", { cache: "no-store" })
-      .then((response) => {
-        if (!response.ok) throw new Error("status request failed");
-        return response.json() as Promise<StatusResponse>;
-      })
-      .then(setData)
-      .catch(() =>
-        setData({
-          action: fallback,
-          developmentStatus: {
-            repository: "severe-behavior-support-spfx",
-            main: "Unknown",
-            openPrCount: null,
-            evidenceState: "ERROR",
-          },
-          evidence: null,
-          observedAt: new Date().toISOString(),
-        }),
-      )
-      .finally(() => setLoading(false));
-  }, []);
+    Promise.all([loadStatus(), loadHistory()]).finally(() => setLoading(false));
+  }, [loadStatus, loadHistory]);
 
   const action = data?.action ?? fallback;
   const evidenceState = data?.developmentStatus.evidenceState;
   const approvalAllowed = isApprovalIntentUiAllowed(action.status, evidenceState);
-  const fingerprint = data
+  const serverFingerprint = data?.decisionFingerprint ?? null;
+  const localFingerprint = data
     ? buildApprovalIntentFingerprint({
         actionStatus: action.status,
         evidenceState,
@@ -83,12 +103,38 @@ export function App() {
     : "";
 
   useEffect(() => {
-    setIntentDraft((current) => reconcileApprovalIntentDraft(current, fingerprint, approvalAllowed));
-  }, [fingerprint, approvalAllowed]);
+    setIntentDraft((current) => reconcileApprovalIntentDraft(current, localFingerprint, approvalAllowed));
+  }, [localFingerprint, approvalAllowed]);
 
   function handleSelectIntent(intent: ApprovalIntent) {
-    const result = selectApprovalIntent(approvalAllowed, intent, fingerprint);
+    const result = selectApprovalIntent(approvalAllowed, intent, localFingerprint);
     setIntentDraft(result.draft);
+    // A fresh choice starts a fresh submission context (a later press generates a new key).
+    setSubmission({ phase: "IDLE" });
+  }
+
+  async function submitAttempt(attempt: LedgerSubmissionAttempt) {
+    setSubmission({ phase: "SUBMITTING", attempt });
+    const outcome = await postLedgerRecord(attempt);
+    const effect = applyLedgerOutcome(attempt, outcome);
+    setSubmission(effect.state);
+    if (effect.discardIntent) setIntentDraft(null);
+    if (effect.refreshStatus) await loadStatus();
+    if (effect.state.phase === "RECORDED") await loadHistory();
+  }
+
+  function handleRecord() {
+    if (!intentDraft) return;
+    const attempt = beginLedgerSubmission(intentDraft.intent, serverFingerprint);
+    if (!attempt) return;
+    void submitAttempt(attempt);
+  }
+
+  function handleRetry() {
+    // Blind retry after an unknown result reuses the SAME idempotency key.
+    const attempt = retryableAttempt(submission);
+    if (!attempt) return;
+    void submitAttempt(attempt);
   }
 
   return (
@@ -120,6 +166,18 @@ export function App() {
           onSelect={handleSelectIntent}
         />
       )}
+
+      {!loading && (approvalAllowed || submission.phase !== "IDLE") && (
+        <LedgerRecordControls
+          draft={intentDraft}
+          decisionFingerprint={serverFingerprint}
+          submission={submission}
+          onRecord={handleRecord}
+          onRetry={handleRetry}
+        />
+      )}
+
+      {!loading && <LedgerHistoryPanel history={history} />}
 
       <details className="details-card">
         <summary>理由と参照元を見る</summary>

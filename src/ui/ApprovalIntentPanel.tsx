@@ -41,7 +41,8 @@ export function ApprovalIntentPanel({
     <section className="approval-intent-card" aria-label="Approval Intent local draft">
       <h2>Approval Intent（案）</h2>
       <p className="approval-intent-note">
-        これは実際の承認ではありません。選択は端末上の一時案のみで、外部へ送信・保存されません。
+        これは実際の承認ではありません。選択は端末上の一時案です。「Ledger に記録」を押した場合のみ
+        監査用 Ledger に追記されます（実行・Merge・外部システムへの反映は行われません）。
       </p>
 
       <dl className="approval-intent-evidence">

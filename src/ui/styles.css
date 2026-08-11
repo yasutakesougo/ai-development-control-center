@@ -7,7 +7,8 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, textarea, select { font: inherit; }
 .shell { width: min(100%, 720px); margin: 0 auto; padding: 20px 16px 48px; }
-.action-card, .status-card, .details-card, .approval-intent-card {
+.action-card, .status-card, .details-card, .approval-intent-card,
+.ledger-record-card, .ledger-history-card {
   background: #fff;
   border: 1px solid #dfe5dc;
   border-radius: 20px;
@@ -65,6 +66,55 @@ summary { cursor: pointer; font-weight: 700; }
 }
 .approval-intent-draft p { margin: 0 0 6px; color: #5f675f; line-height: 1.5; }
 .approval-intent-draft p:last-child { margin-bottom: 0; }
+.ledger-record-card, .ledger-history-card { margin-top: 16px; padding: 20px; }
+.ledger-record-card h2, .ledger-history-card h2 { margin: 0 0 8px; font-size: 1.05rem; }
+.ledger-record-note { margin: 0 0 16px; color: #5f675f; line-height: 1.6; }
+.ledger-record-submit p { margin: 0 0 10px; line-height: 1.6; }
+.ledger-record-submit button, .ledger-record-result button {
+  border: 1px solid #355d3a;
+  background: #355d3a;
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.ledger-record-submit button:disabled { opacity: 0.6; cursor: wait; }
+.ledger-record-result {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #c9d2c6;
+  background: #f8faf6;
+}
+.ledger-record-result p { margin: 0 0 6px; line-height: 1.55; color: #3c463d; }
+.ledger-record-result p:last-child { margin-bottom: 0; }
+.ledger-record-result.recorded { border-color: #355d3a; background: #e7efe6; }
+.ledger-record-result.stale { border-color: #8a722a; background: #fff9eb; }
+.ledger-record-result.retryable { border-color: #8a722a; background: #fff9eb; }
+.ledger-record-result.refused { border-color: #a25050; background: #fdf1f0; }
+.ledger-record-meta { font-size: 0.85rem; color: #657066; overflow-wrap: anywhere; }
+.ledger-history-list { list-style: none; margin: 0; padding: 0; }
+.ledger-history-list li { padding: 12px 0; border-top: 1px solid #edf0eb; }
+.ledger-history-list li:first-child { border-top: 0; }
+.ledger-history-main { line-height: 1.6; }
+.ledger-history-flag {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef1ec;
+  color: #52755a;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.ledger-history-refs, .ledger-history-id {
+  color: #657066;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.ledger-history-audit { margin: 8px 0 0; }
+.ledger-history-audit div { grid-template-columns: 160px 1fr; }
 @media (min-width: 640px) {
   .shell { padding-top: 40px; }
   .action-card { padding: 32px; }
