@@ -550,6 +550,7 @@ Approval Intent は実承認・永続化・実行ゲートではありません�
 MVP-3 Approval Intent UI V1 = COMPLETE
 MVP-3 Approval Ledger CONTRACT-V1 = DESIGN ONLY
 MVP-3 Approval Ledger IDENTITY-V1 = DESIGN ONLY
+MVP-3 Approval Ledger AUTH-VERIFY-V1 = CODE PRESENT (not production-activated)
 ```
 
 Ledger 契約ドラフト:
@@ -559,7 +560,7 @@ docs/mvp-3-approval-ledger-contract-v1.md
 docs/mvp-3-approval-ledger-identity-v1.md
 ```
 
-契約上の追加 invariant（design-only）:
+契約上の追加 invariant:
 
 ```text
 stable decision fingerprint（observedAt は audit metadata。canonical から分離）
@@ -570,15 +571,18 @@ principal identity = issuer + subjectId（subjectId alone is not globally stable
 browser-supplied approverId/email/displayName must not establish identity
 JWT fail-closed validation required before any future privileged Ledger write
 displayName/email persistence NOT REQUIRED until PII retention is resolved
-fingerprint canonicalization / idempotency / auth implementation = NOT AUTHORIZED
+authenticated ≠ authorized to write Ledger
+fingerprint canonicalization / idempotency / authorization allowlist = NOT AUTHORIZED
 ```
 
 ただし:
 
 ```text
 Ledger persistence Implementation Start = NOT AUTHORIZED
-authentication / authorization implementation = NOT AUTHORIZED
-backend mutation API = NOT AUTHORIZED
+Cloudflare Access configuration = NOT AUTHORIZED
+production auth boundary activation = NOT AUTHORIZED
+authorization allowlist implementation = NOT AUTHORIZED
+backend approval mutation API = NOT AUTHORIZED
 real persistence / write = NOT AUTHORIZED
 Action Gateway / Agent execution = NOT AUTHORIZED
 ```

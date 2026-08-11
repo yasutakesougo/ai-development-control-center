@@ -1,9 +1,14 @@
 import { resolveHumanAction } from "../domain/humanActionResolver";
+import { handleAuthStatus } from "./auth/authStatus";
 import { observeRepository } from "./github/readOnlyAdapter";
 
 interface Env {
   ASSETS: { fetch(request: Request): Promise<Response> };
   GITHUB_TOKEN?: string;
+  /** Cloudflare Access team domain / JWT issuer. Optional until Access is configured. */
+  ACCESS_TEAM_DOMAIN?: string;
+  /** Cloudflare Access application audience tag. Optional until Access is configured. */
+  ACCESS_AUD?: string;
 }
 
 const TARGET_REPOSITORY = "yasutakesougo/severe-behavior-support-spfx";
@@ -11,6 +16,10 @@ const TARGET_REPOSITORY = "yasutakesougo/severe-behavior-support-spfx";
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (request.method === "GET" && url.pathname === "/api/auth/status") {
+      return handleAuthStatus(request, env);
+    }
 
     if (request.method === "GET" && url.pathname === "/api/status") {
       const facts = await observeRepository(TARGET_REPOSITORY, env);
