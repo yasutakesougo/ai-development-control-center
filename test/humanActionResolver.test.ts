@@ -11,6 +11,11 @@ function pr(overrides: Partial<ObservedPullRequest> = {}): ObservedPullRequest {
     review: "PASS",
     mergeState: "CLEAN",
     humanDecisionRequired: false,
+    humanDecisionEvidence: {
+      state: "NONE",
+      source: "PR_BODY_MARKER",
+      matchedMarkers: ["Human-Decision: NONE"],
+    },
     sourceRefs: ["github:pr:1"],
     ...overrides,
   };
