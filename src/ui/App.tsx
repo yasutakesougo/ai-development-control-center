@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
+import {
+  buildApprovalIntentFingerprint,
+  isApprovalIntentUiAllowed,
+  reconcileApprovalIntentDraft,
+  selectApprovalIntent,
+  type ApprovalIntent,
+  type ApprovalIntentDraft,
+} from "../domain/approvalIntent";
 import type { HumanAction } from "../domain/humanAction";
+import { ApprovalIntentPanel } from "./ApprovalIntentPanel";
 
 type PrEvidence = {
   pr: number;
@@ -35,6 +44,7 @@ const fallback: HumanAction = {
 export function App() {
   const [data, setData] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [intentDraft, setIntentDraft] = useState<ApprovalIntentDraft | null>(null);
 
   useEffect(() => {
     fetch("/api/status", { cache: "no-store" })
@@ -60,6 +70,26 @@ export function App() {
   }, []);
 
   const action = data?.action ?? fallback;
+  const evidenceState = data?.developmentStatus.evidenceState;
+  const approvalAllowed = isApprovalIntentUiAllowed(action.status, evidenceState);
+  const fingerprint = data
+    ? buildApprovalIntentFingerprint({
+        actionStatus: action.status,
+        evidenceState,
+        sourceRefs: action.sourceRefs,
+        observedAt: data.observedAt,
+        evidence: data.evidence,
+      })
+    : "";
+
+  useEffect(() => {
+    setIntentDraft((current) => reconcileApprovalIntentDraft(current, fingerprint, approvalAllowed));
+  }, [fingerprint, approvalAllowed]);
+
+  function handleSelectIntent(intent: ApprovalIntent) {
+    const result = selectApprovalIntent(approvalAllowed, intent, fingerprint);
+    setIntentDraft(result.draft);
+  }
 
   return (
     <main className="shell">
@@ -77,8 +107,19 @@ export function App() {
           <div><dt>Main</dt><dd>{data?.developmentStatus.main ?? "確認中"}</dd></div>
           <div><dt>Open PR</dt><dd>{data?.developmentStatus.openPrCount ?? "—"}</dd></div>
           <div><dt>Evidence</dt><dd>{data?.developmentStatus.evidenceState ?? "確認中"}</dd></div>
+          <div><dt>observedAt</dt><dd>{data?.observedAt ?? "確認中"}</dd></div>
         </dl>
       </section>
+
+      {!loading && approvalAllowed && data && (
+        <ApprovalIntentPanel
+          action={action}
+          observedAt={data.observedAt}
+          evidence={data.evidence}
+          draft={intentDraft}
+          onSelect={handleSelectIntent}
+        />
+      )}
 
       <details className="details-card">
         <summary>理由と参照元を見る</summary>
