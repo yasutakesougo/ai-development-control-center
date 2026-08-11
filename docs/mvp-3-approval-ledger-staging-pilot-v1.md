@@ -3,21 +3,21 @@
 Status:
 
 ```text
-PARTIALLY DEPLOYED
-STAGING WORKER = LIVE (fail-closed)
-STAGING D1 = BLOCKED (API token permission)
-STAGING ACCESS = BLOCKED (API token permission)
-STOP = EXTERNAL_HUMAN_INPUT_REQUIRED
+COMPLETE
+STAGING WORKER = LIVE (fail-closed, D1 + Access wired)
+STAGING D1 = LIVE
+STAGING ACCESS = LIVE (Human JWT auth verified)
+SLICE D = COMPLETE
+PR #18 = READY_FOR_HUMAN_READY_DECISION
+STOP = READY_FOR_HUMAN_READY_DECISION (do not auto-merge)
 ```
 
 Baseline at execution:
 
 ```text
-main = d604ec73f4c01c66f21c644e453cfcb886f934e3
-MVP-3-APPROVAL-LEDGER-AUTHZ-V1 = MERGED (PR #14)
-MVP-3-APPROVAL-LEDGER-CORE-V1  = MERGED (PR #15)
-MVP-3-APPROVAL-LEDGER-UI-V1    = MERGED (PR #16)
-npm run verify = PASS (119 tests)
+main = 73750273b9c86a0d399325d437b7ba90489a3dc0
+PR #18 HEAD = 9cba455274c2b0a1cf5fde4322c62e7ea29dcca4 (unchanged at closeout)
+npm run verify = PASS (119/119 tests, typecheck PASS, build PASS)
 ```
 
 ---
@@ -29,115 +29,110 @@ Isolated staging Worker (production untouched):
 ```text
 URL        = https://ai-development-control-center-staging.momosantanuki.workers.dev
 Worker     = ai-development-control-center-staging
-Version ID = 2e63dfc1-7956-4353-9b9d-3d3bbf8ad067
-Config     = wrangler.jsonc env.staging
+Version ID = cb6ba670-bebb-439c-8128-7f5c2058346a
+Config     = wrangler.jsonc env.staging (PR #18)
 Deploy     = CLOUDFLARE_ENV=staging vite build
              && wrangler deploy -c dist/ai_development_control_center/wrangler.json
 Vars       = LEDGER_AUTHZ_MODE=access-policy
-Bindings   = ASSETS only (no D1 yet, no secrets)
+             ACCESS_TEAM_DOMAIN=https://momosantanuki.cloudflareaccess.com
+             ACCESS_AUD=91270b9e145b0e0501447707795d6a75d7622c141da082e72d77c4fa02e1ac3c
+Bindings   = ASSETS, LEDGER_DB (staging D1)
 ```
 
-Verified fail-closed smoke (real requests against the staging URL):
+Staging D1 (isolated, production untouched):
+
+```text
+binding      = LEDGER_DB
+database     = ai-development-control-center-ledger-staging
+database_id  = 59e85eae-74ec-4742-866e-94e9c8cf5fd6
+migration    = 0001_approval_ledger.sql applied (append-only triggers verified)
+```
+
+Staging Access (isolated application, production untouched):
+
+```text
+application  = ai-development-control-center-staging - Cloudflare Workers
+app_id       = 066b2cf8-1d6f-4444-b88b-25281b13b5f6
+domain       = ai-development-control-center-staging.momosantanuki.workers.dev
+policy       = allow email = momosantanuki@gmail.com
+issuer       = https://momosantanuki.cloudflareaccess.com
+audience     = 91270b9e145b0e0501447707795d6a75d7622c141da082e72d77c4fa02e1ac3c
+```
+
+Verified fail-closed smoke (pre-wiring, retained for history):
 
 ```text
 GET  /                        => 200 (UI serves)
 GET  /api/status              => 200, evidenceState=ERROR (private repo, no token),
                                  HumanAction=UNKNOWN, decisionFingerprint ABSENT
-GET  /api/ledger/records      => 401 UNAUTHENTICATED
-POST /api/ledger/records      => 401 UNAUTHENTICATED
+GET  /api/ledger/records      => 401 UNAUTHENTICATED (before Access wiring)
+POST /api/ledger/records      => 401 UNAUTHENTICATED (before Access wiring)
 POST with forged Cf-Access-Jwt-Assertion => 401 (signature verification fails closed)
 PUT  /api/ledger/records      => 405
-GET  /api/auth/status         => 401
+GET  /api/auth/status         => 401 (before Access wiring)
 ```
-
-Ledger write on staging is therefore impossible today (not "publicly usable"):
-no Access is configured, so no valid Access JWT can exist, and the Worker
-denies everything without one. Additionally no D1 binding exists (would be
-503 LEDGER_UNAVAILABLE even after auth).
 
 ---
 
-## 2. What is blocked, and why
+## 2. Human-confirmed live evidence (FINAL CLOSEOUT)
 
-The injected `CLOUDFLARE_API_TOKEN` can:
-
-```text
-Workers scripts   = deploy OK (staging Worker deployed)
-Workers subdomain = read OK
-Access apps       = read OK (list works, 0 apps exist)
-```
-
-It cannot:
+Human smoke completed after PR #18 wiring + staging Worker redeploy:
 
 ```text
-D1 (list/create/query)      => code 10000 Authentication error
-Access apps write            => code 1010 auth.forbidden
-Access organizations read    => code 10000 Authentication error
+staging Worker redeploy                          = PASS
+staging Version ID                               = cb6ba670-bebb-439c-8128-7f5c2058346a
+live LEDGER_DB binding                           = ai-development-control-center-ledger-staging
+live database ID                                 = 59e85eae-74ec-4742-866e-94e9c8cf5fd6
+Cloudflare Access Human authentication           = PASS
+  GET /api/auth/status                           => HTTP 200, {"authenticated":true}
+live authenticated Ledger read                   = PASS
+  GET /api/ledger/records                        => HTTP 200, {"records":[]}
+Ledger history UI empty state                    = PASS
+real authenticated Ledger write (live Human)     = NOT APPLICABLE
+  (no CONFIRMED + ACTION_REQUIRED decision in live evidence; do not manufacture one)
+synthetic authenticated write coverage           = PASS (npm run verify, 119/119 tests)
+staging GitHub observation (no GITHUB_TOKEN)     = fail-closed (expected, safe)
+  GET /api/status                                => evidenceState=ERROR, HumanAction=UNKNOWN
+local npm run verify                             = PASS (119/119, typecheck PASS, build PASS)
 ```
 
-Blocked required steps:
+Live write criterion per runbook:
 
 ```text
-1. create separate staging D1 database
-   (suggested name: ai-development-control-center-ledger-staging)
-2. apply migrations/0001_approval_ledger.sql to staging D1
-3. bind staging-only LEDGER_DB in env.staging
-4. create Access application for the staging host
-   with allow policy = account owner email (momosantanuki@gmail.com,
-   taken from the authenticated Cloudflare context)
-5. set staging ACCESS_TEAM_DOMAIN / ACCESS_AUD vars and redeploy
-6. real staging read/write Ledger smoke
+synthetic authenticated write coverage = PASS (test suite)
+live Human write                       = NOT APPLICABLE (no recordable live decision exists)
 ```
 
-No production resource was modified. No Access policy was weakened.
-No policy value was invented.
+No ACTION_REQUIRED evidence was manufactured. `severe-behavior-support-spfx` was not mutated.
 
 ---
 
-## 3. Exact remaining Human action
+## 3. Repository wiring (PR #18)
 
-Extend the Cloudflare API token used by the agent (Cursor Cloud Agents →
-Secrets → `CLOUDFLARE_API_TOKEN`) with these account-scoped permissions:
+`wrangler.jsonc` `env.staging` (staging-only; production top-level config untouched):
 
 ```text
-Account | D1                                                | Edit
-Account | Access: Apps and Policies                         | Edit
-Account | Access: Organizations, Identity Providers, Groups | Read
+LEDGER_DB binding  = ai-development-control-center-ledger-staging (59e85eae-74ec-4742-866e-94e9c8cf5fd6)
+ACCESS_TEAM_DOMAIN = https://momosantanuki.cloudflareaccess.com
+ACCESS_AUD         = 91270b9e145b0e0501447707795d6a75d7622c141da082e72d77c4fa02e1ac3c
 ```
 
-If the account has never enabled Zero Trust, one-time Zero Trust onboarding
-(team name selection) must also be completed by the Human in the dashboard —
-the agent must not invent a team name.
+PR #18 HEAD at closeout: `9cba455274c2b0a1cf5fde4322c62e7ea29dcca4` (unchanged).
 
 ---
 
-## 4. Completion runbook (once permissions exist)
+## 4. Optional follow-up (not blocking completion)
+
+A staging `GITHUB_TOKEN` secret would allow staging `/api/status` to observe the private
+repository instead of remaining fail-closed at `evidenceState=ERROR`. This was **not**
+configured (not separately authorized). Staging GitHub observation therefore remains:
 
 ```text
-1. npx wrangler d1 create ai-development-control-center-ledger-staging
-2. add env.staging.d1_databases binding (binding=LEDGER_DB, database_id=<new>)
-3. npx wrangler d1 migrations apply ai-development-control-center-ledger-staging \
-     --remote --env staging
-4. POST /accounts/{account}/access/apps
-     domain = ai-development-control-center-staging.momosantanuki.workers.dev
-     type = self_hosted, policy allow email = momosantanuki@gmail.com
-5. set env.staging vars ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com,
-   ACCESS_AUD=<app aud tag>
-6. CLOUDFLARE_ENV=staging vite build
-   && wrangler deploy -c dist/ai_development_control_center/wrangler.json
-7. smoke:
-   unauthenticated => Access login redirect (no Ledger access)
-   Access service token => Worker 401 NON_HUMAN_PRINCIPAL (fail-closed)
-   authorized Human browser => auth PASS, Ledger UI + history visible
-   synthetic write path remains covered by the test suite
-   (current observed repository shows HumanAction=NO_ACTION —
-    do NOT manufacture an ACTION_REQUIRED fact;
-    never mutate severe-behavior-support-spfx for test evidence)
+evidenceState = ERROR
+HumanAction   = UNKNOWN / 判定できません
 ```
 
-Optional (Human decision): a staging `GITHUB_TOKEN` secret is required for
-staging to observe the private repository; without it staging /api/status
-stays fail-closed at evidenceState=ERROR, which is safe but not informative.
+This is safe and expected without a token. Do not add unless separately authorized.
 
 ---
 
@@ -145,11 +140,35 @@ stays fail-closed at evidenceState=ERROR, which is safe but not informative.
 
 ```text
 production Worker (ai-development-control-center.momosantanuki.workers.dev)
-  = untouched (settings verified unchanged; still serving)
-production Access / routes / D1 / secrets / permissions = untouched
+  = untouched (0 mutations)
+production Access / routes / D1 / secrets / permissions = untouched (0 mutations)
 severe-behavior-support-spfx = 0 mutations (read-only GETs only)
 SharePoint = 0
 Action Gateway = 0
 Agent execution from Ledger = 0
 GitHub write from Control Center runtime = 0
 ```
+
+---
+
+## 6. Completion determination
+
+```text
+Slice D            = COMPLETE
+STAGING-PILOT-V1   = COMPLETE
+PR #18             = READY_FOR_HUMAN_READY_DECISION
+```
+
+Criteria satisfied:
+
+- staging D1 created, migrated, bound, and live-read verified
+- staging Access application created with Human-only allow policy; auth verified live
+- staging Worker redeployed with D1 + Access vars
+- unauthenticated / forged-JWT fail-closed (pre-wiring + test suite)
+- authenticated Ledger read + empty-state UI verified live
+- synthetic write path covered by test suite (live Human write N/A per runbook)
+- production, SharePoint, severe-behavior-support-spfx, Action Gateway, Agent = 0 mutations
+
+**STOP — STAGING-PILOT-V1 COMPLETE / READY_FOR_HUMAN_READY_DECISION**
+
+Do not auto-merge PR #18. Human Ready decision required.
