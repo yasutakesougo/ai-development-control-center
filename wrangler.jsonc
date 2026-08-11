@@ -17,9 +17,25 @@
         "binding": "ASSETS",
         "not_found_handling": "single-page-application"
       },
+      // Isolated staging-only Approval Ledger store (D1). Production config
+      // (top-level) intentionally has no D1 binding and stays untouched.
+      "d1_databases": [
+        {
+          "binding": "LEDGER_DB",
+          "database_name": "ai-development-control-center-ledger-staging",
+          "database_id": "59e85eae-74ec-4742-866e-94e9c8cf5fd6"
+        }
+      ],
       "vars": {
         // Coarse staging authorization boundary: Cloudflare Access application policy.
-        "LEDGER_AUTHZ_MODE": "access-policy"
+        "LEDGER_AUTHZ_MODE": "access-policy",
+        // Cloudflare Access issuer (JWT `iss`) for the momosantanuki team. Must
+        // include the https:// scheme: the Worker builds the JWKS URL from this
+        // value and matches it against the token issuer (bare domain fails closed).
+        "ACCESS_TEAM_DOMAIN": "https://momosantanuki.cloudflareaccess.com",
+        // Audience tag of the staging Access application
+        // (ai-development-control-center-staging.momosantanuki.workers.dev).
+        "ACCESS_AUD": "91270b9e145b0e0501447707795d6a75d7622c141da082e72d77c4fa02e1ac3c"
       }
     }
   }
