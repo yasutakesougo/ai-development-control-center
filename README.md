@@ -3,18 +3,18 @@
 ## Status
 
 ```text
-MVP-1 COMPLETE
+MVP-2 EVIDENCE-TRACE-V1 COMPLETE
 ```
 
-本番観測（private GitHub repository → Observed Facts → Resolver → Web UI）まで通った状態を固定します。
+MVP-1 の fail-closed Human Action Resolver を維持したまま、Open PR ごとの一次情報を Evidence として収集・API/UI へ露出する状態を固定します。
 
-現在の `HumanAction = UNKNOWN` は失敗ではなく、証拠不足時の fail-closed 契約どおりです。
+現在の production は Open PR が 0 件のため `HumanAction = NO_ACTION`、`evidence = []` です。これは失敗ではなく、観測結果に基づく確定判定です。
 
 ## Purpose
 
 AI Development Control Center は、開発プロジェクトの状態を読み取り、Human が「今、自分が何をすればよいか」を短時間で判断するための独立した Web アプリです。
 
-MVP-1 では `yasutakesougo/severe-behavior-support-spfx` を read-only で観測します。
+観測対象は `yasutakesougo/severe-behavior-support-spfx`（read-only）です。
 
 このリポジトリは業務アプリ本体ではありません。
 
@@ -25,23 +25,43 @@ MVP-1 では `yasutakesougo/severe-behavior-support-spfx` を read-only で観�
 | Production URL | https://ai-development-control-center.momosantanuki.workers.dev |
 | Status API | https://ai-development-control-center.momosantanuki.workers.dev/api/status |
 | Observed repository | `yasutakesougo/severe-behavior-support-spfx` (read-only) |
-| Closeout evidence | `evidenceState = CONFIRMED`, `HumanAction = UNKNOWN` |
+| Cloudflare Version ID | `61d4b9f6-783e-455e-897f-0fb079a1732a` |
+| Baseline main | `08d5d73cf0810d58273d1b1ab6628e716328dadb` |
+| Closeout evidence | `evidenceState = CONFIRMED`, `openPrCount = 0`, `HumanAction = NO_ACTION`, `evidence = []` |
 
-MVP-1 closeout 時点の観測結果（要約）:
+### Current production（MVP-2 closeout）
 
 ```text
-Production deploy: PASS
-GitHub private repo observation: PASS
-Observed Facts: PASS
-Resolver fail-closed: PASS
-FALSE_WAIT fix: PASS
-Resolver tests: 17 PASS
+Production deploy: SUCCESS
+Cloudflare Version ID: 61d4b9f6-783e-455e-897f-0fb079a1732a
+npm run verify: 28 / 28 PASS
+PR #6: MERGED (EVIDENCE-TRACE-V1)
+PR #8: MERGED (post-merge P2 fix)
+merge commit / current main: 08d5d73cf0810d58273d1b1ab6628e716328dadb
+
+/api/status:
+  evidenceState = CONFIRMED
+  openPrCount = 0
+  HumanAction = NO_ACTION
+  evidence = []
 
 severe-behavior-support-spfx mutation = 0
 GitHub write capability = 0
 SharePoint mutation = 0
 Automatic approval = 0
 Secret exposure = 0
+```
+
+### Historical MVP-1 closeout evidence（not current production）
+
+MVP-1 closeout 時点の観測（当時 `HumanAction = UNKNOWN`、source PR #245）は historical record です。current production と誤読しないでください。
+
+```text
+[historical MVP-1]
+evidenceState = CONFIRMED
+HumanAction = UNKNOWN
+sourceRefs = severe-behavior-support-spfx PR #245
+Resolver tests: 17 PASS
 ```
 
 ## Architecture
@@ -53,7 +73,7 @@ Cloudflare Worker + Static Assets
   ↓ GET only
 GitHub API
   ↓
-Observed Facts
+Observed Facts (+ per-PR Evidence)
   ↓
 Human Action Resolver
   ↓
@@ -66,7 +86,46 @@ Observed Facts と Human Action は分離しています。
 
 Resolver は明示された規則だけを使います。
 
-証拠不足、GitHub API 失敗、矛盾、未知の規則、Human Decision 不明の場合は `UNKNOWN` を返します。
+証拠不足、GitHub API 失敗、矛盾、未知の規則、Human Decision 不明、projection mismatch の場合は `UNKNOWN` を返します。
+
+## EVIDENCE-TRACE-V1 contract
+
+MVP-2 で確定した Evidence 契約です。
+
+### Recognized Human-Decision markers only
+
+厳密に次の行マーカーだけを認識します。
+
+```text
+Human-Decision: REQUIRED
+Human-Decision: NONE
+```
+
+- exact marker 以外は推測しません
+- free-form の `HUMAN-ONLY` 文言は `humanDecision = UNRESOLVED`（推測しない）
+- `REQUIRED` と `NONE` が同時に存在する場合は `CONTRADICTORY`（action escalation しない）
+- structured evidence と `humanDecisionRequired` の projection mismatch は `HumanAction = UNKNOWN`
+- PR detail `body === null` は権威ある「本文なし」。stale list `summary.body` の marker を復活させない（false `ACTION_REQUIRED` 禁止）
+- Observed PR evidence UI は各 PR の `sourceRefs` を表示し、一次 source へ追跡可能にする
+
+### `/api/status` evidence array
+
+Open PR ごとに次を露出します。
+
+```text
+evidence: Array<{
+  pr
+  draft
+  ci
+  review
+  mergeState
+  humanDecision
+  humanDecisionSource
+  sourceRefs
+}>
+```
+
+Open PR が 0 件のときは `evidence = []` です。
 
 ## Human Action contract
 
@@ -80,7 +139,7 @@ type HumanActionStatus =
 
 `ACTION_REQUIRED` は、必要な証拠が確認でき、かつ Human Decision が明示的に必要と判定できた場合だけ返します。
 
-MVP-1 の GitHub adapter では、PR 本文に次の明示マーカーがある場合だけ Human Decision を確定します。
+GitHub adapter では、PR 本文に次の明示マーカーがある場合だけ Human Decision を確定します。
 
 ```text
 Human-Decision: REQUIRED
@@ -92,7 +151,7 @@ Human-Decision: REQUIRED
 Human-Decision: NONE
 ```
 
-マーカーがなく、別の一次情報から確定できない場合は推測せず `UNKNOWN` とします。
+マーカーがなく、別の一次情報から確定できない場合は推測せず `UNKNOWN` / `UNRESOLVED` とします。
 
 ## Local development
 
@@ -121,7 +180,7 @@ private repository の観測には、Worker 側の `GITHUB_TOKEN`（fine-grained
 
 ブラウザへ token は渡しません。
 
-### GITHUB_TOKEN 権限境界（MVP-1 確定）
+### GITHUB_TOKEN 権限境界（MVP-1 確定 / MVP-2 維持）
 
 対象 repository は `yasutakesougo/severe-behavior-support-spfx` のみです。
 
@@ -174,16 +233,18 @@ token の値をチャットへ貼り付ける必要はありません。
 
 ## Testing
 
-Resolver / CI normalizer unit tests:
+Resolver / Evidence / CI normalizer unit tests:
 
 ```text
-npm test → 17 PASS
+npm test → 28 PASS
 ```
 
 内訳:
 
-- `humanActionResolver.test.ts` — 9
+- `humanDecisionEvidence.test.ts` — 5
+- `humanActionResolver.test.ts` — 11
 - `normalizeCi.test.ts` — 8
+- `selectAuthoritativePullBody.test.ts` — 4
 
 最低限、次を確認します。
 
@@ -197,6 +258,12 @@ npm test → 17 PASS
 - Insufficient evidence が `ACTION_REQUIRED` へ昇格しないこと
 - Empty commit status (`total_count = 0`) -> `CI = UNKNOWN`（FALSE_WAIT 防止）
 - PR A=PENDING + PR B=UNKNOWN -> `UNKNOWN`（WAIT より UNKNOWN を優先）
+- strict `Human-Decision` marker のみ認識
+- free-form `HUMAN-ONLY` を推測しない
+- REQUIRED + NONE contradiction -> `CONTRADICTORY` / no escalation
+- projection mismatch -> `UNKNOWN`
+- detail `body = null` + stale summary REQUIRED -> `UNRESOLVED` / no `ACTION_REQUIRED`
+- detail body missing (`undefined`) のときのみ summary へ fallback
 
 実行方法は次です。
 
@@ -206,7 +273,7 @@ npm test
 
 ## Deployment
 
-MVP-1 は `workers.dev` での試験公開を前提とします。
+`workers.dev` での試験公開を前提とします。
 
 Cloudflare Vite plugin が Worker と React SPA の build をまとめます。
 
@@ -220,11 +287,11 @@ npm run deploy
 
 勝手に有料サービスを契約しない方針です。
 
-独自ドメインは MVP-1 では不要です。
+独自ドメインは現時点では不要です。
 
 ## Security boundary
 
-MVP-1 の境界は次です。
+境界は次です。
 
 ```text
 Browser
@@ -252,6 +319,7 @@ yasutakesougo/severe-behavior-support-spfx
 - Codex Agent 起動
 - 自動承認
 - Action Gateway write
+- Human Approval UI（MVP-3、別 Human GO まで HOLD）
 
 ## Known behavior
 
@@ -259,7 +327,7 @@ yasutakesougo/severe-behavior-support-spfx
 
 GitHub Combined Commit Status は、status が 0 件でも `state=pending` を返すことがあります。
 
-これを `CI = PENDING` と解釈すると、実際には待っていないのに `HumanAction = WAIT` になる（FALSE_WAIT）ため、MVP-1 では次を契約とします。
+これを `CI = PENDING` と解釈すると、実際には待っていないのに `HumanAction = WAIT` になる（FALSE_WAIT）ため、次を契約とします。
 
 ```text
 Check Runs あり
@@ -284,59 +352,35 @@ Resolver は、PR 内に UNKNOWN evidence がある場合、PENDING による `W
 ```text
 認証失敗 / API failure → evidenceState=ERROR → HumanAction=UNKNOWN
 証拠不足（Human Decision 未確定など）→ evidenceState=CONFIRMED でも HumanAction=UNKNOWN
+contradiction / projection mismatch → HumanAction=UNKNOWN
+PR detail body が明示的 null → stale list marker を使わず UNRESOLVED（false ACTION_REQUIRED 禁止）
 ```
 
 ## Known limitations
 
-MVP-1 は Human Action を AI の自由推論では決定しません。
+Human Action を AI の自由推論では決定しません。
 
-GitHub 上に Human Decision の一次情報が存在しても、現在の adapter がその形式を認識できなければ `UNKNOWN` になります。
+GitHub 上に Human Decision の一次情報が存在しても、現在の adapter がその形式を認識できなければ `UNKNOWN` / `UNRESOLVED` になります。
 
 Review、CI、merge state は GitHub API で確認できた情報だけを正規化します。
 
 取得不能な値を推測で補完しません。
 
-### Current production UNKNOWN（PR #245）
+Relevant Issue の高度な関連付けはまだ実装しません。
 
-closeout 時点で production は次です。
-
-```text
-evidenceState = CONFIRMED
-HumanAction = UNKNOWN
-sourceRefs = severe-behavior-support-spfx PR #245
-```
-
-これは失敗ではありません。
-
-現在取得できる証拠だけでは、Human Decision の有無を一次情報から確定できないためです。
-
-```text
-証拠不足
-↓
-推測しない
-↓
-UNKNOWN
-```
-
-スマートフォンを開いた Human は少なくとも、
-
-「今は自分で判断して動く段階ではない。Control Center も安全のため判断を保留している」
-
-と理解できます。
-
-Relevant Issue の高度な関連付けや Evidence 自動収集はまだ実装しません。
-
-## MVP-1 closeout record
+## MVP-2 closeout record
 
 | # | Item | Result |
 | --- | --- | --- |
-| 1 | production URL を README へ記録 | DONE |
-| 2 | 17 tests PASS を記録 | DONE |
-| 3 | GITHUB_TOKEN の権限境界を記録 | DONE |
-| 4 | FALSE_WAIT 修正を Known behavior へ記録 | DONE |
-| 5 | 現在 UNKNOWN になる理由を Known limitation へ記録 | DONE |
-| 6 | PR #1 / #2 を整理 | DONE（下記） |
-| 7 | MVP-1 COMPLETE を固定 | DONE |
+| 1 | PR #6 merge + production deploy SUCCESS を記録 | DONE |
+| 2 | PR #8 post-merge P2 fix merge + redeploy SUCCESS を記録 | DONE |
+| 3 | Cloudflare Version ID（post-#8）を記録 | DONE |
+| 4 | `/api/status` current production を記録 | DONE |
+| 5 | 28 tests PASS を記録 | DONE |
+| 6 | EVIDENCE-TRACE-V1 契約を README へ固定 | DONE |
+| 7 | historical MVP-1 UNKNOWN（PR #245）を誤読防止表記へ更新 | DONE |
+| 8 | `severe-behavior-support-spfx` mutation = 0 を維持 | DONE |
+| 9 | MVP-2 EVIDENCE-TRACE-V1 COMPLETE を固定 | DONE |
 
 ### PR disposition
 
@@ -346,22 +390,35 @@ Relevant Issue の高度な関連付けや Evidence 自動収集はまだ実装�
 | #2 | chore: Cloudflare agent skills and MCP setup | MVP-1 runtime 非依存のため Draft のまま close（将来 tooling 候補） |
 | #3 | Checks API soft-fail with Commit Status CI fallback | merged / closed（本番反映済み） |
 | #4 | FALSE_WAIT fail-closed fix | merged / closed（本番反映済み） |
+| #5 | docs: MVP-1 COMPLETE closeout | merged / closed |
+| #6 | feat(mvp2): add fail-closed PR evidence trace | merged / closed（本番反映済み） |
+| #8 | fix(mvp2): post-merge P2 — stale marker + sourceRefs UI | merged / closed（本番反映済み） |
+
+## MVP-1 closeout record（historical）
+
+| # | Item | Result |
+| --- | --- | --- |
+| 1 | production URL を README へ記録 | DONE |
+| 2 | 17 tests PASS を記録 | DONE |
+| 3 | GITHUB_TOKEN の権限境界を記録 | DONE |
+| 4 | FALSE_WAIT 修正を Known behavior へ記録 | DONE |
+| 5 | 当時 UNKNOWN になる理由を Known limitation へ記録 | DONE |
+| 6 | PR #1 / #2 を整理 | DONE |
+| 7 | MVP-1 COMPLETE を固定 | DONE |
 
 ## Future phases
 
-MVP-2 第一候補は Evidence 自動収集の拡張です。
+MVP-3 候補は Human Approval UI です。
 
-特に、PR 本文の独自文字列を推測するのではなく、Human Decision の有無をどの一次情報から確定するかを設計する段階になります。
+security boundary を含むため、MVP-2 closeout 完了後も Implementation Start は別 Human GO まで HOLD です。
 
 その他の候補:
 
 - 複数 repository 対応
 - SharePoint read-only observation
 
-MVP-3 候補は Human Approval UI です。
-
 MVP-4 候補は Action Gateway integration と Cursor / Codex Agent execution です。
 
 MVP-5 候補は Approved GitHub write です。
 
-これらは MVP-1 では実装しません。
+これらは現時点では実装しません。
