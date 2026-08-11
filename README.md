@@ -25,18 +25,19 @@ AI Development Control Center は、開発プロジェクトの状態を読み�
 | Production URL | https://ai-development-control-center.momosantanuki.workers.dev |
 | Status API | https://ai-development-control-center.momosantanuki.workers.dev/api/status |
 | Observed repository | `yasutakesougo/severe-behavior-support-spfx` (read-only) |
-| Cloudflare Version ID | `76aecf76-62eb-482c-92f5-62042680b856` |
-| Baseline main | `566da5dd94c55f8cc9b6640da2f92328a89970fd` |
+| Cloudflare Version ID | `61d4b9f6-783e-455e-897f-0fb079a1732a` |
+| Baseline main | `08d5d73cf0810d58273d1b1ab6628e716328dadb` |
 | Closeout evidence | `evidenceState = CONFIRMED`, `openPrCount = 0`, `HumanAction = NO_ACTION`, `evidence = []` |
 
 ### Current production（MVP-2 closeout）
 
 ```text
 Production deploy: SUCCESS
-Cloudflare Version ID: 76aecf76-62eb-482c-92f5-62042680b856
-npm run verify: 24 / 24 PASS
-PR #6: MERGED
-merge commit: 566da5dd94c55f8cc9b6640da2f92328a89970fd
+Cloudflare Version ID: 61d4b9f6-783e-455e-897f-0fb079a1732a
+npm run verify: 28 / 28 PASS
+PR #6: MERGED (EVIDENCE-TRACE-V1)
+PR #8: MERGED (post-merge P2 fix)
+merge commit / current main: 08d5d73cf0810d58273d1b1ab6628e716328dadb
 
 /api/status:
   evidenceState = CONFIRMED
@@ -104,6 +105,8 @@ Human-Decision: NONE
 - free-form の `HUMAN-ONLY` 文言は `humanDecision = UNRESOLVED`（推測しない）
 - `REQUIRED` と `NONE` が同時に存在する場合は `CONTRADICTORY`（action escalation しない）
 - structured evidence と `humanDecisionRequired` の projection mismatch は `HumanAction = UNKNOWN`
+- PR detail `body === null` は権威ある「本文なし」。stale list `summary.body` の marker を復活させない（false `ACTION_REQUIRED` 禁止）
+- Observed PR evidence UI は各 PR の `sourceRefs` を表示し、一次 source へ追跡可能にする
 
 ### `/api/status` evidence array
 
@@ -233,7 +236,7 @@ token の値をチャットへ貼り付ける必要はありません。
 Resolver / Evidence / CI normalizer unit tests:
 
 ```text
-npm test → 24 PASS
+npm test → 28 PASS
 ```
 
 内訳:
@@ -241,6 +244,7 @@ npm test → 24 PASS
 - `humanDecisionEvidence.test.ts` — 5
 - `humanActionResolver.test.ts` — 11
 - `normalizeCi.test.ts` — 8
+- `selectAuthoritativePullBody.test.ts` — 4
 
 最低限、次を確認します。
 
@@ -258,6 +262,8 @@ npm test → 24 PASS
 - free-form `HUMAN-ONLY` を推測しない
 - REQUIRED + NONE contradiction -> `CONTRADICTORY` / no escalation
 - projection mismatch -> `UNKNOWN`
+- detail `body = null` + stale summary REQUIRED -> `UNRESOLVED` / no `ACTION_REQUIRED`
+- detail body missing (`undefined`) のときのみ summary へ fallback
 
 実行方法は次です。
 
@@ -347,6 +353,7 @@ Resolver は、PR 内に UNKNOWN evidence がある場合、PENDING による `W
 認証失敗 / API failure → evidenceState=ERROR → HumanAction=UNKNOWN
 証拠不足（Human Decision 未確定など）→ evidenceState=CONFIRMED でも HumanAction=UNKNOWN
 contradiction / projection mismatch → HumanAction=UNKNOWN
+PR detail body が明示的 null → stale list marker を使わず UNRESOLVED（false ACTION_REQUIRED 禁止）
 ```
 
 ## Known limitations
@@ -366,13 +373,14 @@ Relevant Issue の高度な関連付けはまだ実装しません。
 | # | Item | Result |
 | --- | --- | --- |
 | 1 | PR #6 merge + production deploy SUCCESS を記録 | DONE |
-| 2 | Cloudflare Version ID を記録 | DONE |
-| 3 | `/api/status` current production を記録 | DONE |
-| 4 | 24 tests PASS を記録 | DONE |
-| 5 | EVIDENCE-TRACE-V1 契約を README へ固定 | DONE |
-| 6 | historical MVP-1 UNKNOWN（PR #245）を誤読防止表記へ更新 | DONE |
-| 7 | `severe-behavior-support-spfx` mutation = 0 を維持 | DONE |
-| 8 | MVP-2 EVIDENCE-TRACE-V1 COMPLETE を固定 | DONE |
+| 2 | PR #8 post-merge P2 fix merge + redeploy SUCCESS を記録 | DONE |
+| 3 | Cloudflare Version ID（post-#8）を記録 | DONE |
+| 4 | `/api/status` current production を記録 | DONE |
+| 5 | 28 tests PASS を記録 | DONE |
+| 6 | EVIDENCE-TRACE-V1 契約を README へ固定 | DONE |
+| 7 | historical MVP-1 UNKNOWN（PR #245）を誤読防止表記へ更新 | DONE |
+| 8 | `severe-behavior-support-spfx` mutation = 0 を維持 | DONE |
+| 9 | MVP-2 EVIDENCE-TRACE-V1 COMPLETE を固定 | DONE |
 
 ### PR disposition
 
@@ -384,6 +392,7 @@ Relevant Issue の高度な関連付けはまだ実装しません。
 | #4 | FALSE_WAIT fail-closed fix | merged / closed（本番反映済み） |
 | #5 | docs: MVP-1 COMPLETE closeout | merged / closed |
 | #6 | feat(mvp2): add fail-closed PR evidence trace | merged / closed（本番反映済み） |
+| #8 | fix(mvp2): post-merge P2 — stale marker + sourceRefs UI | merged / closed（本番反映済み） |
 
 ## MVP-1 closeout record（historical）
 
