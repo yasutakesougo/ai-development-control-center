@@ -40,6 +40,10 @@ export type AccessVerifyResult =
 export type AccessKeyResolver = JWTVerifyGetKey | CryptoKey | Uint8Array;
 
 const ACCESS_JWT_HEADER = "cf-access-jwt-assertion";
+const ACCESS_SIGNING_ALGORITHMS = ["RS256"] as const;
+
+/** Issuer-keyed cache so the same trusted issuer reuses one remote JWKS resolver. */
+const jwksResolverByIssuer = new Map<string, JWTVerifyGetKey>();
 
 /**
  * Extract Cloudflare Access JWT from the request.
@@ -62,22 +66,20 @@ export function isAccessVerifierConfigured(config: Partial<AccessVerifierConfig>
 }
 
 /**
- * Cloudflare Access service tokens commonly carry `common_name`.
- * Those are non-Human principals and must not approve.
+ * Cloudflare Access service tokens carry a non-empty `common_name`.
+ * `type: "app"` is NOT a discriminator — Human application JWTs also use it.
  */
 export function isNonHumanAccessPrincipal(payload: JWTPayload): boolean {
-  if (typeof payload.common_name === "string" && payload.common_name.length > 0) {
-    return true;
-  }
-  if (payload.type === "app") {
-    return true;
-  }
-  return false;
+  return typeof payload.common_name === "string" && payload.common_name.trim().length > 0;
+}
+
+function normalizeIssuer(issuer: string): string {
+  return issuer.trim().replace(/\/$/, "");
 }
 
 function normalizeConfig(config: AccessVerifierConfig): AccessVerifierConfig | null {
-  const expectedIssuer = config.expectedIssuer?.trim();
-  const expectedAudience = config.expectedAudience?.trim();
+  const expectedIssuer = config.expectedIssuer ? normalizeIssuer(config.expectedIssuer) : "";
+  const expectedAudience = config.expectedAudience?.trim() ?? "";
   if (!expectedIssuer || !expectedAudience) return null;
   return { expectedIssuer, expectedAudience };
 }
@@ -132,10 +134,11 @@ export async function verifyAccessHumanJwt(
     const { payload } = await jwtVerify(token, keyResolver, {
       issuer: normalized.expectedIssuer,
       audience: normalized.expectedAudience,
+      algorithms: [...ACCESS_SIGNING_ALGORITHMS],
       clockTolerance: 0,
     });
 
-    const issuer = typeof payload.iss === "string" ? payload.iss.trim() : "";
+    const issuer = typeof payload.iss === "string" ? normalizeIssuer(payload.iss) : "";
     if (!issuer || issuer !== normalized.expectedIssuer) {
       return { ok: false, reason: "UNEXPECTED_ISSUER" };
     }
@@ -162,12 +165,27 @@ export async function verifyAccessHumanJwt(
 }
 
 /**
- * Build a JWKS resolver for a configured Access team issuer.
- * Used at runtime when Access env is present; tests inject local keys instead.
+ * Return a cached remote JWKS resolver for the configured trusted issuer.
+ * JWKS URL is derived only from configured issuer — never from untrusted JWT claims.
  */
-export function createAccessJwksResolver(expectedIssuer: string): JWTVerifyGetKey {
-  const issuer = expectedIssuer.trim().replace(/\/$/, "");
-  return createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
+export function getAccessJwksResolver(expectedIssuer: string): JWTVerifyGetKey {
+  const issuer = normalizeIssuer(expectedIssuer);
+  const cached = jwksResolverByIssuer.get(issuer);
+  if (cached) return cached;
+
+  const resolver = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
+  jwksResolverByIssuer.set(issuer, resolver);
+  return resolver;
+}
+
+/** Test helper: clear issuer-keyed JWKS cache. */
+export function clearAccessJwksResolverCache(): void {
+  jwksResolverByIssuer.clear();
+}
+
+/** Test helper: inspect whether an issuer already has a cached resolver. */
+export function hasCachedAccessJwksResolver(expectedIssuer: string): boolean {
+  return jwksResolverByIssuer.has(normalizeIssuer(expectedIssuer));
 }
 
 export function accessVerifierConfigFromEnv(env: {
@@ -178,7 +196,7 @@ export function accessVerifierConfigFromEnv(env: {
   const expectedAudience = env.ACCESS_AUD?.trim();
   if (!expectedIssuer || !expectedAudience) return null;
   return {
-    expectedIssuer: expectedIssuer.replace(/\/$/, ""),
+    expectedIssuer: normalizeIssuer(expectedIssuer),
     expectedAudience,
   };
 }

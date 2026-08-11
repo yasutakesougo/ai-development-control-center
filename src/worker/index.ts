@@ -1,10 +1,5 @@
 import { resolveHumanAction } from "../domain/humanActionResolver";
-import {
-  accessVerifierConfigFromEnv,
-  createAccessJwksResolver,
-  extractAccessJwt,
-  verifyAccessHumanJwt,
-} from "./auth/accessJwtVerifier";
+import { handleAuthStatus } from "./auth/authStatus";
 import { observeRepository } from "./github/readOnlyAdapter";
 
 interface Env {
@@ -17,40 +12,6 @@ interface Env {
 }
 
 const TARGET_REPOSITORY = "yasutakesougo/severe-behavior-support-spfx";
-
-function unauthorizedAuthStatus(): Response {
-  return Response.json(
-    { authenticated: false },
-    {
-      status: 401,
-      headers: { "Cache-Control": "no-store" },
-    },
-  );
-}
-
-/**
- * READ-ONLY auth probe.
- * Authentication verification only — never grants ledger.write authorization.
- */
-async function handleAuthStatus(request: Request, env: Env): Promise<Response> {
-  const config = accessVerifierConfigFromEnv(env);
-  if (!config) return unauthorizedAuthStatus();
-
-  const token = extractAccessJwt(request);
-  const result = await verifyAccessHumanJwt(
-    token,
-    config,
-    createAccessJwksResolver(config.expectedIssuer),
-  );
-
-  if (!result.ok) return unauthorizedAuthStatus();
-
-  // Do not expose issuer/subjectId/email/displayName on this probe.
-  return Response.json(
-    { authenticated: true },
-    { headers: { "Cache-Control": "no-store" } },
-  );
-}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
