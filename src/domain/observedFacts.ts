@@ -1,3 +1,5 @@
+import type { HumanDecisionEvidence } from "./humanDecisionEvidence";
+
 export type EvidenceState = "CONFIRMED" | "MISSING" | "CONTRADICTORY" | "ERROR";
 
 export type CiState = "PASS" | "PENDING" | "FAIL" | "UNKNOWN";
@@ -12,6 +14,7 @@ export interface ObservedPullRequest {
   review: ReviewState;
   mergeState: MergeState;
   humanDecisionRequired: boolean | null;
+  humanDecisionEvidence: HumanDecisionEvidence;
   sourceRefs: string[];
 }
 
