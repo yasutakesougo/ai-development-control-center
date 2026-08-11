@@ -25,6 +25,17 @@ export default {
             openPrCount: facts.openPullRequests?.length ?? null,
             evidenceState: facts.evidenceState,
           },
+          evidence:
+            facts.openPullRequests?.map((pr) => ({
+              pr: pr.number,
+              draft: pr.draft,
+              ci: pr.ci,
+              review: pr.review,
+              mergeState: pr.mergeState,
+              humanDecision: pr.humanDecisionEvidence.state,
+              humanDecisionSource: pr.humanDecisionEvidence.source,
+              sourceRefs: pr.sourceRefs,
+            })) ?? null,
           observedAt: facts.observedAt,
         },
         { headers: { "Cache-Control": "no-store" } },

@@ -2,6 +2,24 @@ import { describe, expect, it } from "vitest";
 import { resolveHumanAction } from "../src/domain/humanActionResolver";
 import type { ObservedFacts, ObservedPullRequest } from "../src/domain/observedFacts";
 
+const requiredEvidence = {
+  state: "REQUIRED" as const,
+  source: "PR_BODY_MARKER" as const,
+  matchedMarkers: ["Human-Decision: REQUIRED" as const],
+};
+
+const noneEvidence = {
+  state: "NONE" as const,
+  source: "PR_BODY_MARKER" as const,
+  matchedMarkers: ["Human-Decision: NONE" as const],
+};
+
+const unresolvedEvidence = {
+  state: "UNRESOLVED" as const,
+  source: "NO_RECOGNIZED_MARKER" as const,
+  matchedMarkers: [],
+};
+
 function pr(overrides: Partial<ObservedPullRequest> = {}): ObservedPullRequest {
   return {
     number: 1,
@@ -11,6 +29,7 @@ function pr(overrides: Partial<ObservedPullRequest> = {}): ObservedPullRequest {
     review: "PASS",
     mergeState: "CLEAN",
     humanDecisionRequired: false,
+    humanDecisionEvidence: noneEvidence,
     sourceRefs: ["github:pr:1"],
     ...overrides,
   };
@@ -32,7 +51,13 @@ function facts(overrides: Partial<ObservedFacts> = {}): ObservedFacts {
 
 describe("resolveHumanAction", () => {
   it("returns ACTION_REQUIRED only with explicit human decision evidence", () => {
-    const result = resolveHumanAction(facts({ openPullRequests: [pr({ humanDecisionRequired: true })] }));
+    const result = resolveHumanAction(
+      facts({
+        openPullRequests: [
+          pr({ humanDecisionRequired: true, humanDecisionEvidence: requiredEvidence }),
+        ],
+      }),
+    );
     expect(result.status).toBe("ACTION_REQUIRED");
   });
 
@@ -45,6 +70,7 @@ describe("resolveHumanAction", () => {
             review: "PASS",
             mergeState: "CLEAN",
             humanDecisionRequired: true,
+            humanDecisionEvidence: requiredEvidence,
           }),
         ],
       }),
@@ -62,6 +88,7 @@ describe("resolveHumanAction", () => {
             review: "PASS",
             mergeState: "CLEAN",
             humanDecisionRequired: true,
+            humanDecisionEvidence: requiredEvidence,
             sourceRefs: ["github:pr:1"],
           }),
           pr({
@@ -70,6 +97,7 @@ describe("resolveHumanAction", () => {
             review: "PASS",
             mergeState: "CLEAN",
             humanDecisionRequired: false,
+            humanDecisionEvidence: noneEvidence,
             sourceRefs: ["github:pr:2"],
           }),
         ],
@@ -92,18 +120,56 @@ describe("resolveHumanAction", () => {
     expect(resolveHumanAction(facts({ evidenceState: "ERROR" })).status).toBe("UNKNOWN");
   });
 
-  it("returns UNKNOWN for contradictory evidence", () => {
+  it("returns UNKNOWN for contradictory repository evidence", () => {
     expect(resolveHumanAction(facts({ evidenceState: "CONTRADICTORY" })).status).toBe("UNKNOWN");
   });
 
-  it("returns UNKNOWN when no known rule applies", () => {
-    const result = resolveHumanAction(facts({ openPullRequests: [pr({ humanDecisionRequired: null })] }));
+  it("returns UNKNOWN when human decision evidence is unresolved", () => {
+    const result = resolveHumanAction(
+      facts({
+        openPullRequests: [
+          pr({ humanDecisionRequired: null, humanDecisionEvidence: unresolvedEvidence }),
+        ],
+      }),
+    );
+    expect(result.status).toBe("UNKNOWN");
+  });
+
+  it("returns UNKNOWN when structured decision markers contradict", () => {
+    const result = resolveHumanAction(
+      facts({
+        openPullRequests: [
+          pr({
+            humanDecisionRequired: null,
+            humanDecisionEvidence: {
+              state: "CONTRADICTORY",
+              source: "PR_BODY_MARKER",
+              matchedMarkers: ["Human-Decision: REQUIRED", "Human-Decision: NONE"],
+            },
+          }),
+        ],
+      }),
+    );
+    expect(result.status).toBe("UNKNOWN");
+  });
+
+  it("returns UNKNOWN when boolean projection conflicts with decision evidence", () => {
+    const result = resolveHumanAction(
+      facts({
+        openPullRequests: [pr({ humanDecisionRequired: true, humanDecisionEvidence: noneEvidence })],
+      }),
+    );
     expect(result.status).toBe("UNKNOWN");
   });
 
   it("never upgrades insufficient evidence to ACTION_REQUIRED", () => {
     const result = resolveHumanAction(
-      facts({ evidenceState: "MISSING", openPullRequests: [pr({ humanDecisionRequired: true })] }),
+      facts({
+        evidenceState: "MISSING",
+        openPullRequests: [
+          pr({ humanDecisionRequired: true, humanDecisionEvidence: requiredEvidence }),
+        ],
+      }),
     );
     expect(result.status).toBe("UNKNOWN");
   });

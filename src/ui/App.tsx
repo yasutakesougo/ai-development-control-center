@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import type { HumanAction } from "../domain/humanAction";
 
+type PrEvidence = {
+  pr: number;
+  draft: boolean;
+  ci: string;
+  review: string;
+  mergeState: string;
+  humanDecision: string;
+  humanDecisionSource: string;
+  sourceRefs: string[];
+};
+
 type StatusResponse = {
   action: HumanAction;
   developmentStatus: {
@@ -9,6 +20,7 @@ type StatusResponse = {
     openPrCount: number | null;
     evidenceState: string;
   };
+  evidence: PrEvidence[] | null;
   observedAt: string;
 };
 
@@ -40,6 +52,7 @@ export function App() {
             openPrCount: null,
             evidenceState: "ERROR",
           },
+          evidence: null,
           observedAt: new Date().toISOString(),
         }),
       )
@@ -72,6 +85,21 @@ export function App() {
         <p>{action.reason}</p>
         {action.sourceRefs.length > 0 && (
           <ul>{action.sourceRefs.map((ref) => <li key={ref}>{ref}</li>)}</ul>
+        )}
+
+        {data?.evidence && data.evidence.length > 0 && (
+          <>
+            <h3>Observed PR evidence</h3>
+            <ul>
+              {data.evidence.map((item) => (
+                <li key={item.pr}>
+                  <strong>PR #{item.pr}</strong>{" — "}
+                  Draft={item.draft ? "YES" : "NO"}, CI={item.ci}, Review={item.review}, Merge={item.mergeState},{" "}
+                  HumanDecision={item.humanDecision} ({item.humanDecisionSource})
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </details>
     </main>

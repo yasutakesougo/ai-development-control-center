@@ -38,7 +38,8 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
     };
   }
 
-  // Prefer UNKNOWN over WAIT: insufficient evidence must not be reported as waiting.
+  // Prefer UNKNOWN over WAIT: insufficient or inconsistent evidence must not be
+  // reported as waiting or actionable.
   const unresolved = facts.openPullRequests.find(hasUnknownEvidence);
   if (unresolved) {
     return unknown(`PR #${unresolved.number} の判定規則に必要な情報を確定できません。`, unresolved.sourceRefs);
@@ -56,7 +57,11 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
   }
 
   const actionable = facts.openPullRequests.find(
-    (pr) => pr.humanDecisionRequired === true && pr.ci === "PASS" && pr.review === "PASS",
+    (pr) =>
+      pr.humanDecisionEvidence.state === "REQUIRED" &&
+      pr.humanDecisionRequired === true &&
+      pr.ci === "PASS" &&
+      pr.review === "PASS",
   );
 
   if (actionable) {
@@ -69,7 +74,11 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
     };
   }
 
-  if (facts.openPullRequests.every((pr) => pr.humanDecisionRequired === false)) {
+  if (
+    facts.openPullRequests.every(
+      (pr) => pr.humanDecisionEvidence.state === "NONE" && pr.humanDecisionRequired === false,
+    )
+  ) {
     return {
       status: "NO_ACTION",
       title: "ありません",
@@ -83,10 +92,17 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
 }
 
 function hasUnknownEvidence(pr: ObservedPullRequest): boolean {
+  const decisionState = pr.humanDecisionEvidence.state;
+  const decisionProjectionMismatch =
+    (decisionState === "REQUIRED" && pr.humanDecisionRequired !== true) ||
+    (decisionState === "NONE" && pr.humanDecisionRequired !== false);
+
   return (
     pr.ci === "UNKNOWN" ||
     pr.review === "UNKNOWN" ||
     pr.mergeState === "UNKNOWN" ||
-    pr.humanDecisionRequired === null
+    decisionState === "UNRESOLVED" ||
+    decisionState === "CONTRADICTORY" ||
+    decisionProjectionMismatch
   );
 }
