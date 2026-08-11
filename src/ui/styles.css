@@ -7,7 +7,7 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, textarea, select { font: inherit; }
 .shell { width: min(100%, 720px); margin: 0 auto; padding: 20px 16px 48px; }
-.action-card, .status-card, .details-card {
+.action-card, .status-card, .details-card, .approval-intent-card {
   background: #fff;
   border: 1px solid #dfe5dc;
   border-radius: 20px;
@@ -32,6 +32,39 @@ dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
 .details-card { margin-top: 16px; padding: 16px 18px; }
 summary { cursor: pointer; font-weight: 700; }
 .details-card p, .details-card li { line-height: 1.6; color: #59645b; overflow-wrap: anywhere; }
+.approval-intent-card { margin-top: 16px; padding: 20px; }
+.approval-intent-card h2 { margin: 0 0 8px; font-size: 1.05rem; }
+.approval-intent-card h3 { margin: 18px 0 8px; font-size: 0.95rem; }
+.approval-intent-note { margin: 0 0 16px; color: #5f675f; line-height: 1.6; }
+.approval-intent-evidence { margin: 0; }
+.approval-intent-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+.approval-intent-choices button {
+  border: 1px solid #c9d2c6;
+  background: #f8faf6;
+  color: #182018;
+  border-radius: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+.approval-intent-choices button.selected {
+  border-color: #355d3a;
+  background: #e7efe6;
+  font-weight: 700;
+}
+.approval-intent-draft {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px dashed #8a722a;
+  border-radius: 12px;
+  background: #fff9eb;
+}
+.approval-intent-draft p { margin: 0 0 6px; color: #5f675f; line-height: 1.5; }
+.approval-intent-draft p:last-child { margin-bottom: 0; }
 @media (min-width: 640px) {
   .shell { padding-top: 40px; }
   .action-card { padding: 32px; }
