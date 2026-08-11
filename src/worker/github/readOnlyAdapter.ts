@@ -1,3 +1,7 @@
+import {
+  collectHumanDecisionEvidence,
+  toHumanDecisionRequired,
+} from "../../domain/humanDecisionEvidence";
 import type {
   CiState,
   MergeState,
@@ -84,6 +88,7 @@ async function observePull(
   const pull = await githubGet<PullResponse>(`/repos/${repository}/pulls/${summary.number}`, env);
   const sha = pull.head?.sha;
   const sourceRefs = [pull.html_url ?? `github:pr:${summary.number}`];
+  const humanDecisionEvidence = collectHumanDecisionEvidence(pull.body ?? summary.body);
 
   if (!sha) {
     return {
@@ -93,7 +98,8 @@ async function observePull(
       ci: "UNKNOWN",
       review: "UNKNOWN",
       mergeState: "UNKNOWN",
-      humanDecisionRequired: parseHumanDecision(summary.body),
+      humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
+      humanDecisionEvidence,
       sourceRefs,
     };
   }
@@ -116,7 +122,8 @@ async function observePull(
     ci: normalizeCi(checks, status),
     review: normalizeReview(reviews),
     mergeState: normalizeMergeState(pull),
-    humanDecisionRequired: parseHumanDecision(pull.body),
+    humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
+    humanDecisionEvidence,
     sourceRefs,
   };
 }
@@ -167,13 +174,6 @@ function normalizeMergeState(pull: PullResponse): MergeState {
   }
   if (pull.mergeable === false) return "BLOCKED";
   return "UNKNOWN";
-}
-
-function parseHumanDecision(body: string | null | undefined): boolean | null {
-  if (!body) return null;
-  if (/Human-Decision:\s*REQUIRED/i.test(body)) return true;
-  if (/Human-Decision:\s*NONE/i.test(body)) return false;
-  return null;
 }
 
 async function githubGet<T>(path: string, env: GitHubEnv): Promise<T> {
