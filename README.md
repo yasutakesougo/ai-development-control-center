@@ -548,19 +548,32 @@ Approval Intent は実承認・永続化・実行ゲートではありません�
 
 ```text
 MVP-3 Approval Intent UI V1 = COMPLETE
+MVP-3 Approval Ledger CONTRACT-V1 = DESIGN ONLY
 ```
 
-Next candidate:
+Ledger 契約ドラフト:
 
 ```text
-Approval Ledger design / contract
+docs/mvp-3-approval-ledger-contract-v1.md
+```
+
+契約上の追加 invariant（design-only）:
+
+```text
+stable decision fingerprint（observedAt は audit metadata。canonical から分離）
+append-only ledger（UPDATE / DELETE 禁止。correction は新 record）
+idempotencyKey 必須（retry duplicate 禁止）
+fingerprint canonicalization / idempotency implementation = NOT AUTHORIZED
 ```
 
 ただし:
 
 ```text
-Implementation Start = NOT AUTHORIZED
+Ledger persistence Implementation Start = NOT AUTHORIZED
+auth / approver identity = NOT AUTHORIZED
+backend mutation API = NOT AUTHORIZED
 real persistence / write = NOT AUTHORIZED
+Action Gateway / Agent execution = NOT AUTHORIZED
 ```
 
 その他の候補:
