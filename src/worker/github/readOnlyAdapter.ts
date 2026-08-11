@@ -80,6 +80,19 @@ export async function observeRepository(
   }
 }
 
+/**
+ * Prefer the authoritative PR detail body.
+ * Explicit `null` means the body is empty — do not resurrect a stale list-response marker.
+ * Fall back to summary.body only when the detail body property is missing (`undefined`).
+ */
+export function selectAuthoritativePullBody(
+  detailBody: string | null | undefined,
+  summaryBody: string | null | undefined,
+): string | null | undefined {
+  if (detailBody !== undefined) return detailBody;
+  return summaryBody;
+}
+
 async function observePull(
   repository: string,
   summary: PullResponse,
@@ -88,7 +101,9 @@ async function observePull(
   const pull = await githubGet<PullResponse>(`/repos/${repository}/pulls/${summary.number}`, env);
   const sha = pull.head?.sha;
   const sourceRefs = [pull.html_url ?? `github:pr:${summary.number}`];
-  const humanDecisionEvidence = collectHumanDecisionEvidence(pull.body ?? summary.body);
+  const humanDecisionEvidence = collectHumanDecisionEvidence(
+    selectAuthoritativePullBody(pull.body, summary.body),
+  );
 
   if (!sha) {
     return {
