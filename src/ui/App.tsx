@@ -96,6 +96,13 @@ export function App() {
                   <strong>PR #{item.pr}</strong>{" — "}
                   Draft={item.draft ? "YES" : "NO"}, CI={item.ci}, Review={item.review}, Merge={item.mergeState},{" "}
                   HumanDecision={item.humanDecision} ({item.humanDecisionSource})
+                  {item.sourceRefs.length > 0 && (
+                    <ul>
+                      {item.sourceRefs.map((ref) => (
+                        <li key={ref}>{ref}</li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               ))}
             </ul>
