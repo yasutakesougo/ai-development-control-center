@@ -38,6 +38,12 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
     };
   }
 
+  // Prefer UNKNOWN over WAIT: insufficient evidence must not be reported as waiting.
+  const unresolved = facts.openPullRequests.find(hasUnknownEvidence);
+  if (unresolved) {
+    return unknown(`PR #${unresolved.number} の判定規則に必要な情報を確定できません。`, unresolved.sourceRefs);
+  }
+
   const pending = facts.openPullRequests.find((pr) => pr.ci === "PENDING" || pr.review === "PENDING");
   if (pending) {
     return {
@@ -47,11 +53,6 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
       reason: "Human判断の前提となる確認が完了していません。",
       sourceRefs: pending.sourceRefs,
     };
-  }
-
-  const unresolved = facts.openPullRequests.find(hasUnknownEvidence);
-  if (unresolved) {
-    return unknown(`PR #${unresolved.number} の判定規則に必要な情報を確定できません。`, unresolved.sourceRefs);
   }
 
   const actionable = facts.openPullRequests.find(

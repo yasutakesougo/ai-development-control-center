@@ -123,8 +123,9 @@ async function observePull(
 
 /**
  * Prefer Check Runs when available.
- * If Checks API is unavailable or returns no runs, fall back to Commit Status.
- * If neither can determine CI, return UNKNOWN (do not escalate repository evidenceState).
+ * If Checks API is unavailable or returns no runs, fall back to Commit Status
+ * only when total_count > 0. GitHub returns state=pending even with zero statuses,
+ * so empty combined status must be UNKNOWN (fail-closed), not PENDING.
  */
 export function normalizeCi(checks: CheckRunsResponse | null, status: StatusResponse): CiState {
   const runs = checks?.check_runs ?? [];
@@ -134,6 +135,10 @@ export function normalizeCi(checks: CheckRunsResponse | null, status: StatusResp
       return "FAIL";
     }
     return "PASS";
+  }
+
+  if (typeof status.total_count !== "number" || status.total_count <= 0) {
+    return "UNKNOWN";
   }
 
   if (status.state === "pending") return "PENDING";

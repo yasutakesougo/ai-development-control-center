@@ -36,9 +36,47 @@ describe("resolveHumanAction", () => {
     expect(result.status).toBe("ACTION_REQUIRED");
   });
 
-  it("returns WAIT while CI is pending", () => {
-    const result = resolveHumanAction(facts({ openPullRequests: [pr({ ci: "PENDING", humanDecisionRequired: true })] }));
+  it("returns WAIT while CI is pending when all other PR evidence is known", () => {
+    const result = resolveHumanAction(
+      facts({
+        openPullRequests: [
+          pr({
+            ci: "PENDING",
+            review: "PASS",
+            mergeState: "CLEAN",
+            humanDecisionRequired: true,
+          }),
+        ],
+      }),
+    );
     expect(result.status).toBe("WAIT");
+  });
+
+  it("prefers UNKNOWN over WAIT when another PR has insufficient evidence", () => {
+    const result = resolveHumanAction(
+      facts({
+        openPullRequests: [
+          pr({
+            number: 1,
+            ci: "PENDING",
+            review: "PASS",
+            mergeState: "CLEAN",
+            humanDecisionRequired: true,
+            sourceRefs: ["github:pr:1"],
+          }),
+          pr({
+            number: 2,
+            ci: "UNKNOWN",
+            review: "PASS",
+            mergeState: "CLEAN",
+            humanDecisionRequired: false,
+            sourceRefs: ["github:pr:2"],
+          }),
+        ],
+      }),
+    );
+    expect(result.status).toBe("UNKNOWN");
+    expect(result.sourceRefs).toEqual(["github:pr:2"]);
   });
 
   it("returns NO_ACTION when no human action exists", () => {
