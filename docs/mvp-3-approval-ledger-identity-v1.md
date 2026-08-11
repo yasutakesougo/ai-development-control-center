@@ -237,9 +237,9 @@ MUST NOT be included in `decisionFingerprint`.
 
 ---
 
-## 7. JWT validation contract (fail-closed; not implemented)
+## 7. JWT validation contract (fail-closed)
 
-For any future privileged Ledger request, the trusted server boundary MUST verify at least:
+For any privileged Ledger request, the trusted server boundary MUST verify at least:
 
 ```text
 JWT signature is valid
@@ -275,11 +275,20 @@ missing / empty subject
 => Ledger write forbidden
 ```
 
+Implementation status:
+
 ```text
-JWT validation implementation = NOT AUTHORIZED in this slice
+MVP-3-APPROVAL-LEDGER-AUTH-VERIFY-V1
+  = server-side Access JWT verifier + optional GET /api/auth/status
+  = IMPLEMENTED IN CODE (repository)
+
+Cloudflare Access configuration = NOT AUTHORIZED
+production authentication boundary activation = NOT AUTHORIZED
+authorization allowlist = NOT AUTHORIZED
+Approval Ledger persistence = NOT AUTHORIZED
 ```
 
-This section defines the contract only. It does not add runtime validation code.
+Authentication verification ≠ authorization to write the Ledger.
 
 ---
 
@@ -583,13 +592,14 @@ src/** / test/** mutation
 ```text
 A. CONTRACT-V1     = MERGED (design)
 B. IDENTITY-V1     = this document (design-only)
+B2. AUTH-VERIFY-V1 = Access JWT verifier in code — Access config / prod activation NOT AUTHORIZED
 C. PERSIST-V1      = durable write/read — NOT AUTHORIZED
-   (+ auth enforcement implementation GO required before/with C)
+   (+ authorization allowlist GO required before/with C)
 D. Action Gateway  = NOT AUTHORIZED
 E. GitHub write    = NOT AUTHORIZED
 ```
 
-IDENTITY-V1 design acceptance does **not** authorize PERSIST-V1 or auth implementation.
+IDENTITY-V1 / AUTH-VERIFY-V1 do **not** authorize PERSIST-V1, Access configuration, or ledger.write.
 
 ---
 
@@ -614,11 +624,12 @@ IDENTITY-V1 design acceptance does **not** authorize PERSIST-V1 or auth implemen
 ```text
 Approval Intent UI             = IMPLEMENTED (local ephemeral)
 Approval Ledger CONTRACT-V1    = DESIGN (merged)
-Approval Ledger IDENTITY-V1    = DESIGN ONLY (this doc)
-Authentication implementation  = 0 / NOT AUTHORIZED
-Authorization implementation   = 0 / NOT AUTHORIZED
+Approval Ledger IDENTITY-V1    = DESIGN (merged)
+Access JWT verifier (code)     = AUTH-VERIFY-V1 (repo code; not production-activated)
+Cloudflare Access configuration = 0 / NOT AUTHORIZED
+Authorization allowlist        = 0 / NOT AUTHORIZED
 Approval Ledger persist        = 0 / NOT AUTHORIZED
-Backend approval API           = 0
+Backend approval mutation API  = 0
 GitHub write                   = 0
 SharePoint mutation            = 0
 Action Gateway                 = 0
