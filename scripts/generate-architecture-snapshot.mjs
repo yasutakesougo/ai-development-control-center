@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -172,8 +172,12 @@ export function writeSnapshot({ commit, generatedAt } = {}) {
   if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error("generatedFrom.commit must be a full Git SHA");
   const snapshot = buildSnapshot(sourceCommit, generatedAt);
   mkdirSync(outputDirectory, { recursive: true });
-  writeFileSync(resolve(outputDirectory, "architecture.json"), `${JSON.stringify(snapshot, null, 2)}\n`);
-  writeFileSync(resolve(outputDirectory, "architecture.html"), renderHtml(snapshot));
+  const jsonPath = resolve(outputDirectory, "architecture.json");
+  writeFileSync(jsonPath, `${JSON.stringify(snapshot, null, 2)}\n`);
+  // JSON is the source of the Human view; read back the emitted artifact so
+  // HTML can never silently diverge into a separately maintained description.
+  const emittedSnapshot = JSON.parse(readFileSync(jsonPath, "utf8"));
+  writeFileSync(resolve(outputDirectory, "architecture.html"), renderHtml(emittedSnapshot));
   return snapshot;
 }
 
