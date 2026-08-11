@@ -6,5 +6,21 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
+  },
+  "env": {
+    // Isolated staging pilot (MVP-3-APPROVAL-LEDGER-STAGING-PILOT-V1).
+    // Deployed only via: CLOUDFLARE_ENV=staging vite build && wrangler deploy -c dist/...
+    // The top-level (production) configuration above remains untouched.
+    "staging": {
+      "name": "ai-development-control-center-staging",
+      "assets": {
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application"
+      },
+      "vars": {
+        // Coarse staging authorization boundary: Cloudflare Access application policy.
+        "LEDGER_AUTHZ_MODE": "access-policy"
+      }
+    }
   }
 }
