@@ -3,12 +3,17 @@
 ## Status
 
 ```text
-MVP-2 EVIDENCE-TRACE-V1 COMPLETE
+MVP-3-APPROVAL-INTENT-UI-V1 COMPLETE
 ```
 
-MVP-1 の fail-closed Human Action Resolver を維持したまま、Open PR ごとの一次情報を Evidence として収集・API/UI へ露出する状態を固定します。
+MVP-1 / MVP-2 の fail-closed 観測・Evidence 契約を維持したまま、
+`HumanAction = ACTION_REQUIRED` のときだけローカルで Approval Intent（承認案 / 却下案 / 保留）を選べる
+presentation-only UI まで到達した状態を固定します。
 
-現在の production は Open PR が 0 件のため `HumanAction = NO_ACTION`、`evidence = []` です。これは失敗ではなく、観測結果に基づく確定判定です。
+これは実際の承認ではありません。選択は端末上の一時案のみで、外部へ送信・保存されません。
+
+現在の production は Open PR が 0 件のため `HumanAction = NO_ACTION`、`evidence = []` です。
+Approval Intent UI は表示されません（`ACTION_REQUIRED + CONFIRMED` のときのみ）。
 
 ## Purpose
 
@@ -25,19 +30,19 @@ AI Development Control Center は、開発プロジェクトの状態を読み�
 | Production URL | https://ai-development-control-center.momosantanuki.workers.dev |
 | Status API | https://ai-development-control-center.momosantanuki.workers.dev/api/status |
 | Observed repository | `yasutakesougo/severe-behavior-support-spfx` (read-only) |
-| Cloudflare Version ID | `61d4b9f6-783e-455e-897f-0fb079a1732a` |
-| Baseline main | `08d5d73cf0810d58273d1b1ab6628e716328dadb` |
+| Cloudflare Version ID | `d13218f0-f2ef-4f79-803c-ab4e310d2bde` |
+| Baseline main | `a0735568180c6cd956f66a186a3efedcef1fc4b0` |
 | Closeout evidence | `evidenceState = CONFIRMED`, `openPrCount = 0`, `HumanAction = NO_ACTION`, `evidence = []` |
 
-### Current production（MVP-2 closeout）
+### Current production（MVP-3 Approval Intent UI V1 closeout）
 
 ```text
 Production deploy: SUCCESS
-Cloudflare Version ID: 61d4b9f6-783e-455e-897f-0fb079a1732a
-npm run verify: 28 / 28 PASS
-PR #6: MERGED (EVIDENCE-TRACE-V1)
-PR #8: MERGED (post-merge P2 fix)
-merge commit / current main: 08d5d73cf0810d58273d1b1ab6628e716328dadb
+Cloudflare Version ID: d13218f0-f2ef-4f79-803c-ab4e310d2bde
+npm run verify: 39 / 39 PASS
+PR #9: MERGED (MVP-3-APPROVAL-INTENT-UI-V1)
+merged HEAD: 924a9d815e6a756249a6ab20903ef1fed260fd4e
+current main: a0735568180c6cd956f66a186a3efedcef1fc4b0
 
 /api/status:
   evidenceState = CONFIRMED
@@ -47,9 +52,29 @@ merge commit / current main: 08d5d73cf0810d58273d1b1ab6628e716328dadb
 
 severe-behavior-support-spfx mutation = 0
 GitHub write capability = 0
+backend mutation API = 0
+persistence = 0
 SharePoint mutation = 0
+Agent execution = 0
+real approval execution = NOT AUTHORIZED
 Automatic approval = 0
 Secret exposure = 0
+```
+
+### Historical MVP-2 closeout evidence（not current production）
+
+MVP-2 closeout 時点の観測（Version `61d4b9f6…`、main `08d5d73…`、28 PASS）は historical record です。current production と誤読しないでください。
+
+```text
+[historical MVP-2]
+Production deploy: SUCCESS
+Cloudflare Version ID: 61d4b9f6-783e-455e-897f-0fb079a1732a
+npm run verify: 28 / 28 PASS
+PR #6 / #8: MERGED
+main: 08d5d73cf0810d58273d1b1ab6628e716328dadb
+evidenceState = CONFIRMED
+HumanAction = NO_ACTION
+evidence = []
 ```
 
 ### Historical MVP-1 closeout evidence（not current production）
@@ -80,6 +105,7 @@ Human Action Resolver
 Human Action
   ↓
 Mobile-first UI
+  └─ Approval Intent UI（ACTION_REQUIRED のみ、local draft）
 ```
 
 Observed Facts と Human Action は分離しています。
@@ -126,6 +152,82 @@ evidence: Array<{
 ```
 
 Open PR が 0 件のときは `evidence = []` です。
+
+## Approval Intent contract（MVP-3-APPROVAL-INTENT-UI-V1）
+
+```text
+Approval Intent =
+  LOCAL ONLY
+  EPHEMERAL
+  NOT SUBMITTED
+  NOT PERSISTED
+  NO EXTERNAL EFFECT
+```
+
+### Visibility
+
+Approval Intent UI は次のときのみ表示します。
+
+```text
+action.status === "ACTION_REQUIRED"
+AND evidenceState === "CONFIRMED"
+```
+
+次の場合は controls を出しません。
+
+```text
+WAIT / NO_ACTION / UNKNOWN
+ERROR / MISSING / CONTRADICTORY evidence
+```
+
+### Choices
+
+```ts
+type ApprovalIntent = "APPROVE" | "REJECT" | "DEFER";
+```
+
+UI 文言は実行済み承認と誤解させないため次とします。
+
+```text
+承認案
+却下案
+保留
+```
+
+選択後は明示的に次を表示します。
+
+```text
+LOCAL DRAFT
+NOT SUBMITTED
+外部システムには反映されていません
+```
+
+「承認されました」「完了しました」「反映しました」等の表現は使いません。
+
+### Stale protection
+
+local Approval Intent draft は React runtime memory のみです。
+
+次の fingerprint が変化した場合、既存 draft を破棄します。
+
+```text
+action.status
+sourceRefs
+observed evidence
+observedAt
+```
+
+ページ reload 後に intent を復元しません（localStorage / sessionStorage / IndexedDB / cookie = 0）。
+
+Human が APPROVE を選んでも外部 effect は 0 です。
+
+```text
+GitHub Ready / Merge / Comment = 0
+SharePoint write = 0
+Action Gateway = 0
+Cursor / Codex Agent = 0
+Worker mutation request = 0
+```
 
 ## Human Action contract
 
@@ -180,7 +282,7 @@ private repository の観測には、Worker 側の `GITHUB_TOKEN`（fine-grained
 
 ブラウザへ token は渡しません。
 
-### GITHUB_TOKEN 権限境界（MVP-1 確定 / MVP-2 維持）
+### GITHUB_TOKEN 権限境界（MVP-1 確定 / MVP-2・MVP-3 維持）
 
 対象 repository は `yasutakesougo/severe-behavior-support-spfx` のみです。
 
@@ -211,6 +313,7 @@ GitHub write capability = 0
 Merge / Ready / Comment = 0
 SharePoint mutation = 0
 Automatic approval = 0
+backend approval API = 0
 ```
 
 Checks 権限は必須ではありません。Check Runs API が取得できない場合、adapter は Commit Status だけで CI を判定し、確定不能なら `CI = UNKNOWN` とします。repository 全体を `ERROR` にはしません。
@@ -233,10 +336,10 @@ token の値をチャットへ貼り付ける必要はありません。
 
 ## Testing
 
-Resolver / Evidence / CI normalizer unit tests:
+Resolver / Evidence / Approval Intent / CI normalizer unit tests:
 
 ```text
-npm test → 28 PASS
+npm test → 39 PASS
 ```
 
 内訳:
@@ -245,6 +348,7 @@ npm test → 28 PASS
 - `humanActionResolver.test.ts` — 11
 - `normalizeCi.test.ts` — 8
 - `selectAuthoritativePullBody.test.ts` — 4
+- `approvalIntent.test.ts` — 11
 
 最低限、次を確認します。
 
@@ -264,6 +368,9 @@ npm test → 28 PASS
 - projection mismatch -> `UNKNOWN`
 - detail `body = null` + stale summary REQUIRED -> `UNRESOLVED` / no `ACTION_REQUIRED`
 - detail body missing (`undefined`) のときのみ summary へ fallback
+- Approval Intent UI: ACTION_REQUIRED only / WAIT・NO_ACTION・UNKNOWN forbidden
+- APPROVE / REJECT / DEFER = local draft only / externalEffect = false
+- evidence/action fingerprint change clears stale local intent
 
 実行方法は次です。
 
@@ -296,30 +403,37 @@ npm run deploy
 ```text
 Browser
   GitHub credential = 0
+  Approval Intent = local ephemeral draft only
       ↓
 Worker
   GITHUB_TOKEN = Secret only
   GitHub request = GET only
+  approval mutation API = 0
       ↓
 yasutakesougo/severe-behavior-support-spfx
   mutation = 0
 ```
 
-実装しない capability は次です。
+### Implemented
 
+- non-operative Approval Intent UI（MVP-3-APPROVAL-INTENT-UI-V1）
+
+### Still FORBIDDEN / NOT AUTHORIZED
+
+- real approval execution
+- Approval Ledger persistence
+- approver identity
+- authentication / authorization
+- backend approval API
 - GitHub write
-- Issue write
-- PR write
-- Merge
-- Ready 化
-- GitHub comment
-- SharePoint write
-- SharePoint schema 変更
+- Issue / PR / comment write
+- Merge / Ready 化
+- SharePoint write / schema 変更
+- Action Gateway
 - Cursor Agent 起動
 - Codex Agent 起動
 - 自動承認
-- Action Gateway write
-- Human Approval UI（MVP-3、別 Human GO まで HOLD）
+- automatic Ready / Merge
 
 ## Known behavior
 
@@ -356,6 +470,12 @@ contradiction / projection mismatch → HumanAction=UNKNOWN
 PR detail body が明示的 null → stale list marker を使わず UNRESOLVED（false ACTION_REQUIRED 禁止）
 ```
 
+### Approval Intent local draft
+
+`ACTION_REQUIRED` 以外では Approval Intent controls を表示しません。
+
+選択結果は external system に反映されません。
+
 ## Known limitations
 
 Human Action を AI の自由推論では決定しません。
@@ -368,7 +488,37 @@ Review、CI、merge state は GitHub API で確認できた情報だけを正規
 
 Relevant Issue の高度な関連付けはまだ実装しません。
 
-## MVP-2 closeout record
+Approval Intent は実承認・永続化・実行ゲートではありません。
+
+## MVP-3 closeout record
+
+| # | Item | Result |
+| --- | --- | --- |
+| 1 | PR #9 merge + production deploy SUCCESS を記録 | DONE |
+| 2 | Cloudflare Version ID（post-#9）を記録 | DONE |
+| 3 | `/api/status` current production を記録 | DONE |
+| 4 | 39 tests PASS を記録 | DONE |
+| 5 | Approval Intent contract を README へ固定 | DONE |
+| 6 | stale protection / LOCAL ONLY を記録 | DONE |
+| 7 | security boundary（real approval = NOT AUTHORIZED）を更新 | DONE |
+| 8 | Future phases を current state と整合 | DONE |
+| 9 | MVP-3-APPROVAL-INTENT-UI-V1 COMPLETE を固定 | DONE |
+
+### PR disposition
+
+| PR | Title | Disposition |
+| --- | --- | --- |
+| #1 | chore: add package-lock.json after Step 10 local verification | closeout で `package-lock.json` を本線へ取り込み。Draft PR は close |
+| #2 | chore: Cloudflare agent skills and MCP setup | MVP-1 runtime 非依存のため Draft のまま close（将来 tooling 候補） |
+| #3 | Checks API soft-fail with Commit Status CI fallback | merged / closed（本番反映済み） |
+| #4 | FALSE_WAIT fail-closed fix | merged / closed（本番反映済み） |
+| #5 | docs: MVP-1 COMPLETE closeout | merged / closed |
+| #6 | feat(mvp2): add fail-closed PR evidence trace | merged / closed（本番反映済み） |
+| #7 | docs: MVP-2 EVIDENCE-TRACE-V1 closeout | merged / closed |
+| #8 | fix(mvp2): post-merge P2 — stale marker + sourceRefs UI | merged / closed（本番反映済み） |
+| #9 | feat(mvp3): add non-operative approval intent UI | merged / closed（本番反映済み） |
+
+## MVP-2 closeout record（historical）
 
 | # | Item | Result |
 | --- | --- | --- |
@@ -381,18 +531,6 @@ Relevant Issue の高度な関連付けはまだ実装しません。
 | 7 | historical MVP-1 UNKNOWN（PR #245）を誤読防止表記へ更新 | DONE |
 | 8 | `severe-behavior-support-spfx` mutation = 0 を維持 | DONE |
 | 9 | MVP-2 EVIDENCE-TRACE-V1 COMPLETE を固定 | DONE |
-
-### PR disposition
-
-| PR | Title | Disposition |
-| --- | --- | --- |
-| #1 | chore: add package-lock.json after Step 10 local verification | closeout で `package-lock.json` を本線へ取り込み。Draft PR は close |
-| #2 | chore: Cloudflare agent skills and MCP setup | MVP-1 runtime 非依存のため Draft のまま close（将来 tooling 候補） |
-| #3 | Checks API soft-fail with Commit Status CI fallback | merged / closed（本番反映済み） |
-| #4 | FALSE_WAIT fail-closed fix | merged / closed（本番反映済み） |
-| #5 | docs: MVP-1 COMPLETE closeout | merged / closed |
-| #6 | feat(mvp2): add fail-closed PR evidence trace | merged / closed（本番反映済み） |
-| #8 | fix(mvp2): post-merge P2 — stale marker + sourceRefs UI | merged / closed（本番反映済み） |
 
 ## MVP-1 closeout record（historical）
 
@@ -408,9 +546,22 @@ Relevant Issue の高度な関連付けはまだ実装しません。
 
 ## Future phases
 
-MVP-3 候補は Human Approval UI です。
+```text
+MVP-3 Approval Intent UI V1 = COMPLETE
+```
 
-security boundary を含むため、MVP-2 closeout 完了後も Implementation Start は別 Human GO まで HOLD です。
+Next candidate:
+
+```text
+Approval Ledger design / contract
+```
+
+ただし:
+
+```text
+Implementation Start = NOT AUTHORIZED
+real persistence / write = NOT AUTHORIZED
+```
 
 その他の候補:
 
