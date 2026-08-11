@@ -2,7 +2,7 @@ import { resolveHumanAction } from "../domain/humanActionResolver";
 import { observeRepository } from "./github/readOnlyAdapter";
 
 interface Env {
-  ASSETS: Fetcher;
+  ASSETS: { fetch(request: Request): Promise<Response> };
   GITHUB_TOKEN?: string;
 }
 
