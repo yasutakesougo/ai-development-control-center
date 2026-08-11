@@ -549,12 +549,14 @@ Approval Intent は実承認・永続化・実行ゲートではありません�
 ```text
 MVP-3 Approval Intent UI V1 = COMPLETE
 MVP-3 Approval Ledger CONTRACT-V1 = DESIGN ONLY
+MVP-3 Approval Ledger IDENTITY-V1 = DESIGN ONLY
 ```
 
 Ledger 契約ドラフト:
 
 ```text
 docs/mvp-3-approval-ledger-contract-v1.md
+docs/mvp-3-approval-ledger-identity-v1.md
 ```
 
 契約上の追加 invariant（design-only）:
@@ -563,14 +565,19 @@ docs/mvp-3-approval-ledger-contract-v1.md
 stable decision fingerprint（observedAt は audit metadata。canonical から分離）
 append-only ledger（UPDATE / DELETE 禁止。correction は新 record）
 idempotencyKey 必須（retry duplicate 禁止）
-fingerprint canonicalization / idempotency implementation = NOT AUTHORIZED
+authenticated human principal required for future Ledger write
+principal identity = issuer + subjectId（subjectId alone is not globally stable）
+browser-supplied approverId/email/displayName must not establish identity
+JWT fail-closed validation required before any future privileged Ledger write
+displayName/email persistence NOT REQUIRED until PII retention is resolved
+fingerprint canonicalization / idempotency / auth implementation = NOT AUTHORIZED
 ```
 
 ただし:
 
 ```text
 Ledger persistence Implementation Start = NOT AUTHORIZED
-auth / approver identity = NOT AUTHORIZED
+authentication / authorization implementation = NOT AUTHORIZED
 backend mutation API = NOT AUTHORIZED
 real persistence / write = NOT AUTHORIZED
 Action Gateway / Agent execution = NOT AUTHORIZED
