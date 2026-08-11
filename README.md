@@ -81,9 +81,20 @@ npm run preview
 
 ## Environment variables / Secrets
 
-public repository の read-only API は認証なしでも取得できますが、GitHub API rate limit を避けるため Worker 側に token を設定できます。
+private repository の観測には、Worker 側の `GITHUB_TOKEN`（fine-grained PAT）が必要です。
 
 ブラウザへ token は渡しません。
+
+対象 repository 向けの最小権限は次です。
+
+```text
+Contents          Read-only
+Pull requests     Read-only
+Commit statuses   Read-only
+Metadata          Read-only（GitHub 側の基本権限）
+```
+
+Checks 権限は必須ではありません。Check Runs API が取得できない場合、adapter は Commit Status だけで CI を判定し、確定不能なら `CI = UNKNOWN` とします。repository 全体を `ERROR` にはしません。
 
 ローカル開発では `.dev.vars` を使用できます。
 

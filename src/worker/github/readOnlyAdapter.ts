@@ -98,8 +98,13 @@ async function observePull(
     };
   }
 
+  // Checks API may be unavailable for fine-grained PATs (no Checks permission UI).
+  // Soft-fail check-runs so observation can continue with Commit Status only.
   const [checks, status, reviews] = await Promise.all([
-    githubGet<CheckRunsResponse>(`/repos/${repository}/commits/${sha}/check-runs?per_page=100`, env),
+    githubGetOptional<CheckRunsResponse>(
+      `/repos/${repository}/commits/${sha}/check-runs?per_page=100`,
+      env,
+    ),
     githubGet<StatusResponse>(`/repos/${repository}/commits/${sha}/status`, env),
     githubGet<ReviewResponse[]>(`/repos/${repository}/pulls/${summary.number}/reviews?per_page=100`, env),
   ]);
@@ -116,13 +121,21 @@ async function observePull(
   };
 }
 
-function normalizeCi(checks: CheckRunsResponse, status: StatusResponse): CiState {
-  const runs = checks.check_runs ?? [];
-  if (runs.some((run) => run.status !== "completed")) return "PENDING";
-  if (runs.some((run) => run.conclusion && !["success", "neutral", "skipped"].includes(run.conclusion))) {
-    return "FAIL";
+/**
+ * Prefer Check Runs when available.
+ * If Checks API is unavailable or returns no runs, fall back to Commit Status.
+ * If neither can determine CI, return UNKNOWN (do not escalate repository evidenceState).
+ */
+export function normalizeCi(checks: CheckRunsResponse | null, status: StatusResponse): CiState {
+  const runs = checks?.check_runs ?? [];
+  if (runs.length > 0) {
+    if (runs.some((run) => run.status !== "completed")) return "PENDING";
+    if (runs.some((run) => run.conclusion && !["success", "neutral", "skipped"].includes(run.conclusion))) {
+      return "FAIL";
+    }
+    return "PASS";
   }
-  if (runs.length > 0) return "PASS";
+
   if (status.state === "pending") return "PENDING";
   if (status.state === "failure" || status.state === "error") return "FAIL";
   if (status.state === "success") return "PASS";
@@ -159,16 +172,26 @@ function parseHumanDecision(body: string | null | undefined): boolean | null {
 }
 
 async function githubGet<T>(path: string, env: GitHubEnv): Promise<T> {
+  const response = await githubFetch(path, env);
+  if (!response.ok) throw new Error("GitHub API request failed");
+  return (await response.json()) as T;
+}
+
+/** Soft-fail GET for optional endpoints (e.g. check-runs without Checks permission). */
+async function githubGetOptional<T>(path: string, env: GitHubEnv): Promise<T | null> {
+  const response = await githubFetch(path, env);
+  if (!response.ok) return null;
+  return (await response.json()) as T;
+}
+
+async function githubFetch(path: string, env: GitHubEnv): Promise<Response> {
   const headers = new Headers({
     Accept: "application/vnd.github+json",
     "User-Agent": "ai-development-control-center",
     "X-GitHub-Api-Version": "2022-11-28",
   });
   if (env.GITHUB_TOKEN) headers.set("Authorization", `Bearer ${env.GITHUB_TOKEN}`);
-
-  const response = await fetch(`${API}${path}`, { method: "GET", headers });
-  if (!response.ok) throw new Error("GitHub API request failed");
-  return (await response.json()) as T;
+  return fetch(`${API}${path}`, { method: "GET", headers });
 }
 
 function missing(repository: string, sourceRefs: string[], message: string): ObservedFacts {
