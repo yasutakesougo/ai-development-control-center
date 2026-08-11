@@ -566,7 +566,10 @@ stable decision fingerprint（observedAt は audit metadata。canonical から�
 append-only ledger（UPDATE / DELETE 禁止。correction は新 record）
 idempotencyKey 必須（retry duplicate 禁止）
 authenticated human principal required for future Ledger write
+principal identity = issuer + subjectId（subjectId alone is not globally stable）
 browser-supplied approverId/email/displayName must not establish identity
+JWT fail-closed validation required before any future privileged Ledger write
+displayName/email persistence NOT REQUIRED until PII retention is resolved
 fingerprint canonicalization / idempotency / auth implementation = NOT AUTHORIZED
 ```
 
