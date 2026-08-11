@@ -557,6 +557,15 @@ Ledger 契約ドラフト:
 docs/mvp-3-approval-ledger-contract-v1.md
 ```
 
+契約上の追加 invariant（design-only）:
+
+```text
+stable decision fingerprint（observedAt は audit metadata。canonical から分離）
+append-only ledger（UPDATE / DELETE 禁止。correction は新 record）
+idempotencyKey 必須（retry duplicate 禁止）
+fingerprint canonicalization / idempotency implementation = NOT AUTHORIZED
+```
+
 ただし:
 
 ```text
