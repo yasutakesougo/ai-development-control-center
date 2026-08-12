@@ -19,6 +19,11 @@ Companion pure helpers: `src/domain/persistentAutoRefreshContract.ts`
 Example (historical) workflow sketch:
 `docs/architecture/persistent-auto-refresh-workflow.example.yml`
 
+HISTORY-V1 (append-only Snapshot/refresh audit) is **designed** and **not
+implemented** — see [`../history/history-v1.md`](../history/history-v1.md).
+AUTO-REFRESH may eventually emit history events; eligibility must not depend
+solely on HISTORY when live repository evidence is available.
+
 ---
 
 ## Objective
