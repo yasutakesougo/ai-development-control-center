@@ -96,10 +96,17 @@ type ActionGatewayCommentRequestV1 = {
     authorizedRequestFingerprint: string;
     /** Must equal request.idempotencyKey (one Human auth ⇒ one attempt key). */
     authorizedIdempotencyKey: string;
+    /** Must equal request.requestedBy (one Human auth ⇒ one requester scope). */
+    authorizedRequestedBy: {
+      principalKind: "HUMAN";
+      subjectId: string;
+      issuer?: string;
+    };
     authorizedAt: string; // ISO-8601
     /**
      * Absolute expiry. If omitted, effective expiry =
      * authorizedAt + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS (1h).
+     * Validity window: authorizedAt <= nowIso <= effectiveExpiry.
      */
     expiresAt?: string;
     evidenceRefs: string[]; // non-secret refs (e.g. authorizing comment URLs)
@@ -157,11 +164,27 @@ alone is not enough to reuse one authorization across different attempt keys.
 ```text
 evaluation clock          = independent nowIso (REQUIRED)
                             NEVER derived from authorizedAt
+validity window           = authorizedAt <= nowIso <= effectiveExpiry
 effectiveExpiry           = expiresAt  if present
                           = authorizedAt + DEFAULT_TTL (1h)  if expiresAt omitted
+nowIso < authorizedAt     ⇒ REJECTED_AUTHORIZATION_NOT_YET_VALID
 nowIso > effectiveExpiry  ⇒ REJECTED_AUTHORIZATION_EXPIRED
 nowIso missing/invalid    ⇒ REJECTED_EVALUATION_CLOCK_MISSING
 ```
+
+Live observation must include identity, not only existence:
+
+```text
+observedTargetExists === true
+observedRepository     == request.repository
+observedTargetKind     == request.target.kind
+observedTargetNumber   == request.target.number
+(+ nodeId/title when expected)
+```
+
+Malformed runtime JSON is fail-closed via structural parse helpers
+(`parseActionGatewayCommentRequest` / `parseActionGatewayPreWriteOptions`) —
+helpers must not throw; they return `REJECTED_SCHEMA`.
 
 ---
 
@@ -217,22 +240,23 @@ type ActionGatewayCommentResultV1 = {
 2. `recommendedNextAction.authorizesMutation` remains **`false`** and is not an
    input to the Gateway authorizer.
 3. Mutation requires `humanAuthorization` bound to **exact**
-   `capabilityId + repository + target + requestFingerprint + idempotencyKey`.
-4. Missing / malformed / expired / mismatched authorization ⇒ `REJECTED`
+   `capabilityId + repository + target + requestFingerprint + idempotencyKey + requestedBy`.
+4. Missing / malformed / expired / not-yet-valid / mismatched authorization ⇒ `REJECTED`
    before any GitHub write. Default TTL applies when `expiresAt` is omitted.
+   Validity window is `authorizedAt <= nowIso <= effectiveExpiry`.
 5. Repository allowlist (V1) is exactly
    `yasutakesougo/ai-development-control-center`.
-6. Target must already exist and be **live re-observed** as existing before
-   write (`observedTargetExists === true` required; omitted observation fails
-   closed). If `expectedObservations` includes `targetNodeId` / `targetTitle`,
-   matching live observations are required (not optional).
+6. Target must already exist and be **live re-observed** with matching
+   `repository / kind / number` before write (`observedTargetExists === true`
+   alone is insufficient). If `expectedObservations` includes `targetNodeId` /
+   `targetTitle`, matching live observations are required.
 7. Authorization for number N cannot be replayed against number M.
 8. Authorization for `github.comment.create.v1` cannot authorize Ready / Merge /
    Close / workflow dispatch / repository-file writes / other capabilities.
 9. Same `idempotencyKey` (within principal+capability+repository scope) must not
    create a second comment; return the prior terminal result.
-   Different key requires a **new** Human authorization whose
-   `authorizedIdempotencyKey` matches that key.
+   Different key **or** different `requestedBy` requires a **new** Human
+   authorization bound to that key and requester.
 10. Secrets / tokens never appear in request, result, UI, logs, or persisted
     evidence documents.
 
@@ -245,10 +269,13 @@ authorizedRepository    == request.repository == allowlist repo
 authorizedTarget        == request.target == expectedObservations target
 authorizedRequestFingerprint == computeCommentRequestFingerprint(...)
 authorizedIdempotencyKey == request.idempotencyKey
+authorizedRequestedBy   == request.requestedBy
 nowIso provided independently of authorizedAt
-nowIso <= effectiveExpiry (expiresAt or authorizedAt+DEFAULT_TTL)
+authorizedAt <= nowIso <= effectiveExpiry (expiresAt or authorizedAt+DEFAULT_TTL)
 evidenceRefs non-empty and non-secret
-live re-observation: observedTargetExists === true
+live re-observation:
+  observedTargetExists === true
+  observedRepository/kind/number == request target
   + if expected targetNodeId/title set → live observed values required and equal
 ```
 
@@ -323,12 +350,14 @@ REJECTED_REPOSITORY_NOT_ALLOWED
 REJECTED_AUTHORIZATION_MISSING
 REJECTED_AUTHORIZATION_MISMATCH
 REJECTED_AUTHORIZATION_EXPIRED
+REJECTED_AUTHORIZATION_NOT_YET_VALID
 REJECTED_FINGERPRINT_MISMATCH
 REJECTED_TARGET_NOT_FOUND
 REJECTED_TARGET_MISMATCH
 REJECTED_PAYLOAD_LIMIT
 REJECTED_IDEMPOTENCY_KEY_MISSING
 REJECTED_IDEMPOTENCY_KEY_MISMATCH
+REJECTED_REQUESTER_MISMATCH
 REJECTED_OBSERVATION_MISSING
 REJECTED_EVALUATION_CLOCK_MISSING
 REJECTED_OVERLAY_NOT_AUTHORIZATION   // if caller tries to treat overlay as auth
@@ -338,6 +367,9 @@ UNKNOWN_GITHUB_OUTCOME
 SUCCEEDED_CREATED
 SUCCEEDED_IDEMPOTENT_REPLAY
 ```
+
+`comment.id/url` may appear **only** on `SUCCEEDED`. `FAILED` / `UNKNOWN` /
+`REJECTED` must omit `comment`.
 
 ---
 
@@ -386,8 +418,12 @@ detail; design requires a deny-on-secret-scan hook before write).
 | Overlay “next action” treated as auth | Explicit rule: overlay never authorizes; reason `REJECTED_OVERLAY_NOT_AUTHORIZATION` |
 | Auth replay on different Issue/PR | Exact target + fingerprint binding |
 | Auth reused with a different idempotencyKey | `authorizedIdempotencyKey` exact match |
+| Auth reused under a different requestedBy / scope | `authorizedRequestedBy` exact match |
 | Clock derived from `authorizedAt` skips expiry | Independent required `nowIso`; default TTL always applied when `expiresAt` omitted |
-| Skipping live target probe | `observedTargetExists === true` required; expected nodeId/title require live values |
+| Future-dated authorization used early | `authorizedAt <= nowIso <= expiry` |
+| Skipping live target probe / identity | existence + repository/kind/number required; expected nodeId/title require live values |
+| FAILED/UNKNOWN carrying comment ids | Result invariant: comment only on SUCCEEDED |
+| Malformed runtime JSON throws | Structural parse helpers fail closed as `REJECTED_SCHEMA` |
 | Auth for comment used as Ready/Merge | Capability allowlist exact-match only |
 | Cross-repo write | Repository allowlist exact-match |
 | Network retry duplicates comment | Idempotency key scope + replay prior result |

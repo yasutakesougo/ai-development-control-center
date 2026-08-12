@@ -73,9 +73,18 @@
       "then": { "required": ["comment"] }
     },
     {
+      "if": {
+        "properties": {
+          "status": { "enum": ["REJECTED", "FAILED", "UNKNOWN"] }
+        }
+      },
+      "then": {
+        "not": { "required": ["comment"] }
+      }
+    },
+    {
       "if": { "properties": { "status": { "const": "REJECTED" } } },
       "then": {
-        "not": { "required": ["comment"] },
         "properties": {
           "timestamps": {
             "not": { "required": ["attemptedAt"] }

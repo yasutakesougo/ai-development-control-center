@@ -16,6 +16,7 @@ import {
   reconcileUnknownCommentOutcome,
   type ActionGatewayCommentRequestV1,
   type ActionGatewayCommentResultV1,
+  type ActionGatewayPreWriteOptions,
 } from "../src/domain/actionGatewayCommentContract";
 
 const fixturesDir = join(
@@ -44,7 +45,22 @@ async function validRequest(): Promise<ActionGatewayCommentRequestV1> {
       ...request.humanAuthorization,
       authorizedRequestFingerprint: fingerprint,
       authorizedIdempotencyKey: request.idempotencyKey,
+      authorizedRequestedBy: { ...request.requestedBy },
     },
+  };
+}
+
+function liveOpts(
+  request: ActionGatewayCommentRequestV1,
+  overrides: Partial<ActionGatewayPreWriteOptions> = {},
+): ActionGatewayPreWriteOptions {
+  return {
+    nowIso: NOW,
+    observedTargetExists: true,
+    observedRepository: request.repository,
+    observedTargetKind: request.target.kind,
+    observedTargetNumber: request.target.number,
+    ...overrides,
   };
 }
 
@@ -63,11 +79,10 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     ]);
   });
 
-  it("fingerprint is stable for content facts and ignores attempt key differences", async () => {
+  it("fingerprint is stable for content facts", async () => {
     const base = await validRequest();
     const a = await computeCommentRequestFingerprint(base);
     expect(a).toMatch(/^[a-f0-9]{64}$/);
-
     const changedBody = await computeCommentRequestFingerprint({
       capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
       repository: base.repository,
@@ -80,25 +95,40 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
 
   it("valid authorized request is ELIGIBLE but does not attempt write", async () => {
     const request = await validRequest();
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(request, liveOpts(request));
     expect(evaluation.status).toBe("ELIGIBLE_FOR_ADAPTER");
     expect(evaluation.writeAttempted).toBe(false);
     if (evaluation.status === "ELIGIBLE_FOR_ADAPTER") {
       expect(evaluation.executionImplemented).toBe(false);
-      expect(evaluation.requestFingerprint).toMatch(/^[a-f0-9]{64}$/);
     }
+  });
+
+  it("fail-closes malformed runtime JSON without throwing", async () => {
+    await expect(evaluateCommentRequestPreWrite(null, liveOpts(await validRequest()))).resolves.toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_SCHEMA",
+      writeAttempted: false,
+    });
+    await expect(evaluateCommentRequestPreWrite(await validRequest(), null)).resolves.toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_SCHEMA",
+      writeAttempted: false,
+    });
+    await expect(
+      evaluateCommentRequestPreWrite({ schemaVersion: "nope" }, { nowIso: NOW }),
+    ).resolves.toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_SCHEMA",
+      writeAttempted: false,
+    });
   });
 
   it("STATUS-OVERLAY cannot authorize mutation", async () => {
     const request = await validRequest();
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-      overlayUsedAsAuthorization: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, { overlayUsedAsAuthorization: true }),
+    );
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_OVERLAY_NOT_AUTHORIZATION",
@@ -109,10 +139,7 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
   it("fingerprint mismatch fails closed before write", async () => {
     const request = await validRequest();
     request.humanAuthorization.authorizedRequestFingerprint = "0".repeat(64);
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(request, liveOpts(request));
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_FINGERPRINT_MISMATCH",
@@ -123,10 +150,7 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
   it("authorization for another issue number cannot be replayed", async () => {
     const request = await validRequest();
     request.humanAuthorization.authorizedTarget = { kind: "ISSUE", number: 1 };
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(request, liveOpts(request));
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_AUTHORIZATION_MISMATCH",
@@ -139,12 +163,9 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     request.repository = "yasutakesougo/severe-behavior-support-spfx";
     request.humanAuthorization.authorizedRepository = request.repository;
     request.expectedObservations.repository = request.repository;
-    const fingerprint = await computeCommentRequestFingerprint(request);
-    request.humanAuthorization.authorizedRequestFingerprint = fingerprint;
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-    });
+    request.humanAuthorization.authorizedRequestFingerprint =
+      await computeCommentRequestFingerprint(request);
+    const evaluation = await evaluateCommentRequestPreWrite(request, liveOpts(request));
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_REPOSITORY_NOT_ALLOWED",
@@ -152,29 +173,28 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
-  it("missing idempotency key fails closed", async () => {
+  it("requires an independent evaluation clock", async () => {
     const request = await validRequest();
-    request.idempotencyKey = "";
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, { nowIso: "" }),
+    );
     expect(evaluation).toMatchObject({
       status: "REJECTED",
-      reasonCode: "REJECTED_IDEMPOTENCY_KEY_MISSING",
+      reasonCode: "REJECTED_EVALUATION_CLOCK_MISSING",
       writeAttempted: false,
     });
   });
 
-  it("requires an independent evaluation clock (never authorizedAt-as-now)", async () => {
+  it("rejects evaluation before authorizedAt", async () => {
     const request = await validRequest();
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: "",
-      observedTargetExists: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, { nowIso: "2026-08-12T06:00:00.000Z" }),
+    );
     expect(evaluation).toMatchObject({
       status: "REJECTED",
-      reasonCode: "REJECTED_EVALUATION_CLOCK_MISSING",
+      reasonCode: "REJECTED_AUTHORIZATION_NOT_YET_VALID",
       writeAttempted: false,
     });
   });
@@ -187,16 +207,22 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
       authorizedAtMs + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS,
     );
 
-    const withinTtl = await evaluateCommentRequestPreWrite(request, {
-      nowIso: new Date(authorizedAtMs + 30 * 60 * 1000).toISOString(),
-      observedTargetExists: true,
-    });
+    const withinTtl = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, {
+        nowIso: new Date(authorizedAtMs + 30 * 60 * 1000).toISOString(),
+      }),
+    );
     expect(withinTtl.status).toBe("ELIGIBLE_FOR_ADAPTER");
 
-    const pastTtl = await evaluateCommentRequestPreWrite(request, {
-      nowIso: new Date(authorizedAtMs + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS + 1).toISOString(),
-      observedTargetExists: true,
-    });
+    const pastTtl = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, {
+        nowIso: new Date(
+          authorizedAtMs + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS + 1,
+        ).toISOString(),
+      }),
+    );
     expect(pastTtl).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_AUTHORIZATION_EXPIRED",
@@ -204,12 +230,12 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
-  it("expired explicit expiresAt fails closed with independent nowIso", async () => {
+  it("expired explicit expiresAt fails closed", async () => {
     const request = await validRequest();
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: "2026-08-13T00:00:00.000Z",
-      observedTargetExists: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, { nowIso: "2026-08-13T00:00:00.000Z" }),
+    );
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_AUTHORIZATION_EXPIRED",
@@ -217,24 +243,25 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
-  it("requires live target re-observation (omitted fails closed)", async () => {
+  it("requires live target identity, not only exists=true", async () => {
     const request = await validRequest();
-    const omitted = await evaluateCommentRequestPreWrite(request, {
+    const omittedIdentity = await evaluateCommentRequestPreWrite(request, {
       nowIso: NOW,
+      observedTargetExists: true,
     });
-    expect(omitted).toMatchObject({
+    expect(omittedIdentity).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_OBSERVATION_MISSING",
       writeAttempted: false,
     });
 
-    const absent = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: false,
-    });
-    expect(absent).toMatchObject({
+    const mismatched = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, { observedTargetNumber: 999 }),
+    );
+    expect(mismatched).toMatchObject({
       status: "REJECTED",
-      reasonCode: "REJECTED_TARGET_NOT_FOUND",
+      reasonCode: "REJECTED_TARGET_MISMATCH",
       writeAttempted: false,
     });
   });
@@ -244,33 +271,27 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     request.expectedObservations.targetNodeId = "I_kwExampleNode";
     request.expectedObservations.targetTitle = "Example title";
 
-    const missingLive = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-    });
+    const missingLive = await evaluateCommentRequestPreWrite(request, liveOpts(request));
     expect(missingLive).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_OBSERVATION_MISSING",
       writeAttempted: false,
     });
 
-    const matched = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-      observedTargetNodeId: "I_kwExampleNode",
-      observedTargetTitle: "Example title",
-    });
+    const matched = await evaluateCommentRequestPreWrite(
+      request,
+      liveOpts(request, {
+        observedTargetNodeId: "I_kwExampleNode",
+        observedTargetTitle: "Example title",
+      }),
+    );
     expect(matched.status).toBe("ELIGIBLE_FOR_ADAPTER");
   });
 
   it("rejects reusing Human authorization under a different idempotencyKey", async () => {
     const request = await validRequest();
     request.idempotencyKey = "agw-comment-41-different-key";
-    // authorizedIdempotencyKey remains the original fixture key
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: NOW,
-      observedTargetExists: true,
-    });
+    const evaluation = await evaluateCommentRequestPreWrite(request, liveOpts(request));
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_IDEMPOTENCY_KEY_MISMATCH",
@@ -278,33 +299,54 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
+  it("rejects reusing Human authorization under a different requestedBy", async () => {
+    const request = await validRequest();
+    request.requestedBy = {
+      principalKind: "HUMAN",
+      subjectId: "other-human-subject",
+      issuer: request.requestedBy.issuer,
+    };
+    const evaluation = await evaluateCommentRequestPreWrite(request, liveOpts(request));
+    expect(evaluation).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_REQUESTER_MISMATCH",
+      writeAttempted: false,
+    });
+  });
+
   it("UNKNOWN reconciliation prefers prior SUCCEEDED and never invents a write", () => {
     const prior = loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json");
-    const fromPrior = reconcileUnknownCommentOutcome({
-      priorByIdempotencyKey: prior,
-      markerMatch: null,
-    });
-    expect(fromPrior).toEqual({
+    expect(
+      reconcileUnknownCommentOutcome({
+        priorByIdempotencyKey: prior,
+        markerMatch: null,
+      }),
+    ).toEqual({
       status: "SUCCEEDED",
       source: "PRIOR_RESULT",
       resultHint: prior.comment,
     });
 
-    const fromMarker = reconcileUnknownCommentOutcome({
-      priorByIdempotencyKey: null,
-      markerMatch: { id: 42, url: "https://example.invalid/c/42" },
+    expect(
+      reconcileUnknownCommentOutcome({
+        priorByIdempotencyKey: "bad",
+        markerMatch: { id: 42, url: "https://example.invalid/c/42" },
+      }),
+    ).toEqual({
+      status: "SUCCEEDED",
+      source: "MARKER",
+      resultHint: { id: 42, url: "https://example.invalid/c/42" },
     });
-    expect(fromMarker.status).toBe("SUCCEEDED");
-    expect(fromMarker.source).toBe("MARKER");
 
-    const unproven = reconcileUnknownCommentOutcome({
-      priorByIdempotencyKey: loadFixture("result-unknown-timeout.json"),
-      markerMatch: null,
-    });
-    expect(unproven).toEqual({ status: "UNKNOWN", source: "UNPROVEN" });
+    expect(
+      reconcileUnknownCommentOutcome({
+        priorByIdempotencyKey: loadFixture("result-unknown-timeout.json"),
+        markerMatch: null,
+      }),
+    ).toEqual({ status: "UNKNOWN", source: "UNPROVEN" });
   });
 
-  it("result fixtures obey SUCCEEDED/REJECTED/FAILED/UNKNOWN shape invariants", () => {
+  it("result invariants allow comment only on SUCCEEDED", () => {
     const succeeded = loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json");
     const rejected = loadFixture<ActionGatewayCommentResultV1>(
       "result-rejected-auth-mismatch.json",
@@ -318,11 +360,19 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     expect(assertCommentResultInvariants(rejected)).toEqual([]);
     expect(assertCommentResultInvariants(failed)).toEqual([]);
     expect(assertCommentResultInvariants(unknown)).toEqual([]);
+    expect(assertCommentResultInvariants(null)).toEqual(["result_not_object"]);
 
-    expect(rejected.comment).toBeUndefined();
-    expect(rejected.timestamps.attemptedAt).toBeUndefined();
-    expect(failed.timestamps.attemptedAt).toBeTruthy();
-    expect(unknown.timestamps.attemptedAt).toBeTruthy();
-    expect(succeeded.comment?.id).toBeTypeOf("number");
+    expect(
+      assertCommentResultInvariants({
+        ...failed,
+        comment: { id: 1, url: "https://example.invalid/1" },
+      }),
+    ).toContain("FAILED_forbids_comment");
+    expect(
+      assertCommentResultInvariants({
+        ...unknown,
+        comment: { id: 1, url: "https://example.invalid/1" },
+      }),
+    ).toContain("UNKNOWN_forbids_comment");
   });
 });

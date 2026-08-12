@@ -56,6 +56,7 @@
         "authorizedTarget",
         "authorizedRequestFingerprint",
         "authorizedIdempotencyKey",
+        "authorizedRequestedBy",
         "authorizedAt",
         "evidenceRefs"
       ],
@@ -80,6 +81,16 @@
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[\\x20-\\x7E]+$"
+        },
+        "authorizedRequestedBy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["principalKind", "subjectId"],
+          "properties": {
+            "principalKind": { "const": "HUMAN" },
+            "subjectId": { "type": "string", "minLength": 1 },
+            "issuer": { "type": "string", "minLength": 1 }
+          }
         },
         "authorizedAt": { "type": "string", "minLength": 1 },
         "expiresAt": { "type": "string", "minLength": 1 },
