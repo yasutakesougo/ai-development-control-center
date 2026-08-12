@@ -63,10 +63,11 @@ Architecture-relevant paths follow the Snapshot `staleIndicators`:
 
 HANDOFF-V1 does not regenerate the Architecture Snapshot.
 
-AUTO-REFRESH-V1 (future) may regenerate Snapshot artifacts and open a Draft PR
-only. It is **designed** in `docs/architecture/auto-refresh-v1.md` and
-**not implemented**. Snapshot staleness is maintenance evidence only and must
-never be upgraded into HANDOFF / Approval Ledger `ACTION_REQUIRED`.
+AUTO-REFRESH-V1 is **designed** with a **manual** pilot
+(`npm run auto-refresh:pilot`) that may open a Draft refresh PR only.
+Persistent automation is **not enabled**. Snapshot staleness is maintenance
+evidence only and must never be upgraded into HANDOFF / Approval Ledger
+`ACTION_REQUIRED`. See `docs/architecture/auto-refresh-v1.md`.
 
 ## Next action
 

@@ -1,14 +1,17 @@
 # AUTO-REFRESH-V1
 
-**Status: DESIGNED · NOT IMPLEMENTED · NO EXECUTION PATH**
+**Status: DESIGNED · PILOT AVAILABLE (manual) · PERSISTENT AUTOMATION NOT ENABLED · NO SCHEDULER**
 
-Design-only contract for a future Architecture Snapshot refresh workflow.
-This document and the companion pure domain helpers in
-`src/domain/autoRefreshContract.ts` define eligibility, anti-loop, identity,
-verification, and mutation boundaries.
+Design-only contract for a future Architecture Snapshot refresh workflow,
+plus a **manual** pilot runner:
 
-AUTO-REFRESH-V1 does **not** run today. There is no scheduler, GitHub Action
-mutation runner, Action Gateway path, or Agent execution path for refresh.
+```bash
+npm run auto-refresh:pilot
+```
+
+The pilot may regenerate the Snapshot and open a **Draft** PR when eligible.
+It does **not** enable cron, push triggers, Ready, Merge, Action Gateway, or
+Agent execution.
 
 ---
 
@@ -329,8 +332,10 @@ confirmed CI/Review PASS.
 | Design document | this file |
 | Pure eligibility / identity helpers | `src/domain/autoRefreshContract.ts` |
 | Contract tests | `test/autoRefreshContract.test.ts` |
-| Scheduler / Actions runner / GitHub mutation | **NOT IMPLEMENTED** |
+| Manual pilot runner | `scripts/run-auto-refresh-pilot.ts` (`npm run auto-refresh:pilot`) |
+| Pilot helpers / Draft-only publisher caps | `src/domain/autoRefreshPilot.ts`, `src/domain/autoRefreshPublisher.ts` |
+| Scheduler / push-triggered Actions runner | **NOT ENABLED** |
 | Action Gateway / Agent execution | **NOT IMPLEMENTED** |
 
-Until an accepted implementation slice lands, architecture Snapshot unknown
-`unknown-auto-refresh` remains correctly **unknown**.
+Until persistent automation is accepted, architecture Snapshot unknown
+`unknown-auto-refresh` remains correctly **unknown** (no watcher/schedule).

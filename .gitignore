@@ -9,3 +9,4 @@ dist/
 .DS_Store
 docs/handoff/handoff.json
 docs/handoff/handoff.md
+docs/architecture/auto-refresh-pilot-result.json

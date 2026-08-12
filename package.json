@@ -6,6 +6,7 @@
   "scripts": {
     "architecture:snapshot": "node scripts/generate-architecture-snapshot.mjs",
     "handoff": "vite-node scripts/run-handoff.ts",
+    "auto-refresh:pilot": "vite-node scripts/run-auto-refresh-pilot.ts",
     "dev": "vite",
     "build": "vite build",
     "preview": "npm run build && vite preview",
