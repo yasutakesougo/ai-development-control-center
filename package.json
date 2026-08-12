@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "architecture:snapshot": "node scripts/generate-architecture-snapshot.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "npm run build && vite preview",
