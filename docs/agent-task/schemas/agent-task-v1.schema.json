@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ai-development-control-center.local/schemas/agent-task-v1.json",
   "title": "AgentTaskV1",
+  "description": "Machine-readable Agent task contract. Runtime parser must mirror this schema (additionalProperties:false) and apply documented semantic uniqueness rules for paths and verification command ids.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -56,24 +57,26 @@
     "objective": { "type": "string", "minLength": 1, "maxLength": 4096 },
     "allowedPaths": {
       "type": "array",
+      "description": "Repository-relative path boundaries. Entries must be unique after trailing-slash normalization (runtime rejects docs/foo vs docs/foo/). Absolute paths, empty segments, and . / .. segments are forbidden.",
       "minItems": 1,
       "maxItems": 256,
       "items": {
         "type": "string",
         "minLength": 1,
         "maxLength": 512,
-        "pattern": "^(?!/)(?!.*\\.\\./)[^\\x00]+$"
+        "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00]+$"
       },
       "uniqueItems": true
     },
     "forbiddenPaths": {
       "type": "array",
+      "description": "Explicit deny boundaries. Same path grammar and trailing-slash uniqueness rules as allowedPaths.",
       "maxItems": 256,
       "items": {
         "type": "string",
         "minLength": 1,
         "maxLength": 512,
-        "pattern": "^(?!/)(?!.*\\.\\./)[^\\x00]+$"
+        "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00]+$"
       },
       "uniqueItems": true
     },
@@ -85,6 +88,7 @@
     },
     "verificationCommands": {
       "type": "array",
+      "description": "Explicit verification command data only — not execution authority. Each command id MUST be unique within the array; runtime rejects duplicate ids as REJECTED_SCHEMA.",
       "maxItems": 32,
       "items": {
         "type": "object",
@@ -93,6 +97,7 @@
         "properties": {
           "id": {
             "type": "string",
+            "description": "Unique within verificationCommands. Duplicate ids fail closed.",
             "minLength": 1,
             "maxLength": 64,
             "pattern": "^[a-zA-Z0-9._-]+$"
@@ -102,7 +107,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 512,
-            "pattern": "^(?!/)(?!.*\\.\\./)[^\\x00]+$"
+            "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00]+$"
           },
           "description": { "type": "string", "minLength": 1, "maxLength": 512 }
         }
@@ -110,6 +115,7 @@
     },
     "allowedCapabilities": {
       "type": "array",
+      "description": "Default-deny capability allowlist. Empty array authorizes no capabilities.",
       "maxItems": 32,
       "items": {
         "type": "string",

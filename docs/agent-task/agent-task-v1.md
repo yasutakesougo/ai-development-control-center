@@ -144,7 +144,13 @@ Runtime validation is deterministic and fail-closed:
 - Malformed raw values return structured results; parsers never throw.
 - Unknown root properties are rejected (`additionalProperties: false`).
 - Path boundaries must not silently authorize paths outside `allowedPaths`.
+- Path lists reject exact duplicates and duplicates after trailing-slash
+  normalization (`docs/foo` ≡ `docs/foo/`).
+- Absolute paths, empty segments (`//`), and `.` / `..` segments fail closed.
 - Allowed/forbidden exact duplicates and deterministic prefix overlaps are rejected.
+- `verificationCommands[].id` must be unique within one task; duplicate ids are
+  `REJECTED_SCHEMA` (JSON Schema cannot express nested-property uniqueness, so
+  runtime owns this rule and documents it on the schema).
 - Semantic conflicts that cannot be resolved mechanically yield `HOLD` or `UNKNOWN`.
 - Validation itself never executes `verificationCommands`.
 
@@ -156,6 +162,17 @@ Validation result statuses:
 | `INVALID` | Deterministic rejection |
 | `HOLD` | Ambiguous boundary conflict; Human resolution required |
 | `UNKNOWN` | Insufficient information to decide safely |
+
+### Schema / TypeScript / runtime parity
+
+| Concern | Canonical rule |
+|---|---|
+| Root / nested keys | `additionalProperties: false` in schema; `hasOnlyKeys` in runtime |
+| Path grammar | Shared pattern (no absolute / `//` / `.` / `..` segments) |
+| Path uniqueness | Exact + trailing-slash-normalized uniqueness |
+| Verification command ids | Unique within array (runtime-enforced; schema-documented) |
+| Validation findings bounds | Schema maxLengths mirrored by runtime parsers |
+| Capability ids | Default-deny; empty array authorizes nothing |
 
 ---
 

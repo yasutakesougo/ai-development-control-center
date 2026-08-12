@@ -40,8 +40,28 @@ export const AGENT_TASK_PATH_MAX_LEN = 512 as const;
 export const AGENT_TASK_ACCEPTANCE_CRITERIA_MAX = 64 as const;
 export const AGENT_TASK_ACCEPTANCE_CRITERION_MAX = 2048 as const;
 export const AGENT_TASK_VERIFICATION_COMMANDS_MAX = 32 as const;
+export const AGENT_TASK_VERIFICATION_COMMAND_ID_MAX = 64 as const;
 export const AGENT_TASK_CAPABILITIES_MAX = 32 as const;
 export const AGENT_TASK_TASK_ID_MAX = 128 as const;
+export const AGENT_TASK_FINDINGS_MAX = 64 as const;
+export const AGENT_TASK_FINDING_PATH_MAX = 512 as const;
+export const AGENT_TASK_FINDING_CODE_MAX = 128 as const;
+export const AGENT_TASK_FINDING_MESSAGE_MAX = 2048 as const;
+export const AGENT_TASK_REASON_CODE_MAX = 128 as const;
+export const AGENT_TASK_REASON_MESSAGE_MAX = 2048 as const;
+
+/**
+ * verificationCommands[].id must be unique within one AgentTaskV1 document.
+ * JSON Schema cannot express nested-property uniqueness; runtime enforces this
+ * as REJECTED_SCHEMA to keep structural fail-closed behavior.
+ */
+export const AGENT_TASK_VERIFICATION_COMMAND_IDS_MUST_BE_UNIQUE = true as const;
+
+/**
+ * Path list uniqueness is evaluated after trailing-slash normalization so
+ * `docs/foo` and `docs/foo/` cannot both appear as distinct boundaries.
+ */
+export const AGENT_TASK_PATH_UNIQUENESS_NORMALIZES_TRAILING_SLASH = true as const;
 
 /** Exact root keys accepted by AgentTaskV1 (additionalProperties: false). */
 export const AGENT_TASK_ROOT_KEYS = [
@@ -184,7 +204,9 @@ export interface AgentTaskValidationResultV1 {
 const REPOSITORY_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const BASE_REVISION_PATTERN = /^[a-f0-9]{40}$/;
 const TASK_ID_PATTERN = /^[\x20-\x7E]+$/;
-const REPO_PATH_PATTERN = /^(?!\/)(?!.*\.\.\/)[^\x00]+$/;
+/** Mirrors schema path pattern: no absolute, no //, no . / .. segments. */
+const REPO_PATH_PATTERN =
+  /^(?!\/)(?!.*\/\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*(?:^|\/)\.(?:\/|$))[^\x00]+$/;
 const CAPABILITY_ID_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z0-9]+)+\.v[0-9]+$/;
 const VERIFICATION_COMMAND_ID_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
@@ -225,13 +247,30 @@ function isTaskId(value: unknown): value is string {
   );
 }
 
+/**
+ * Strip trailing slashes so `docs/foo/` and `docs/foo` compare consistently.
+ * Does not collapse internal segments or authorize parent traversal.
+ */
+export function normalizeRepoPath(path: string): string {
+  return path.replace(/\/+$/, "");
+}
+
 function isRepoRelativePath(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length >= 1 &&
-    value.length <= AGENT_TASK_PATH_MAX_LEN &&
-    REPO_PATH_PATTERN.test(value)
-  );
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > AGENT_TASK_PATH_MAX_LEN ||
+    !REPO_PATH_PATTERN.test(value)
+  ) {
+    return false;
+  }
+  const normalized = normalizeRepoPath(value);
+  if (normalized.length < 1) return false;
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return false;
+  }
+  return true;
 }
 
 function isCapabilityId(value: unknown): value is string {
@@ -261,14 +300,9 @@ function hasDuplicates(values: string[]): string[] {
   return duplicates;
 }
 
-/** Strip trailing slashes so `docs/foo/` and `docs/foo` compare consistently. */
-function normalizeRepoPath(path: string): string {
-  return path.replace(/\/+$/, "");
-}
-
 /**
- * Deterministic prefix overlap: `a` is a boundary prefix of `b` when
- * `b === a` or `b.startsWith(a + "/")`. Used for allowed/forbidden conflicts.
+ * Deterministic prefix overlap after trailing-slash normalization.
+ * `a` overlaps `b` when equal or either is a directory prefix of the other.
  */
 function pathsOverlap(a: string, b: string): boolean {
   const left = normalizeRepoPath(a);
@@ -317,7 +351,7 @@ function isVerificationCommand(
   if (
     typeof value.id !== "string" ||
     value.id.length < 1 ||
-    value.id.length > 64 ||
+    value.id.length > AGENT_TASK_VERIFICATION_COMMAND_ID_MAX ||
     !VERIFICATION_COMMAND_ID_PATTERN.test(value.id)
   ) {
     return false;
@@ -447,12 +481,21 @@ function parsePathArray(
     };
   }
   const paths = value as string[];
-  const duplicates = hasDuplicates(paths);
-  if (duplicates.length > 0) {
+  const exactDuplicates = hasDuplicates(paths);
+  if (exactDuplicates.length > 0) {
     return {
       ok: false,
-      reasonMessage: `${field} contains duplicate entries: ${duplicates.join(", ")}.`,
+      reasonMessage: `${field} contains duplicate entries: ${exactDuplicates.join(", ")}.`,
     };
+  }
+  if (AGENT_TASK_PATH_UNIQUENESS_NORMALIZES_TRAILING_SLASH) {
+    const normalizedDuplicates = hasDuplicates(paths.map(normalizeRepoPath));
+    if (normalizedDuplicates.length > 0) {
+      return {
+        ok: false,
+        reasonMessage: `${field} contains duplicate entries after trailing-slash normalization: ${normalizedDuplicates.join(", ")}.`,
+      };
+    }
   }
   return { ok: true, paths };
 }
@@ -601,13 +644,15 @@ export function parseAgentTaskV1(
     };
   }
   const verificationIds = value.verificationCommands.map((cmd) => cmd.id);
-  const duplicateVerificationIds = hasDuplicates(verificationIds);
-  if (duplicateVerificationIds.length > 0) {
-    return {
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: `verificationCommands contains duplicate ids: ${duplicateVerificationIds.join(", ")}.`,
-    };
+  if (AGENT_TASK_VERIFICATION_COMMAND_IDS_MUST_BE_UNIQUE) {
+    const duplicateVerificationIds = hasDuplicates(verificationIds);
+    if (duplicateVerificationIds.length > 0) {
+      return {
+        ok: false,
+        reasonCode: "REJECTED_SCHEMA",
+        reasonMessage: `verificationCommands contains duplicate ids: ${duplicateVerificationIds.join(", ")}. Each verificationCommands[].id must be unique.`,
+      };
+    }
   }
 
   if (
@@ -904,7 +949,7 @@ export function parseAgentTaskValidationResult(
   if (
     typeof value.reasonCode !== "string" ||
     value.reasonCode.length < 1 ||
-    value.reasonCode.length > 128
+    value.reasonCode.length > AGENT_TASK_REASON_CODE_MAX
   ) {
     return {
       ok: false,
@@ -915,7 +960,7 @@ export function parseAgentTaskValidationResult(
   if (
     typeof value.reasonMessage !== "string" ||
     value.reasonMessage.length < 1 ||
-    value.reasonMessage.length > 2048
+    value.reasonMessage.length > AGENT_TASK_REASON_MESSAGE_MAX
   ) {
     return {
       ok: false,
@@ -926,17 +971,20 @@ export function parseAgentTaskValidationResult(
   if (value.findings !== undefined) {
     if (
       !Array.isArray(value.findings) ||
-      value.findings.length > 64 ||
+      value.findings.length > AGENT_TASK_FINDINGS_MAX ||
       !value.findings.every(
         (finding) =>
           isPlainObject(finding) &&
           hasOnlyKeys(finding, ["path", "code", "message", "severity"]) &&
           typeof finding.path === "string" &&
           finding.path.length >= 1 &&
+          finding.path.length <= AGENT_TASK_FINDING_PATH_MAX &&
           typeof finding.code === "string" &&
           finding.code.length >= 1 &&
+          finding.code.length <= AGENT_TASK_FINDING_CODE_MAX &&
           typeof finding.message === "string" &&
           finding.message.length >= 1 &&
+          finding.message.length <= AGENT_TASK_FINDING_MESSAGE_MAX &&
           (finding.severity === "ERROR" || finding.severity === "WARNING"),
       )
     ) {

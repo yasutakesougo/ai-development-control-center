@@ -4,16 +4,24 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   AGENT_EXECUTION_IMPLEMENTED,
+  AGENT_TASK_FINDING_CODE_MAX,
+  AGENT_TASK_FINDING_MESSAGE_MAX,
+  AGENT_TASK_FINDING_PATH_MAX,
   AGENT_TASK_GITHUB_PUBLICATION_IMPLEMENTED,
+  AGENT_TASK_PATH_UNIQUENESS_NORMALIZES_TRAILING_SLASH,
   AGENT_TASK_RISK_CLASSES,
+  AGENT_TASK_ROOT_KEYS,
   AGENT_TASK_SCHEMA,
   AGENT_TASK_STOP_AT_VALUES,
+  AGENT_TASK_VALIDATION_RESULT_ROOT_KEYS,
   AGENT_TASK_VALIDATION_RESULT_SCHEMA,
+  AGENT_TASK_VERIFICATION_COMMAND_IDS_MUST_BE_UNIQUE,
   DRAFT_PR_AUTOMATION_IMPLEMENTED,
   MERGE_AUTOMATION_IMPLEMENTED,
   READY_AUTOMATION_IMPLEMENTED,
   assertAgentExecutionNotImplemented,
   evaluatePathBoundary,
+  normalizeRepoPath,
   parseAgentTaskJsonBody,
   parseAgentTaskValidationResult,
   parseAgentTaskV1,
@@ -26,11 +34,22 @@ const fixturesDir = join(
   dirname(fileURLToPath(import.meta.url)),
   "../docs/agent-task/fixtures",
 );
+const schemasDir = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../docs/agent-task/schemas",
+);
 
 const VALIDATED_AT = "2026-08-12T09:00:00.000Z";
 
 function loadFixture<T>(name: string): T {
   return JSON.parse(readFileSync(join(fixturesDir, name), "utf8")) as T;
+}
+
+function loadSchema(name: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(schemasDir, name), "utf8")) as Record<
+    string,
+    unknown
+  >;
 }
 
 function validTask(): AgentTaskV1 {
@@ -172,6 +191,19 @@ describe("AGENT-TASK-V1 contract", () => {
     expect(parseAgentTaskV1(task).ok).toBe(false);
   });
 
+  it("rejects empty path segments and dot segments", () => {
+    expect(parseAgentTaskV1({ ...validTask(), allowedPaths: ["src//domain"] }).ok).toBe(
+      false,
+    );
+    expect(parseAgentTaskV1({ ...validTask(), allowedPaths: ["."] }).ok).toBe(false);
+    expect(parseAgentTaskV1({ ...validTask(), allowedPaths: ["src/./x"] }).ok).toBe(
+      false,
+    );
+    expect(parseAgentTaskV1({ ...validTask(), allowedPaths: ["foo/.."] }).ok).toBe(
+      false,
+    );
+  });
+
   it("rejects duplicate forbiddenPaths", () => {
     const task = {
       ...validTask(),
@@ -194,6 +226,7 @@ describe("AGENT-TASK-V1 contract", () => {
   });
 
   it("rejects duplicate verification command ids", () => {
+    expect(AGENT_TASK_VERIFICATION_COMMAND_IDS_MUST_BE_UNIQUE).toBe(true);
     const task = {
       ...validTask(),
       verificationCommands: [
@@ -201,7 +234,23 @@ describe("AGENT-TASK-V1 contract", () => {
         { id: "verify.all", command: "npm test" },
       ],
     };
-    expect(parseAgentTaskV1(task).ok).toBe(false);
+    const parsed = parseAgentTaskV1(task);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonCode).toBe("REJECTED_SCHEMA");
+    expect(parsed.reasonMessage).toContain("duplicate ids");
+    expect(parsed.reasonMessage).toContain("must be unique");
+  });
+
+  it("accepts distinct verification command ids", () => {
+    const task = {
+      ...validTask(),
+      verificationCommands: [
+        { id: "verify.typecheck", command: "npm run typecheck" },
+        { id: "verify.test", command: "npm test" },
+      ],
+    };
+    expect(parseAgentTaskV1(task).ok).toBe(true);
   });
 
   it("rejects malformed capability identifiers", () => {
@@ -402,5 +451,205 @@ describe("AGENT-TASK-V1 contract", () => {
     expect(reparsed.ok).toBe(true);
     if (!reparsed.ok) return;
     expect(reparsed.result).toEqual(validation);
+  });
+});
+
+describe("AGENT-TASK-V1 path boundary regressions", () => {
+  it("enables trailing-slash uniqueness normalization", () => {
+    expect(AGENT_TASK_PATH_UNIQUENESS_NORMALIZES_TRAILING_SLASH).toBe(true);
+  });
+
+  it("normalizeRepoPath strips trailing slashes only", () => {
+    expect(normalizeRepoPath("docs/agent-task/")).toBe("docs/agent-task");
+    expect(normalizeRepoPath("docs/agent-task///")).toBe("docs/agent-task");
+    expect(normalizeRepoPath("src/domain/agentTaskContract.ts")).toBe(
+      "src/domain/agentTaskContract.ts",
+    );
+  });
+
+  it("rejects allowedPaths that differ only by trailing slash", () => {
+    const parsed = parseAgentTaskV1({
+      ...validTask(),
+      allowedPaths: ["docs/agent-task", "docs/agent-task/"],
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonMessage).toContain("trailing-slash normalization");
+  });
+
+  it("rejects forbiddenPaths that differ only by trailing slash", () => {
+    const parsed = parseAgentTaskV1({
+      ...validTask(),
+      forbiddenPaths: ["migrations", "migrations/"],
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonMessage).toContain("trailing-slash normalization");
+  });
+
+  it("treats trailing-slash variance as exact allowed/forbidden conflict", () => {
+    const task = validTask();
+    const parsed = parseAgentTaskV1({
+      ...task,
+      allowedPaths: ["docs/agent-task/"],
+      forbiddenPaths: ["docs/agent-task"],
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const result = validateAgentTaskV1(parsed.task, { validatedAt: VALIDATED_AT });
+    expect(result.status).toBe("INVALID");
+    expect(result.reasonCode).toBe("REJECTED_PATH_CONFLICT");
+  });
+
+  it("matches directory prefixes with or without trailing slash", () => {
+    const task = {
+      ...validTask(),
+      allowedPaths: ["docs/agent-task/"],
+      forbiddenPaths: [".github/workflows"],
+    };
+    const parsed = parseAgentTaskV1(task);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(evaluatePathBoundary(parsed.task, "docs/agent-task/agent-task-v1.md")).toBe(
+      "ALLOWED",
+    );
+    expect(evaluatePathBoundary(parsed.task, "docs/agent-task")).toBe("ALLOWED");
+    expect(evaluatePathBoundary(parsed.task, ".github/workflows/ci.yml")).toBe(
+      "FORBIDDEN",
+    );
+  });
+
+  it("does not treat sibling path prefixes as matches", () => {
+    const task = {
+      ...validTask(),
+      allowedPaths: ["src/foo"],
+      forbiddenPaths: ["src/bar"],
+    };
+    const parsed = parseAgentTaskV1(task);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(evaluatePathBoundary(parsed.task, "src/foobar/x.ts")).toBe("UNKNOWN");
+    expect(evaluatePathBoundary(parsed.task, "src/foo/x.ts")).toBe("ALLOWED");
+    expect(evaluatePathBoundary(parsed.task, "src/bar/x.ts")).toBe("FORBIDDEN");
+  });
+
+  it("prefers forbidden over allowed when both would match", () => {
+    const task = {
+      ...validTask(),
+      allowedPaths: ["docs/"],
+      forbiddenPaths: ["docs/secrets/"],
+    };
+    const parsed = parseAgentTaskV1(task);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // Semantic prefix overlap is INVALID by default; path helper still fail-closes.
+    const validation = validateAgentTaskV1(parsed.task, { validatedAt: VALIDATED_AT });
+    expect(validation.status).toBe("INVALID");
+    expect(evaluatePathBoundary(parsed.task, "docs/secrets/token.txt")).toBe(
+      "FORBIDDEN",
+    );
+  });
+});
+
+describe("AGENT-TASK-V1 schema / TypeScript / runtime parity", () => {
+  it("mirrors AgentTaskV1 schema root keys and required fields", () => {
+    const schema = loadSchema("agent-task-v1.schema.json");
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties).toBeTypeOf("object");
+    const properties = schema.properties as Record<string, unknown>;
+    expect(Object.keys(properties).sort()).toEqual([...AGENT_TASK_ROOT_KEYS].sort());
+    expect(schema.required).toEqual([
+      "schemaVersion",
+      "taskId",
+      "repository",
+      "baseRevision",
+      "sourceIssue",
+      "objective",
+      "allowedPaths",
+      "forbiddenPaths",
+      "acceptanceCriteria",
+      "verificationCommands",
+      "allowedCapabilities",
+      "riskClass",
+      "stopAt",
+    ]);
+    expect((properties.schemaVersion as { const: string }).const).toBe(
+      AGENT_TASK_SCHEMA,
+    );
+  });
+
+  it("documents verification command id uniqueness on the schema", () => {
+    const schema = loadSchema("agent-task-v1.schema.json");
+    const properties = schema.properties as Record<string, { description?: string }>;
+    expect(properties.verificationCommands.description).toMatch(/unique/i);
+    expect(AGENT_TASK_VERIFICATION_COMMAND_IDS_MUST_BE_UNIQUE).toBe(true);
+  });
+
+  it("mirrors validation-result schema root keys and bounds", () => {
+    const schema = loadSchema("agent-task-validation-result-v1.schema.json");
+    expect(schema.additionalProperties).toBe(false);
+    const properties = schema.properties as Record<string, unknown>;
+    expect(Object.keys(properties).sort()).toEqual(
+      [...AGENT_TASK_VALIDATION_RESULT_ROOT_KEYS].sort(),
+    );
+    expect((properties.schemaVersion as { const: string }).const).toBe(
+      AGENT_TASK_VALIDATION_RESULT_SCHEMA,
+    );
+    const taskId = properties.taskId as {
+      type: unknown;
+      pattern?: string;
+      maxLength?: number;
+    };
+    expect(taskId.type).toEqual(["string", "null"]);
+    expect(taskId.pattern).toBe("^[\\x20-\\x7E]+$");
+    expect(taskId.maxLength).toBe(128);
+    const findings = properties.findings as {
+      maxItems: number;
+      items: {
+        properties: {
+          path: { maxLength: number };
+          code: { maxLength: number };
+          message: { maxLength: number };
+        };
+      };
+    };
+    expect(findings.maxItems).toBe(64);
+    expect(findings.items.properties.path.maxLength).toBe(AGENT_TASK_FINDING_PATH_MAX);
+    expect(findings.items.properties.code.maxLength).toBe(AGENT_TASK_FINDING_CODE_MAX);
+    expect(findings.items.properties.message.maxLength).toBe(
+      AGENT_TASK_FINDING_MESSAGE_MAX,
+    );
+  });
+
+  it("rejects validation findings that exceed schema maxLengths", () => {
+    const result = {
+      schemaVersion: AGENT_TASK_VALIDATION_RESULT_SCHEMA,
+      taskId: null,
+      status: "INVALID",
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "ok",
+      validatedAt: VALIDATED_AT,
+      findings: [
+        {
+          path: "x".repeat(AGENT_TASK_FINDING_PATH_MAX + 1),
+          code: "REJECTED_SCHEMA",
+          message: "too long path",
+          severity: "ERROR",
+        },
+      ],
+    };
+    expect(parseAgentTaskValidationResult(result).ok).toBe(false);
+  });
+
+  it("rejects validation result taskId that violates printable ASCII pattern", () => {
+    const result = {
+      schemaVersion: AGENT_TASK_VALIDATION_RESULT_SCHEMA,
+      taskId: "bad\nid",
+      status: "VALID",
+      reasonCode: "VALID",
+      reasonMessage: "ok",
+      validatedAt: VALIDATED_AT,
+    };
+    expect(parseAgentTaskValidationResult(result).ok).toBe(false);
   });
 });
