@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "ISSUE-PROPOSAL-V1",
+  "proposalId": "proposal-62-issue-decomposer-contract-v1",
+  "roadmapNodeId": "node-issue-decomposer-contract",
+  "repository": "yasutakesougo/ai-development-control-center",
+  "title": "ISSUE-DECOMPOSER-CONTRACT-V1",
+  "objective": "Define IssueProposalV1 as a machine-readable contract for later decomposition without granting GitHub Issue mutation or Agent execution authority.",
+  "dependsOn": [],
+  "allowedPaths": [
+    "docs/issue-proposal/",
+    "src/domain/issueProposalContract.ts",
+    "test/issueProposalContract.test.ts"
+  ],
+  "forbiddenPaths": [
+    ".github/workflows/",
+    "migrations/"
+  ],
+  "acceptanceCriteria": [
+    "IssueProposalV1 parse/validate/fingerprint available",
+    "Proposal validation does not grant GitHub Issue mutation authority",
+    "npm run verify passes without Planner, ISSUE-VALIDATOR-V1, Publisher, or Agent execution"
+  ],
+  "verificationCommands": [
+    {
+      "id": "typecheck",
+      "command": "npm run typecheck",
+      "description": "TypeScript contract must typecheck"
+    },
+    {
+      "id": "unit",
+      "command": "npm test -- test/issueProposalContract.test.ts",
+      "description": "IssueProposal contract tests"
+    }
+  ],
+  "allowedCapabilities": [
+    "workspace.read.v1"
+  ],
+  "riskClass": "R1",
+  "stopAt": "DRAFT_PR",
+  "estimatedChangedFiles": 8,
+  "provenance": {
+    "roadmapId": "roadmap-61-v1-2026-08-12",
+    "roadmapAuthorityFingerprint": "4030ba816276b42eaa4e6657b2ceadba9d8fcdc1e646b14ec8b65175ff4dbb7b"
+  },
+  "metadata": {
+    "createdAt": "2026-08-12T22:18:00.000Z",
+    "createdBy": "control-center-contract-v0",
+    "observedAt": "2026-08-12T22:18:00.000Z",
+    "sourceIssueUrl": "https://github.com/yasutakesougo/ai-development-control-center/issues/62",
+    "notes": [
+      "Slice: ISSUE-DECOMPOSER-CONTRACT-V1 / IssueProposalV1 only",
+      "Planner / ISSUE-VALIDATOR-V1 / Publisher / GitHub Issue mutation / Agent = NOT IMPLEMENTED"
+    ]
+  }
+}
