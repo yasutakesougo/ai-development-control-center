@@ -207,7 +207,14 @@ const TASK_ID_PATTERN = /^[\x20-\x7E]+$/;
 /** Mirrors schema path pattern: no absolute, no \, no //, no . / .. segments. */
 const REPO_PATH_PATTERN =
   /^(?!\/)(?!.*\\)(?!.*\/\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*(?:^|\/)\.(?:\/|$))[^\x00\\]+$/;
-const CAPABILITY_ID_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z0-9]+)+\.v[0-9]+$/;
+/**
+ * Capability ids are dotted, version-suffixed identifiers.
+ * Segments after the first may include hyphens (e.g. github.draft-pr.publish.v1)
+ * so narrowly named stage capabilities remain expressible without broadening
+ * to generic github.write / repo.write forms.
+ */
+const CAPABILITY_ID_PATTERN =
+  /^[a-z][a-z0-9]*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+\.v[0-9]+$/;
 const VERIFICATION_COMMAND_ID_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
