@@ -1,0 +1,54 @@
+# PERSISTENT-AUTO-REFRESH-V1 — EXAMPLE ONLY (NOT ENABLED)
+#
+# This file lives under docs/architecture/ so GitHub Actions will NOT load it.
+# A future Human-authorized implementation slice may copy it to:
+#   .github/workflows/architecture-auto-refresh.yml
+#
+# Until then: Persistent AUTO-REFRESH = NOT ENABLED
+
+name: architecture-auto-refresh
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/architecture/architecture.json"
+      - "docs/architecture/architecture.html"
+  workflow_dispatch:
+
+concurrency:
+  group: architecture-auto-refresh-${{ github.repository }}-main
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    if: false # DESIGN-ONLY guard: never run even if misplaced under .github/workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm ci
+
+      - name: Evaluate + regenerate + verify + Draft-only publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run auto-refresh:pilot -- --publish
+
+      # Explicit non-goals (must never appear):
+      # - gh pr ready
+      # - gh pr merge
+      # - gh pr close
+      # - Cloudflare / SharePoint / Ledger / Action Gateway / Agent / deploy
