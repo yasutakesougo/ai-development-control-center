@@ -2,17 +2,20 @@
 
 **Issue:** [#39](https://github.com/yasutakesougo/ai-development-control-center/issues/39)  
 **PR:** [#40](https://github.com/yasutakesougo/ai-development-control-center/pull/40) (Draft)  
-**Verdict: HOLD / Human deploy required**  
-**Stop:** pilot safely attempted + smoke evidence recorded + PASS/HOLD (no Ready / no Merge)
+**Verdict: HOLD / production tip not observed**  
+**Stop:** production smoke re-run recorded after Human deploy comment; pilot remains HOLD (no Ready / no Merge / no Fresh Review)
 
 ```text
-Pilot enablement in the real deployed production Worker = BLOCKED
-Local tip path smoke (wrangler --local) = PASS (supplemental only; not production)
+Human deploy report (comment 5262885245) = RECEIVED
+Production smoke re-run (authoritative behavior) = FAIL
+Authorized tip asset / route presence on production = NOT OBSERVED
 Write mutations performed = 0
-Human deploy gate (exact steps) = DOCUMENTED — awaiting Human execution
 ```
 
-Human deploy instructions source:
+Human deploy report source:
+[Issue #39 comment 5262885245](https://github.com/yasutakesougo/ai-development-control-center/issues/39#issuecomment-5262885245)
+
+Human deploy gate source (exact steps):
 [Issue #39 comment 5262856051](https://github.com/yasutakesougo/ai-development-control-center/issues/39#issuecomment-5262856051)
 
 ---
@@ -26,191 +29,146 @@ Human deploy instructions source:
 | Runtime Generator / Observer / UI / Wiring | COMPLETE (merged via PR #38) |
 | Repository / HISTORY writers | NOT IMPLEMENTED |
 | Action Gateway / Approval Ledger / Agent | NOT IMPLEMENTED |
-| `npm run verify` on tip | PASS — 291 tests / 24 files / typecheck / build |
+| `npm run verify` on authorized tip (this agent) | PASS — **291 tests / 24 files** / typecheck / build |
+| Human pre-deploy verify (comment 5262885245) | reported **119 tests / 11 files** / build PASS |
+
+Test-count equivalence is **not** used as PASS evidence. Production behavior is authoritative.
 
 ---
 
-## What was attempted
+## Human deploy report (received)
 
-1. Probe production workers.dev for `GET /api/status-overlay`
-2. Probe staging workers.dev (Access-gated)
-3. Attempt production deploy of authorized tip via established `npm run deploy` / `wrangler deploy`
-4. Supplemental local smoke of the same tip with `wrangler dev --local` (code-path evidence only)
+From comment `5262885245`:
 
-No `STATUS_OVERLAY_REPOSITORY` override was set. No GitHub / HISTORY / Gateway / Ledger / Agent / SharePoint writes were performed.
+| Field | Reported value |
+|---|---|
+| Revision | `6a055e1a63a42c1f8a58208be9223390c76dbfa0` |
+| Worker | `ai-development-control-center` |
+| URL | `https://ai-development-control-center.momosantanuki.workers.dev` |
+| Wrangler | `4.120.1` |
+| Version ID | `8967d27c-67c0-476d-b723-a2652da5d7ff` |
+| Asset upload | SUCCESS |
+| Worker deploy | SUCCESS |
+
+Agent cannot independently confirm Version ID via Cloudflare Workers Scripts API (`CLOUDFLARE_API_TOKEN` verify=active; Scripts/deployments/versions APIs still **403 Authentication error**).
 
 ---
 
-## Deployed environment evidence (authoritative for pilot PASS)
+## Production smoke re-run (authoritative)
 
+Probe time (UTC): **2026-08-12T05:50:58Z** (API) / UI screenshots ~05:51Z  
 Production URL: `https://ai-development-control-center.momosantanuki.workers.dev`
 
-| Probe | Result |
-|---|---|
-| `GET /` | **200** — legacy SPA loads (`/assets/index-C4Vzo5Yb.js`) |
-| `GET /api/status` | **200** — legacy HumanAction path; repo `yasutakesougo/severe-behavior-support-spfx` |
-| `GET /api/status-overlay` | **404** plain `Not Found` — route **not present** on deployed Worker |
+| # | Gate | Result | Evidence |
+|---|---|---|---|
+| 1 | Deployed revision corresponds to authorized tip | **FAIL** | Tip build assets = `/assets/index-BpbrbWum.js` + `/assets/index-B_OiJpPm.css`. Production serves `/assets/index-Bo9GFqfm.js` + `/assets/index-D8mEp3RE.css`. Tip asset URLs on production return SPA shell (464 B), not tip bundles. |
+| 2 | `GET /api/status-overlay` = 200 | **FAIL** | HTTP **404**, `content-type: text/plain`, body `Not Found` (route catch-all). Not the runtime-disabled JSON 404 shape from `handleStatusOverlayGet`. |
+| 3 | `schemaVersion = STATUS-OVERLAY-V1` | **FAIL** | No JSON body |
+| 4 | `repository = yasutakesougo/ai-development-control-center` | **FAIL** | No overlay document. Legacy `GET /api/status` still targets `yasutakesougo/severe-behavior-support-spfx`. |
+| 5 | `recommendedNextAction.authorizesMutation === false` | **FAIL** | Endpoint absent |
+| 6 | No token/secret material in overlay response | **N/A → treated FAIL for pilot PASS** | Overlay response is plain `Not Found` only; no secret leakage observed in that body |
+| 7 | `observedAt` present on overlay | **FAIL** | Endpoint absent (`/api/status` has its own `observedAt`, not overlay) |
+| 8 | UI sections CURRENT / GATE / NEXT / AUTOMATION / HOLDS / UNKNOWNS / PRS | **FAIL** | Production client bundle contains **zero** `status-overlay` / `STATUS-OVERLAY` / `/api/status-overlay` strings. UI shows legacy HumanAction + Ledger 履歴 only. |
+| 9 | UNKNOWN/HOLD/FAILED/OUTCOME_UNKNOWN visibly distinct | **FAIL** | Overlay panel not present |
+| 10 | Existing app still loads | **PASS** | `GET /` = **200**; UI renders Development Status / Ledger 履歴 |
+| 11 | Alternate-repository fail-closed preserved | not safely testable on prod (endpoint absent; no env mutation) | Unit tests in `test/statusOverlayApiAuth.test.ts` remain the coverage |
+| 12 | Write mutations = 0 | **PASS** | Smoke was read-only; no GitHub / HISTORY / Gateway / Ledger / Agent / SharePoint writes |
 
-Observed production client assets **do not** match tip build assets:
+### Response samples
 
 ```text
-production assets = /assets/index-C4Vzo5Yb.js , /assets/index-C6aIaSYs.css
-tip build assets  = /assets/index-BpbrbWum.js , /assets/index-B_OiJpPm.css
+GET /api/status-overlay
+HTTP/2 404
+content-type: text/plain;charset=UTF-8
+Not Found
 ```
 
-Staging `…-staging…/api/status-overlay` redirects to Cloudflare Access login (unauthenticated smoke not available).
+```text
+GET /
+HTTP/2 200
+assets: /assets/index-Bo9GFqfm.js , /assets/index-D8mEp3RE.css
+```
 
-### Deploy attempt
+```text
+Authorized tip local build (npm run build @ docs branch on tip)
+assets: /assets/index-BpbrbWum.js , /assets/index-B_OiJpPm.css
+worker bundle contains STATUS-OVERLAY-V1 route + sanitizers
+```
+
+### Asset drift vs prior HOLD probe
+
+| When | Production assets |
+|---|---|
+| Prior HOLD evidence | `/assets/index-C4Vzo5Yb.js` , `/assets/index-C6aIaSYs.css` |
+| After Human deploy comment | `/assets/index-Bo9GFqfm.js` , `/assets/index-D8mEp3RE.css` |
+| Authorized tip build | `/assets/index-BpbrbWum.js` , `/assets/index-B_OiJpPm.css` |
+
+Assets changed after the Human deploy report, but the served Worker/UI still does **not** match the authorized tip overlay revision.
+
+### UI screenshots (agent artifacts)
+
+- `/opt/cursor/artifacts/status-overlay-pilot/prod-app-viewport.webp` — legacy app loads; no overlay sections
+- `/opt/cursor/artifacts/status-overlay-pilot/prod-app-expanded.webp` — PR evidence / Ledger 履歴
+- `/opt/cursor/artifacts/status-overlay-pilot/production-smoke-rerun.txt` — probe summary
+
+### Note on Human 119-test report
+
+Human pre-deploy verify reported **119 tests / 11 files**. Authorized tip currently runs **291 tests / 24 files**. Repository history shows ~119 `it(` across 11 `test/*.test.ts` files around the MVP-3 staging / architecture-snapshot era (pre-STATUS-OVERLAY merge). This is recorded as a consistency warning only; **PASS/FAIL is decided by production behavior above**, not by test-count matching.
+
+---
+
+## Agent deploy capability (unchanged)
 
 ```text
 CLOUDFLARE_API_TOKEN verify        = success / status=active
 Workers Scripts API                = Authentication error [code: 10000] / 403
-Account resource                   = 403 Unauthorized
-D1 database list                   = 200 (token has partial account access)
-wrangler secret list / deploy list = Authentication error
-wrangler login (interactive)       = STOP per README (Human operation required)
+Deployments / versions APIs        = 403
 ```
 
-**Conclusion:** authorized tip cannot be published to the pilot Worker from this agent environment. Production remains on a pre-STATUS-OVERLAY revision. Overlay was **not** enabled in the real deployed environment.
-
-### Re-check after Human deploy comment (2026-08-12)
-
-| Check | Result |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` verify | still `active` |
-| Workers Scripts API | still **403** Authentication error |
-| Production `GET /api/status-overlay` | still **404** |
-
-Agent cannot complete `npm run deploy` until Workers Scripts Edit is granted or Human deploys interactively.
-
----
-
-## Human deploy gate — exact execution
-
-Authorized revision:
-
-`6a055e1a63a42c1f8a58208be9223390c76dbfa0`
-
-From that exact revision, use the repository's established deploy script:
-
-```bash
-git checkout 6a055e1a63a42c1f8a58208be9223390c76dbfa0
-npm ci
-npm run verify
-npm run deploy
-```
-
-`npm run deploy` is defined in `package.json` as `npm run build && wrangler deploy`.
-
-Before deploy, either:
-
-- grant the existing `CLOUDFLARE_API_TOKEN` permission sufficient for Workers Scripts edit/deploy, or
-- perform the deploy interactively as Human with authorized Cloudflare credentials.
-
-Do **not**:
-
-- set `STATUS_OVERLAY_REPOSITORY` away from `yasutakesougo/ai-development-control-center`
-- add GitHub mutation / repository writer / HISTORY writer / Action Gateway / Ledger / Agent / SharePoint capabilities
-
-### After deploy — production smoke (all required for PASS)
-
-1. deployed revision / asset revision corresponds to the authorized tip  
-2. `GET /api/status-overlay` = 200  
-3. `schemaVersion = STATUS-OVERLAY-V1`  
-4. `repository = yasutakesougo/ai-development-control-center`  
-5. `recommendedNextAction.authorizesMutation = false`  
-6. no token/secret material in response  
-7. `observedAt` present  
-8. UI renders CURRENT / GATE / NEXT / AUTOMATION / HOLDS / UNKNOWNS / PRS  
-9. UNKNOWN/HOLD/FAILED/OUTCOME_UNKNOWN remain visibly distinct when present  
-10. existing app still loads  
-11. alternate-repository fail-closed remains preserved  
-12. write mutations = 0  
-
-If any production gate fails → keep Issue #39 / PR #40 at **HOLD** and stop.  
-If all pass → update this evidence + PR #40, keep **Draft**, stop for **Fresh Review**.
+Agent still cannot publish or inspect Version ID `8967d27c-…` directly.
 
 ---
 
 ## Supplemental local tip smoke (not sufficient for PASS)
 
-Command:
-
-```bash
-npm run verify
-npx wrangler dev -c dist/ai_development_control_center/wrangler.json \
-  --ip 127.0.0.1 --port 8787 --local
-```
-
-### `GET http://127.0.0.1:8787/api/status-overlay`
-
-| Gate | Result |
-|---|---|
-| HTTP | **200** |
-| `schemaVersion` | `STATUS-OVERLAY-V1` |
-| `repository` | `yasutakesougo/ai-development-control-center` |
-| `recommendedNextAction.authorizesMutation` | `false` |
-| Secret material (`ghp_`, `github_pat_`, `Bearer`, `cfut_`) | **absent** |
-| `observedAt` | present (`2026-08-12T05:29:55.906Z` on API probe; UI cycle `…05:31:43.266Z`) |
-| `main.sha` | `6a055e1a63a42c1f8a58208be9223390c76dbfa0` |
-
-Observed projection (local): `recommendedNextAction.code=REVIEW_FAILED_AUTOMATION`, `status=FAILED`, automation last run `31566418653` conclusion `failure`. HISTORY remains `DESIGNED_NOT_IMPLEMENTED`.
-
-### UI panel (`http://127.0.0.1:8787/`)
-
-STATUS-OVERLAY-V1 panel rendered with sections:
-
-`CURRENT` · `GATE` · `NEXT` · `AUTOMATION` · `HOLDS` · `UNKNOWNS` · `PRS`
-
-Distinct tokens visible: `FAILED`, `UNKNOWN`, `failure`, `HumanActionRequired`.  
-Legacy App / HumanAction UI still loaded above the overlay.  
-`authorizesMutation: false` shown in NEXT.
-
-Screenshots (agent artifacts):
-
-- `/opt/cursor/artifacts/status-overlay-pilot/91354.webp`
-- `/opt/cursor/artifacts/status-overlay-pilot/11f58.webp`
-- `/opt/cursor/artifacts/status-overlay-pilot/e55b3.webp`
-
-JSON summary: `/opt/cursor/artifacts/status-overlay-pilot/local-overlay-summary.json`
-
-### Alternate-repository fail-closed (gate 11)
-
-Not re-probed against production (endpoint absent; no env mutation). Covered by existing unit tests in `test/statusOverlayApiAuth.test.ts` (non-canonical `STATUS_OVERLAY_REPOSITORY` → **403** before token-backed GitHub reads).
+Unchanged from prior evidence: local `wrangler dev --local` on tip returned overlay **200** with canonical schema/repository/`authorizesMutation=false`/no secrets/`observedAt`, and UI sections rendered. That remains supplemental only.
 
 ---
 
-## Smoke gate scorecard
+## Smoke gate scorecard (production re-run)
 
-| # | Gate | Production | Local tip (supplemental) |
-|---|---|---|---|
-| 1 | Deployed revision = authorized main | **FAIL** (stale assets; overlay 404) | N/A (local) |
-| 2 | `GET /api/status-overlay` 200 | **FAIL** (404) | PASS |
-| 3 | Schema `STATUS-OVERLAY-V1` | — | PASS |
-| 4 | Repository exact canonical | — | PASS |
-| 5 | `authorizesMutation === false` | — | PASS |
-| 6 | No secret material | — | PASS |
-| 7 | `observedAt` present | — | PASS |
-| 8 | Panel sections render | — | PASS |
-| 9 | UNKNOWN/HOLD/FAILED distinct | — | PASS |
-| 10 | Existing app still loads | PASS (legacy) | PASS |
-| 11 | Alternate repo fail-closed | not safely testable on prod | unit tests PASS |
-| 12 | No write mutations | PASS | PASS |
+| # | Gate | Production re-run |
+|---|---|---|
+| 1 | Deployed revision = authorized main | **FAIL** |
+| 2 | `GET /api/status-overlay` 200 | **FAIL** (404 plain) |
+| 3 | Schema `STATUS-OVERLAY-V1` | **FAIL** |
+| 4 | Repository exact canonical | **FAIL** |
+| 5 | `authorizesMutation === false` | **FAIL** |
+| 6 | No secret material | N/A / no overlay JSON |
+| 7 | `observedAt` present | **FAIL** |
+| 8 | Panel sections render | **FAIL** |
+| 9 | UNKNOWN/HOLD/FAILED distinct | **FAIL** |
+| 10 | Existing app still loads | **PASS** |
+| 11 | Alternate repo fail-closed | not safely testable on prod |
+| 12 | No write mutations | **PASS** |
 
-**Pilot PASS requires production (or equivalently reachable deployed) gates 1–12.** Local-only success does **not** authorize PASS.
+**Pilot PASS is not met.** Fresh Review is **not** opened.
 
 ---
 
 ## Verdict
 
 ```text
-VERDICT = HOLD / Human deploy required
-REASON  = Cloudflare Workers deploy credentials lack Workers Scripts permission;
-          production Worker still serves pre-overlay revision (/api/status-overlay = 404).
-NEXT HUMAN GATE = execute Human deploy gate above on revision
-                   6a055e1a63a42c1f8a58208be9223390c76dbfa0
-                   (grant Workers Scripts Edit OR interactive Human deploy),
-                   then re-run Issue #39 production smoke 1–12.
+VERDICT = HOLD / production tip not observed
+REASON  = After Human deploy comment 5262885245, production still lacks
+          GET /api/status-overlay (plain 404) and tip overlay assets/UI.
+          Observed production assets != authorized tip build assets.
+NEXT HUMAN GATE = confirm Cloudflare dashboard Version ID / deployed source
+                  for Worker ai-development-control-center is exactly
+                  6a055e1a63a42c1f8a58208be9223390c76dbfa0
+                  (or re-run: git checkout 6a055e1… && npm ci && npm run verify
+                  && npm run deploy from that revision), then request
+                  production smoke re-run again.
 ```
 
-Do not Ready. Do not Merge. Do not expand write capabilities. Do not set `STATUS_OVERLAY_REPOSITORY` away from the canonical public repository.
+Do not Ready. Do not Merge. Do not expand write capabilities. Do not set `STATUS_OVERLAY_REPOSITORY` away from the canonical public repository. Keep PR #40 Draft / HOLD.
