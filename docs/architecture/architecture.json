@@ -2,8 +2,8 @@
   "schemaVersion": "1.0",
   "generatedFrom": {
     "repository": "ai-development-control-center",
-    "commit": "e540b108d42c129aefe743a384cd54eefaa44371",
-    "generatedAt": "2026-08-11T13:24:33.370Z",
+    "commit": "c305af63dadea1ac0bc10756eb32ebe2d7761318",
+    "generatedAt": "2026-08-12T02:21:09.506Z",
     "generator": "ARCH-SNAPSHOT-GEN-V1"
   },
   "confidence": {
@@ -145,6 +145,44 @@
         "docs/mvp-3-approval-ledger-staging-pilot-v1.md"
       ],
       "layer": 1
+    },
+    {
+      "id": "handoff-live-observer",
+      "name": "HANDOFF live GitHub reconciliation",
+      "responsibility": "Reads this repository's default-branch tip, open PRs, checks/status, reviews, and Human-Decision markers through GET-only requests; failures become fail-closed live evidence.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "src/domain/observeHandoffLiveState.ts",
+        "docs/handoff/README.md"
+      ],
+      "layer": 2
+    },
+    {
+      "id": "handoff-evaluator",
+      "name": "HANDOFF-V1 evaluator",
+      "responsibility": "Compares architecture.json to current main, classifies snapshot staleness, preserves confirmed/assumed/unknown facts, and resolves nextAction as NO_ACTION, ACTION_REQUIRED, or UNKNOWN without inventing work.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "src/domain/handoffEvaluator.ts",
+        "src/domain/architectureSnapshot.ts",
+        "docs/handoff/README.md"
+      ],
+      "layer": 3
+    },
+    {
+      "id": "handoff-report",
+      "name": "HANDOFF report generation",
+      "responsibility": "Emits machine-readable handoff.json and Human-readable handoff.md from an evaluated HandoffReport; decision-support only, no Ledger write or execution.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "src/domain/formatHandoffReport.ts",
+        "src/domain/handoffReport.ts",
+        "scripts/run-handoff.ts"
+      ],
+      "layer": 4
     }
   ],
   "dependencies": [
@@ -321,6 +359,44 @@
       ],
       "source": "staging-config",
       "target": "ledger-guard"
+    },
+    {
+      "id": "dep-handoff-live-github",
+      "name": "control-center GitHub GET",
+      "responsibility": "HANDOFF live observer reads this repository through GET-only GitHub REST calls.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "src/domain/observeHandoffLiveState.ts"
+      ],
+      "source": "handoff-live-observer",
+      "target": "ext-github"
+    },
+    {
+      "id": "dep-handoff-live-eval",
+      "name": "live state",
+      "responsibility": "HANDOFF evaluator consumes fail-closed live observation when classifying nextAction and live differences.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "src/domain/handoffEvaluator.ts",
+        "scripts/run-handoff.ts"
+      ],
+      "source": "handoff-live-observer",
+      "target": "handoff-evaluator"
+    },
+    {
+      "id": "dep-handoff-eval-report",
+      "name": "HandoffReport",
+      "responsibility": "Evaluated handoff facts are formatted into machine- and Human-readable reports.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "src/domain/formatHandoffReport.ts",
+        "scripts/run-handoff.ts"
+      ],
+      "source": "handoff-evaluator",
+      "target": "handoff-report"
     }
   ],
   "flows": [
@@ -384,6 +460,31 @@
         "dep-api-fingerprint",
         "dep-api-store",
         "dep-store-d1"
+      ]
+    },
+    {
+      "id": "flow-handoff-reconcile",
+      "name": "HANDOFF-V1 context reconciliation",
+      "responsibility": "Architecture Snapshot facts plus current main and read-only GitHub live state produce a fail-closed handoff report without regenerating the Snapshot or authorizing execution.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "scripts/run-handoff.ts",
+        "src/domain/observeHandoffLiveState.ts",
+        "src/domain/handoffEvaluator.ts",
+        "src/domain/formatHandoffReport.ts",
+        "docs/handoff/README.md"
+      ],
+      "steps": [
+        "ext-github",
+        "handoff-live-observer",
+        "handoff-evaluator",
+        "handoff-report"
+      ],
+      "dependencyIds": [
+        "dep-handoff-live-github",
+        "dep-handoff-live-eval",
+        "dep-handoff-eval-report"
       ]
     }
   ],
@@ -498,6 +599,18 @@
         "src/worker/ledger/ledgerStore.ts",
         "migrations/0001_approval_ledger.sql"
       ]
+    },
+    {
+      "id": "decision-handoff-decision-support",
+      "name": "HANDOFF is decision-support only",
+      "responsibility": "HANDOFF-V1 reconstructs current state and nextAction without regenerating the Snapshot, writing the Ledger, mutating GitHub/Cloudflare, or authorizing execution.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "docs/handoff/README.md",
+        "src/domain/handoffEvaluator.ts",
+        "scripts/run-handoff.ts"
+      ]
     }
   ],
   "unknowns": [
@@ -577,6 +690,21 @@
         "wrangler.jsonc",
         "migrations/0001_approval_ledger.sql",
         "package.json"
+      ]
+    },
+    {
+      "id": "stale-handoff",
+      "name": "HANDOFF-V1 sources changed",
+      "responsibility": "Treat changes to scripts/run-handoff.ts and HANDOFF domain modules as architecture-relevant.",
+      "status": "confirmed",
+      "confidence": "high",
+      "evidence": [
+        "scripts/run-handoff.ts",
+        "src/domain/handoffEvaluator.ts",
+        "src/domain/observeHandoffLiveState.ts",
+        "src/domain/formatHandoffReport.ts",
+        "src/domain/handoffReport.ts",
+        "src/domain/architectureSnapshot.ts"
       ]
     },
     {

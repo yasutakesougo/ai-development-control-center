@@ -135,6 +135,8 @@ describe("HANDOFF-V1 evaluator", () => {
 
   it("detects relevant architecture change", () => {
     expect(isArchitectureRelevantPath("src/worker/index.ts")).toBe(true);
+    expect(isArchitectureRelevantPath("scripts/run-handoff.ts")).toBe(true);
+    expect(isArchitectureRelevantPath("src/domain/handoffEvaluator.ts")).toBe(true);
     const result = classifySnapshotStaleness({
       generatedFrom: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       currentMain: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
