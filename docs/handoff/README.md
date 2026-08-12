@@ -77,8 +77,8 @@ Historical events must not change HANDOFF decision semantics or manufacture
 `ACTION_REQUIRED`.
 
 STATUS-OVERLAY-V1 (current-state projection) is **designed**; Runtime Generator,
-read-only GitHub/workflow observer, and read-only UI projection are
-**implemented** — see
+read-only GitHub/workflow observer, read-only UI projection, and read-only
+runtime wiring are **implemented** — see
 [`../status/status-overlay-v1.md`](../status/status-overlay-v1.md).
 Overlay consumes HANDOFF output and must not redefine HANDOFF rules.
 Repository writer remains not implemented.
