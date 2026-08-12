@@ -14,6 +14,7 @@
  */
 
 import {
+  normalizeRepoPath,
   parseAgentTaskV1,
   validateAgentTaskV1,
   type AgentTaskRiskClass,
@@ -74,7 +75,33 @@ export const DRAFT_PUBLISH_INPUT_ROOT_KEYS = [
   "observedAt",
   "sourceArtifact",
   "proposedDraftPr",
+  "authorizedPublicationHandoff",
 ] as const;
+
+/**
+ * Machine-readable A→B publication handoff binding accepted by DRAFT-PUBLISH-V1.
+ * Compatible with PUBLICATION-HANDOFF-V1 (must include publicationTaskId).
+ * Absent → legacy same-taskId path only.
+ */
+export const DRAFT_PUBLISH_AUTHORIZED_HANDOFF_KEYS = [
+  "schemaVersion",
+  "handoffId",
+  "sourceExecutionTaskId",
+  "publicationTaskId",
+  "sourceIssue",
+  "repository",
+  "baseRevision",
+  "verifiedChangedPaths",
+  "verificationAttemptId",
+  "verificationFingerprint",
+  "requestedPublicationCapability",
+  "requestedRiskClass",
+  "requestedStopAt",
+  "observedAt",
+] as const;
+
+export const DRAFT_PUBLISH_AUTHORIZED_HANDOFF_SCHEMA =
+  "PUBLICATION-HANDOFF-V1" as const;
 
 export const DRAFT_PUBLISH_SOURCE_ARTIFACT_KEYS = [
   "repository",
@@ -133,6 +160,14 @@ export type DraftPublishReasonCode =
   | "REJECT_TASK_SEMANTICS"
   | "REJECT_TASK_ID_BINDING"
   | "REJECT_TASK_ID_MISMATCH"
+  | "REJECT_PUBLICATION_HANDOFF_REQUIRED"
+  | "REJECT_PUBLICATION_HANDOFF"
+  | "REJECT_HANDOFF_SOURCE_TASK_ID"
+  | "REJECT_HANDOFF_PUBLICATION_TASK_ID"
+  | "REJECT_HANDOFF_SOURCE_ISSUE"
+  | "REJECT_HANDOFF_VERIFICATION_BINDING"
+  | "REJECT_HANDOFF_PATHS"
+  | "REJECT_HANDOFF_AUTHORITY"
   | "HOLD_TASK_VALIDATION"
   | "HOLD_REPOSITORY_MISMATCH"
   | "HOLD_BASE_REVISION_MISMATCH"
@@ -181,6 +216,23 @@ export type DraftPublishReasonCode =
   | "FAILED_CLEANUP"
   | "UNKNOWN_PUBLISHER_STATE";
 
+export interface DraftPublishAuthorizedHandoffV1 {
+  schemaVersion: typeof DRAFT_PUBLISH_AUTHORIZED_HANDOFF_SCHEMA;
+  handoffId: string;
+  sourceExecutionTaskId: string;
+  publicationTaskId: string;
+  sourceIssue: { repository: string; number: number };
+  repository: string;
+  baseRevision: string;
+  verifiedChangedPaths: string[];
+  verificationAttemptId: string;
+  verificationFingerprint: string;
+  requestedPublicationCapability: typeof DRAFT_PUBLISH_REQUIRED_CAPABILITY;
+  requestedRiskClass: typeof DRAFT_PUBLISH_REQUIRED_RISK_CLASS;
+  requestedStopAt: typeof DRAFT_PUBLISH_REQUIRED_STOP_AT;
+  observedAt: string;
+}
+
 export interface DraftPublishInputV1 {
   verifiedResult: IndependentVerifyResultV1;
   expectedTask: AgentTaskV1;
@@ -188,6 +240,11 @@ export interface DraftPublishInputV1 {
   observedAt: string;
   sourceArtifact: DraftPublishSourceArtifactV1;
   proposedDraftPr: DraftPublishProposedDraftPrV1;
+  /**
+   * Required when verifiedResult.taskId !== expectedTask.taskId
+   * (execution A → publication B via RUNNER-PUBLISH-HANDOFF-V1).
+   */
+  authorizedPublicationHandoff?: DraftPublishAuthorizedHandoffV1;
 }
 
 export interface DraftPublishMetadataV1 {
@@ -455,6 +512,392 @@ export function computeDraftPublishPayloadFingerprint(input: {
     },
   };
   return `fp:v1:${JSON.stringify(payload)}`;
+}
+
+/**
+ * Deterministic verification binding fingerprint (must match
+ * publicationHandoff.computeVerificationFingerprint format).
+ * observedAt is intentionally excluded — audit metadata, not authority.
+ */
+export function computeDraftPublishVerificationFingerprint(input: {
+  verificationAttemptId: string;
+  taskId: string;
+  repository: string;
+  baseRevision: string;
+  verifiedChangedPaths: string[];
+  status: string;
+}): string {
+  const paths = [...input.verifiedChangedPaths]
+    .map((p) => normalizeRepoPath(p))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return `vf:v1:${JSON.stringify({
+    verificationAttemptId: input.verificationAttemptId,
+    taskId: input.taskId,
+    repository: input.repository,
+    baseRevision: input.baseRevision,
+    verifiedChangedPaths: paths,
+    status: input.status,
+  })}`;
+}
+
+function parseAuthorizedPublicationHandoff(
+  value: unknown,
+):
+  | { ok: true; handoff: DraftPublishAuthorizedHandoffV1 }
+  | { ok: false; reasonCode: DraftPublishReasonCode; reasonMessage: string } {
+  if (value === undefined || value === null) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage:
+        "authorizedPublicationHandoff is present but null/undefined; fail closed.",
+    };
+  }
+  if (!isPlainObject(value)) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage: "authorizedPublicationHandoff must be an object.",
+    };
+  }
+  if (!hasOnlyKeys(value, DRAFT_PUBLISH_AUTHORIZED_HANDOFF_KEYS)) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage:
+        "authorizedPublicationHandoff contains unknown properties; fail closed.",
+    };
+  }
+  for (const key of DRAFT_PUBLISH_AUTHORIZED_HANDOFF_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      return {
+        ok: false,
+        reasonCode: "REJECT_PUBLICATION_HANDOFF",
+        reasonMessage: `authorizedPublicationHandoff.${key} is required; missing fails closed.`,
+      };
+    }
+    if (value[key] === undefined) {
+      return {
+        ok: false,
+        reasonCode: "REJECT_PUBLICATION_HANDOFF",
+        reasonMessage: `authorizedPublicationHandoff.${key} must not be undefined.`,
+      };
+    }
+  }
+  if (value.schemaVersion !== DRAFT_PUBLISH_AUTHORIZED_HANDOFF_SCHEMA) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage: `authorizedPublicationHandoff.schemaVersion must be ${DRAFT_PUBLISH_AUTHORIZED_HANDOFF_SCHEMA}.`,
+    };
+  }
+  if (
+    typeof value.handoffId !== "string" ||
+    value.handoffId.length < 1 ||
+    value.handoffId.length > 128
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage: "authorizedPublicationHandoff.handoffId malformed.",
+    };
+  }
+  if (
+    typeof value.sourceExecutionTaskId !== "string" ||
+    value.sourceExecutionTaskId.length < 1
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_SOURCE_TASK_ID",
+      reasonMessage:
+        "authorizedPublicationHandoff.sourceExecutionTaskId malformed.",
+    };
+  }
+  if (
+    typeof value.publicationTaskId !== "string" ||
+    value.publicationTaskId.length < 1
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_PUBLICATION_TASK_ID",
+      reasonMessage: "authorizedPublicationHandoff.publicationTaskId malformed.",
+    };
+  }
+  if (value.sourceExecutionTaskId === value.publicationTaskId) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage:
+        "authorizedPublicationHandoff requires distinct sourceExecutionTaskId and publicationTaskId.",
+    };
+  }
+  if (!isRepository(value.repository) || !isBaseRevision(value.baseRevision)) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage:
+        "authorizedPublicationHandoff.repository/baseRevision malformed.",
+    };
+  }
+  if (!isPlainObject(value.sourceIssue)) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_SOURCE_ISSUE",
+      reasonMessage: "authorizedPublicationHandoff.sourceIssue must be an object.",
+    };
+  }
+  if (
+    typeof value.sourceIssue.repository !== "string" ||
+    typeof value.sourceIssue.number !== "number"
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_SOURCE_ISSUE",
+      reasonMessage: "authorizedPublicationHandoff.sourceIssue malformed.",
+    };
+  }
+  if (
+    !Array.isArray(value.verifiedChangedPaths) ||
+    !value.verifiedChangedPaths.every((p) => typeof p === "string") ||
+    value.verifiedChangedPaths.length < 1
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_PATHS",
+      reasonMessage:
+        "authorizedPublicationHandoff.verifiedChangedPaths must be a non-empty string array.",
+    };
+  }
+  if (
+    typeof value.verificationAttemptId !== "string" ||
+    value.verificationAttemptId.length < 1 ||
+    typeof value.verificationFingerprint !== "string" ||
+    value.verificationFingerprint.length < 1
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_VERIFICATION_BINDING",
+      reasonMessage:
+        "authorizedPublicationHandoff.verificationAttemptId/fingerprint required.",
+    };
+  }
+  if (typeof value.observedAt !== "string" || value.observedAt.length < 1) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage: "authorizedPublicationHandoff.observedAt malformed.",
+    };
+  }
+  if (
+    value.requestedPublicationCapability !== DRAFT_PUBLISH_REQUIRED_CAPABILITY
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY",
+      reasonMessage: `authorizedPublicationHandoff.requestedPublicationCapability must be exactly ${DRAFT_PUBLISH_REQUIRED_CAPABILITY}.`,
+    };
+  }
+  if (value.requestedRiskClass !== DRAFT_PUBLISH_REQUIRED_RISK_CLASS) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY",
+      reasonMessage: `authorizedPublicationHandoff.requestedRiskClass must be exactly ${DRAFT_PUBLISH_REQUIRED_RISK_CLASS}.`,
+    };
+  }
+  if (value.requestedStopAt !== DRAFT_PUBLISH_REQUIRED_STOP_AT) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY",
+      reasonMessage: `authorizedPublicationHandoff.requestedStopAt must be exactly ${DRAFT_PUBLISH_REQUIRED_STOP_AT}.`,
+    };
+  }
+  return {
+    ok: true,
+    handoff: {
+      schemaVersion: DRAFT_PUBLISH_AUTHORIZED_HANDOFF_SCHEMA,
+      handoffId: value.handoffId,
+      sourceExecutionTaskId: value.sourceExecutionTaskId,
+      publicationTaskId: value.publicationTaskId,
+      sourceIssue: {
+        repository: value.sourceIssue.repository,
+        number: value.sourceIssue.number,
+      },
+      repository: value.repository,
+      baseRevision: value.baseRevision,
+      verifiedChangedPaths: value.verifiedChangedPaths as string[],
+      verificationAttemptId: value.verificationAttemptId,
+      verificationFingerprint: value.verificationFingerprint,
+      requestedPublicationCapability: DRAFT_PUBLISH_REQUIRED_CAPABILITY,
+      requestedRiskClass: DRAFT_PUBLISH_REQUIRED_RISK_CLASS,
+      requestedStopAt: DRAFT_PUBLISH_REQUIRED_STOP_AT,
+      observedAt: value.observedAt,
+    },
+  };
+}
+
+/**
+ * Bind verified execution A + publication task B through an authorized handoff.
+ * Does not mutate verifiedResult or rewrite taskIds.
+ */
+function bindAuthorizedPublicationHandoff(input: {
+  handoff: DraftPublishAuthorizedHandoffV1;
+  verifiedResult: IndependentVerifyResultV1;
+  expectedTask: AgentTaskV1;
+}):
+  | { ok: true }
+  | { ok: false; reasonCode: DraftPublishReasonCode; reasonMessage: string } {
+  const { handoff, verifiedResult, expectedTask } = input;
+
+  if (verifiedResult.taskId !== handoff.sourceExecutionTaskId) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_SOURCE_TASK_ID",
+      reasonMessage: `verifiedResult.taskId (${String(verifiedResult.taskId)}) !== handoff.sourceExecutionTaskId (${handoff.sourceExecutionTaskId}).`,
+    };
+  }
+  if (expectedTask.taskId !== handoff.publicationTaskId) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_PUBLICATION_TASK_ID",
+      reasonMessage: `expectedTask.taskId (${expectedTask.taskId}) !== handoff.publicationTaskId (${handoff.publicationTaskId}).`,
+    };
+  }
+  if (verifiedResult.taskId === expectedTask.taskId) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage:
+        "authorizedPublicationHandoff present but verifiedResult.taskId === expectedTask.taskId; A→B transition required.",
+    };
+  }
+
+  if (
+    handoff.repository !== expectedTask.repository ||
+    handoff.repository !== verifiedResult.repository
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage:
+        "handoff.repository must equal verifiedResult.repository and expectedTask.repository.",
+    };
+  }
+  if (
+    handoff.baseRevision !== expectedTask.baseRevision ||
+    handoff.baseRevision !== verifiedResult.baseRevision
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF",
+      reasonMessage:
+        "handoff.baseRevision must equal verifiedResult.baseRevision and expectedTask.baseRevision.",
+    };
+  }
+
+  if (
+    handoff.sourceIssue.repository !== expectedTask.sourceIssue.repository ||
+    handoff.sourceIssue.number !== expectedTask.sourceIssue.number ||
+    handoff.sourceIssue.repository !== handoff.repository
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_SOURCE_ISSUE",
+      reasonMessage:
+        "handoff.sourceIssue must bind exactly to expectedTask.sourceIssue and handoff.repository.",
+    };
+  }
+
+  if (
+    handoff.verificationAttemptId !== verifiedResult.verificationAttemptId
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_VERIFICATION_BINDING",
+      reasonMessage:
+        "handoff.verificationAttemptId !== verifiedResult.verificationAttemptId.",
+    };
+  }
+
+  const expectedFingerprint = computeDraftPublishVerificationFingerprint({
+    verificationAttemptId: verifiedResult.verificationAttemptId,
+    taskId: String(verifiedResult.taskId),
+    repository: String(verifiedResult.repository),
+    baseRevision: String(verifiedResult.baseRevision),
+    verifiedChangedPaths: verifiedResult.verifiedChangedPaths,
+    status: "VERIFIED",
+  });
+  if (handoff.verificationFingerprint !== expectedFingerprint) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_VERIFICATION_BINDING",
+      reasonMessage:
+        "handoff.verificationFingerprint does not match recomputed VERIFIED binding fingerprint; forged/stale provenance rejected.",
+    };
+  }
+
+  if (
+    !changedPathSetsEqual(
+      handoff.verifiedChangedPaths,
+      verifiedResult.verifiedChangedPaths,
+    )
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_PATHS",
+      reasonMessage:
+        "handoff.verifiedChangedPaths !== verifiedResult.verifiedChangedPaths.",
+    };
+  }
+  if (
+    !changedPathSetsEqual(
+      expectedTask.allowedPaths,
+      verifiedResult.verifiedChangedPaths,
+    ) ||
+    expectedTask.allowedPaths.length !==
+      verifiedResult.verifiedChangedPaths.length
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_PATHS",
+      reasonMessage:
+        "expectedTask.allowedPaths must equal verifiedResult.verifiedChangedPaths under authorized handoff.",
+    };
+  }
+
+  if (
+    expectedTask.allowedCapabilities.length !== 1 ||
+    expectedTask.allowedCapabilities[0] !== DRAFT_PUBLISH_REQUIRED_CAPABILITY ||
+    handoff.requestedPublicationCapability !== DRAFT_PUBLISH_REQUIRED_CAPABILITY
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY",
+      reasonMessage:
+        "Under authorized handoff, publication capability must be exactly github.draft-pr.publish.v1 (no generics).",
+    };
+  }
+  if (
+    expectedTask.riskClass !== DRAFT_PUBLISH_REQUIRED_RISK_CLASS ||
+    handoff.requestedRiskClass !== DRAFT_PUBLISH_REQUIRED_RISK_CLASS
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY",
+      reasonMessage: "Under authorized handoff, riskClass must be exactly R2.",
+    };
+  }
+  if (
+    expectedTask.stopAt !== DRAFT_PUBLISH_REQUIRED_STOP_AT ||
+    handoff.requestedStopAt !== DRAFT_PUBLISH_REQUIRED_STOP_AT
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY",
+      reasonMessage: "Under authorized handoff, stopAt must be exactly DRAFT_PR.",
+    };
+  }
+
+  return { ok: true };
 }
 
 function propagateVerifiedStatus(
@@ -1191,11 +1634,53 @@ export function publishDraftPrV1(
   }
 
   // Identity binding — verified ↔ expectedTask.
-  if (verifiedResult.taskId !== expectedTask.taskId) {
+  // Same taskId: legacy direct path.
+  // Distinct taskIds: require authorizedPublicationHandoff (A→B) provenance.
+  const handoffRaw = Object.prototype.hasOwnProperty.call(
+    rawInput,
+    "authorizedPublicationHandoff",
+  )
+    ? rawInput.authorizedPublicationHandoff
+    : undefined;
+
+  if (handoffRaw !== undefined) {
+    const handoffParsed = parseAuthorizedPublicationHandoff(handoffRaw);
+    if (!handoffParsed.ok) {
+      return buildResult({
+        status: "REJECT",
+        reasonCode: handoffParsed.reasonCode,
+        reasonMessage: handoffParsed.reasonMessage,
+        publicationAttemptId,
+        taskId: expectedTask.taskId,
+        repository: expectedTask.repository,
+        baseRevision: expectedTask.baseRevision,
+        taskValidation: revalidation,
+        observedAt,
+      });
+    }
+    const handoffBind = bindAuthorizedPublicationHandoff({
+      handoff: handoffParsed.handoff,
+      verifiedResult,
+      expectedTask,
+    });
+    if (!handoffBind.ok) {
+      return buildResult({
+        status: "REJECT",
+        reasonCode: handoffBind.reasonCode,
+        reasonMessage: handoffBind.reasonMessage,
+        publicationAttemptId,
+        taskId: expectedTask.taskId,
+        repository: expectedTask.repository,
+        baseRevision: expectedTask.baseRevision,
+        taskValidation: revalidation,
+        observedAt,
+      });
+    }
+  } else if (verifiedResult.taskId !== expectedTask.taskId) {
     return buildResult({
       status: "REJECT",
-      reasonCode: "REJECT_TASK_ID_MISMATCH",
-      reasonMessage: `verifiedResult.taskId (${String(verifiedResult.taskId)}) !== expectedTask.taskId (${expectedTask.taskId}); fail closed.`,
+      reasonCode: "REJECT_PUBLICATION_HANDOFF_REQUIRED",
+      reasonMessage: `verifiedResult.taskId (${String(verifiedResult.taskId)}) !== expectedTask.taskId (${expectedTask.taskId}); authorizedPublicationHandoff is required for A→B publication (do not rewrite verify taskId). Legacy same-taskId path remains available without handoff.`,
       publicationAttemptId,
       taskId: expectedTask.taskId,
       repository: expectedTask.repository,

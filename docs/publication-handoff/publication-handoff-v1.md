@@ -85,7 +85,7 @@ Non-VERIFIED verifier statuses propagate: HOLD / REJECT / FAILED / UNKNOWN.
 
 ---
 
-## 4. Publication task
+## 4. Separate publication task
 
 Distinct `AgentTaskV1`:
 
@@ -100,8 +100,23 @@ Distinct `AgentTaskV1`:
 | stopAt | `DRAFT_PR` |
 
 No `workspace.read.v1`. Provenance (`handoffId`, `sourceExecutionTaskId`,
-`verificationAttemptId`) stays on the handoff / result — not abused into
-unrelated AgentTask fields.
+`publicationTaskId`, `verificationAttemptId`, `verificationFingerprint`)
+is carried on `PublicationHandoffV1` and passed to DRAFT-PUBLISH-V1 as
+`authorizedPublicationHandoff` — not by rewriting verify taskId or mutating
+the execution task.
+
+DRAFT-PUBLISH-V1 accepts A→B only when that authorized handoff binds:
+
+```text
+verifiedResult.taskId === handoff.sourceExecutionTaskId
+expectedTask.taskId === handoff.publicationTaskId
+repository / baseRevision / sourceIssue exact
+verificationAttemptId / verificationFingerprint exact
+verifiedChangedPaths === publicationTask.allowedPaths
+capability / risk / stopAt exact publication authority
+```
+
+Forged or mismatched handoff provenance fails closed.
 
 ---
 

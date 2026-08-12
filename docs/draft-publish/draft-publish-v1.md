@@ -191,7 +191,9 @@ generic `github.write` / `repo.write`.
 | Verifier `HOLD` / `REJECT` / `FAILED` / `UNKNOWN` | same status |
 | Foreign verifier schema/version | `REJECT` |
 | `VERIFIED` + exact identity + R2 + capability + `DRAFT_PR` + draft=true + base exact + adapter success | `PUBLISHED_DRAFT` |
-| taskId mismatch | `REJECT` |
+| taskId mismatch without `authorizedPublicationHandoff` | `REJECT_PUBLICATION_HANDOFF_REQUIRED` |
+| taskId A→B with valid `authorizedPublicationHandoff` provenance | allowed (then normal eligibility) |
+| forged / mismatched handoff provenance | `REJECT` (`REJECT_HANDOFF_*`) |
 | repository mismatch | `HOLD` |
 | baseRevision mismatch | `HOLD` |
 | path set mismatch / unsafe / forbidden / duplicate | `REJECT` / `FAILED` |

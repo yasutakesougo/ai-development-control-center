@@ -23,6 +23,7 @@ import {
   validateAgentTaskV1,
   type AgentTaskRiskClass,
   type AgentTaskSourceIssue,
+  type AgentTaskStopAt,
   type AgentTaskV1,
   type AgentTaskValidationResultV1,
 } from "./agentTaskContract";
@@ -31,11 +32,6 @@ import {
   AGENT_RUNNER_SUPPORTED_RISK_CLASSES,
   evaluateChangedPathsPolicy,
 } from "./agentRunner";
-import {
-  DRAFT_PUBLISH_REQUIRED_CAPABILITY,
-  DRAFT_PUBLISH_REQUIRED_RISK_CLASS,
-  DRAFT_PUBLISH_REQUIRED_STOP_AT,
-} from "./draftPublish";
 import {
   findDuplicateChangedPaths,
   changedPathSetsEqual,
@@ -49,12 +45,17 @@ export const PUBLICATION_HANDOFF_SCHEMA = "PUBLICATION-HANDOFF-V1" as const;
 export const PUBLICATION_HANDOFF_RESULT_SCHEMA =
   "PUBLICATION-HANDOFF-RESULT-V1" as const;
 
+/**
+ * Publication authority constants — string-identical to DRAFT-PUBLISH-V1
+ * requirements. Kept local (no draftPublish import) to avoid cycles so
+ * DRAFT-PUBLISH-V1 can consume handoff provenance.
+ */
 export const PUBLICATION_HANDOFF_REQUIRED_CAPABILITY =
-  DRAFT_PUBLISH_REQUIRED_CAPABILITY;
+  "github.draft-pr.publish.v1" as const;
 export const PUBLICATION_HANDOFF_REQUIRED_RISK_CLASS =
-  DRAFT_PUBLISH_REQUIRED_RISK_CLASS;
+  "R2" as const satisfies AgentTaskRiskClass;
 export const PUBLICATION_HANDOFF_REQUIRED_STOP_AT =
-  DRAFT_PUBLISH_REQUIRED_STOP_AT;
+  "DRAFT_PR" as const satisfies AgentTaskStopAt;
 
 /** Frozen snapshot of runner allowlists — must never expand in this slice. */
 export const PUBLICATION_HANDOFF_RUNNER_RISK_CLASSES_SNAPSHOT = [
@@ -126,6 +127,8 @@ export interface PublicationHandoffV1 {
   schemaVersion: typeof PUBLICATION_HANDOFF_SCHEMA;
   handoffId: string;
   sourceExecutionTaskId: string;
+  /** Distinct publication-scoped task identity (≠ sourceExecutionTaskId). */
+  publicationTaskId: string;
   sourceIssue: AgentTaskSourceIssue;
   repository: string;
   baseRevision: string;
@@ -324,17 +327,17 @@ export function buildDeterministicPublicationTaskId(input: {
 }
 
 /**
- * Narrow compatibility check against existing DRAFT-PUBLISH-V1 constants.
+ * Narrow compatibility check against DRAFT-PUBLISH-V1 authority constants.
  * Does not invoke publishDraftPrV1.
  */
 export function publicationTaskMeetsDraftPublishAuthority(
   task: AgentTaskV1,
 ): boolean {
   return (
-    task.riskClass === DRAFT_PUBLISH_REQUIRED_RISK_CLASS &&
-    task.stopAt === DRAFT_PUBLISH_REQUIRED_STOP_AT &&
+    task.riskClass === PUBLICATION_HANDOFF_REQUIRED_RISK_CLASS &&
+    task.stopAt === PUBLICATION_HANDOFF_REQUIRED_STOP_AT &&
     task.allowedCapabilities.length === 1 &&
-    task.allowedCapabilities[0] === DRAFT_PUBLISH_REQUIRED_CAPABILITY
+    task.allowedCapabilities[0] === PUBLICATION_HANDOFF_REQUIRED_CAPABILITY
   );
 }
 
@@ -1276,6 +1279,7 @@ export function createPublicationHandoffV1(
     schemaVersion: PUBLICATION_HANDOFF_SCHEMA,
     handoffId,
     sourceExecutionTaskId: sourceExecutionTask.taskId,
+    publicationTaskId: publicationTask.taskId,
     sourceIssue: {
       repository: sourceExecutionTask.sourceIssue.repository,
       number: sourceExecutionTask.sourceIssue.number,
