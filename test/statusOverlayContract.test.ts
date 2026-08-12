@@ -50,20 +50,21 @@ function readyPr(n: number): StatusOverlayPullRequest {
 }
 
 describe("STATUS-OVERLAY-V1 design contract", () => {
-  it("marks runtime generator implemented while UI/full product stay off", () => {
+  it("marks generator and UI implemented while full product/writer stay off", () => {
     expect(STATUS_OVERLAY_SCHEMA_VERSION).toBe("STATUS-OVERLAY-V1");
     expect(STATUS_OVERLAY_GENERATOR_IMPLEMENTED).toBe(true);
-    expect(STATUS_OVERLAY_UI_IMPLEMENTED).toBe(false);
+    expect(STATUS_OVERLAY_UI_IMPLEMENTED).toBe(true);
     expect(STATUS_OVERLAY_IMPLEMENTED).toBe(false);
     expect(() => assertStatusOverlayNotImplemented()).not.toThrow();
     expect(proposedStatusOverlayStoragePath()).toBe("docs/status/status-overlay.json");
     expect(STATUS_OVERLAY_MARKDOWN_SECTIONS).toEqual([
       "CURRENT",
       "GATE",
+      "NEXT",
       "AUTOMATION",
       "HOLDS",
-      "UNKNOWN",
-      "NEXT",
+      "UNKNOWNS",
+      "PRS",
     ]);
   });
 

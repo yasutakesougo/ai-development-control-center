@@ -93,9 +93,9 @@ function readyPr(n: number): StatusOverlayPullRequest {
 }
 
 describe("STATUS-OVERLAY-V1 runtime generator", () => {
-  it("marks generator implemented and UI not implemented", () => {
+  it("marks generator implemented (UI projection is separate)", () => {
     expect(STATUS_OVERLAY_GENERATOR_IMPLEMENTED).toBe(true);
-    expect(STATUS_OVERLAY_UI_IMPLEMENTED).toBe(false);
+    expect(STATUS_OVERLAY_UI_IMPLEMENTED).toBe(true);
   });
 
   it("produces a deterministic full document for identical inputs", () => {

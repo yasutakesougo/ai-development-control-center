@@ -1,7 +1,7 @@
 /**
  * STATUS-OVERLAY-V1 design contract helpers.
  *
- * DESIGNED · runtime generator IMPLEMENTED · UI NOT IMPLEMENTED
+ * DESIGNED · runtime generator IMPLEMENTED · UI IMPLEMENTED (read-only)
  *
  * Pure live-state precedence, Human-gate classification, and deterministic
  * next-action selection. Does not observe GitHub, write files, or authorize
@@ -11,10 +11,11 @@
 export const STATUS_OVERLAY_SCHEMA_VERSION = "STATUS-OVERLAY-V1" as const;
 export const STATUS_OVERLAY_DESIGN = "STATUS-OVERLAY-DESIGN-V1" as const;
 
-/** Pure runtime projection generator is implemented (no observer/UI/writer). */
+/** Pure runtime projection generator is implemented (no writer). */
 export const STATUS_OVERLAY_GENERATOR_IMPLEMENTED = true as const;
-export const STATUS_OVERLAY_UI_IMPLEMENTED = false as const;
-/** Full product (observer + UI + emit) remains incomplete. */
+/** Read-only UI projection is implemented (no mutation controls). */
+export const STATUS_OVERLAY_UI_IMPLEMENTED = true as const;
+/** Full product (writer / Gateway binding) remains incomplete. */
 export const STATUS_OVERLAY_IMPLEMENTED = false as const;
 
 /** Stable status vocabulary — no synonyms. */
@@ -150,21 +151,23 @@ export interface SelectNextActionInput {
   activeRefreshPr?: number | null;
 }
 
-/** UI / observer / writer / Gateway binding remain forbidden in this slice. */
-export function assertStatusOverlayUiNotImplemented(): void {
-  if (STATUS_OVERLAY_UI_IMPLEMENTED) {
-    throw new Error("STATUS-OVERLAY-V1 UI must remain NOT IMPLEMENTED");
+/** Writer / Gateway / Ledger binding remain forbidden. */
+export function assertStatusOverlayWriterNotImplemented(): void {
+  if (STATUS_OVERLAY_IMPLEMENTED) {
+    throw new Error(
+      "STATUS-OVERLAY-V1 full product (writer/Gateway binding) must remain NOT IMPLEMENTED",
+    );
   }
 }
 
-/** @deprecated Use assertStatusOverlayUiNotImplemented — generator is now implemented. */
+/** @deprecated Prefer assertStatusOverlayWriterNotImplemented — UI projection is implemented. */
 export function assertStatusOverlayNotImplemented(): void {
-  assertStatusOverlayUiNotImplemented();
-  if (STATUS_OVERLAY_IMPLEMENTED) {
-    throw new Error(
-      "STATUS-OVERLAY-V1 full product (observer/UI/writer) must remain NOT IMPLEMENTED",
-    );
-  }
+  assertStatusOverlayWriterNotImplemented();
+}
+
+/** @deprecated UI projection is implemented; use assertStatusOverlayWriterNotImplemented. */
+export function assertStatusOverlayUiNotImplemented(): void {
+  assertStatusOverlayWriterNotImplemented();
 }
 
 /**
@@ -449,14 +452,15 @@ export function proposedStatusOverlayStoragePath(): "docs/status/status-overlay.
   return "docs/status/status-overlay.json";
 }
 
-/** Compact Markdown section order for a future renderer (not implemented). */
+/** Compact human-facing section order (UI projection). */
 export const STATUS_OVERLAY_MARKDOWN_SECTIONS = [
   "CURRENT",
   "GATE",
+  "NEXT",
   "AUTOMATION",
   "HOLDS",
-  "UNKNOWN",
-  "NEXT",
+  "UNKNOWNS",
+  "PRS",
 ] as const;
 
 /**

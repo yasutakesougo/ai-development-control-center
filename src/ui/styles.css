@@ -8,7 +8,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, textarea, select { font: inherit; }
 .shell { width: min(100%, 720px); margin: 0 auto; padding: 20px 16px 48px; }
 .action-card, .status-card, .details-card, .approval-intent-card,
-.ledger-record-card, .ledger-history-card {
+.ledger-record-card, .ledger-history-card, .status-overlay-card {
   background: #fff;
   border: 1px solid #dfe5dc;
   border-radius: 20px;
@@ -119,3 +119,53 @@ summary { cursor: pointer; font-weight: 700; }
   .shell { padding-top: 40px; }
   .action-card { padding: 32px; }
 }
+
+/* STATUS-OVERLAY-V1 read-only projection */
+.status-overlay-card { margin-top: 16px; padding: 20px; }
+.status-overlay-header { margin-bottom: 12px; }
+.status-overlay-note { margin: 0; color: #5f675f; line-height: 1.55; }
+.status-overlay-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #edf0eb; }
+.status-overlay-section h3 { margin: 0 0 10px; font-size: 0.95rem; letter-spacing: 0.04em; }
+.status-overlay-summary { margin: 8px 0 0; line-height: 1.55; }
+.status-overlay-auth { margin: 10px 0 0; font-size: 0.9rem; color: #5f675f; }
+.status-overlay-secondary { margin: 10px 0 0; padding-left: 18px; color: #5f675f; }
+.status-overlay-empty { margin: 0; color: #657066; font-style: italic; }
+.status-overlay-pr-list { list-style: none; margin: 0; padding: 0; }
+.status-overlay-pr-list li { padding: 10px 0; border-top: 1px solid #edf0eb; }
+.status-overlay-pr-list li:first-child { border-top: 0; }
+.status-overlay-pr-meta { margin-top: 4px; color: #657066; font-size: 0.85rem; }
+.status-overlay-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+.tone-current .status-overlay-badge,
+.status-overlay-badge.tone-current { background: #e7efe6; border-color: #355d3a; color: #27462b; }
+.tone-action .status-overlay-badge,
+.status-overlay-badge.tone-action { background: #e8eef8; border-color: #35557a; color: #243852; }
+.tone-maintenance .status-overlay-badge,
+.status-overlay-badge.tone-maintenance { background: #f3eee6; border-color: #8a6a3a; color: #5a4320; }
+.tone-ready .status-overlay-badge,
+.status-overlay-badge.tone-ready { background: #e7efe6; border-color: #355d3a; color: #27462b; }
+.tone-stale .status-overlay-badge,
+.status-overlay-badge.tone-stale { background: #fff3e0; border-color: #b36b00; color: #6b4200; }
+.tone-hold .status-overlay-badge,
+.status-overlay-badge.tone-hold { background: #fff9eb; border-color: #8a722a; color: #5c4a14; }
+.tone-failed .status-overlay-badge,
+.status-overlay-badge.tone-failed { background: #fdf1f0; border-color: #a25050; color: #6d2d2d; }
+.tone-outcome-unknown .status-overlay-badge,
+.status-overlay-badge.tone-outcome-unknown { background: #f5eef8; border-color: #6b4f7a; color: #3f2d4a; }
+.tone-unknown .status-overlay-badge,
+.status-overlay-badge.tone-unknown { background: #eef1ec; border-color: #758078; color: #3f463f; }
+.tone-neutral .status-overlay-badge,
+.status-overlay-badge.tone-neutral { background: #f8faf6; border-color: #c9d2c6; color: #3c463d; }
+.status-overlay-section.tone-unknown { border-left: 4px solid #758078; padding-left: 12px; }
+.status-overlay-section.tone-hold { border-left: 4px solid #8a722a; padding-left: 12px; }
+.status-overlay-section.tone-failed { border-left: 4px solid #a25050; padding-left: 12px; }
+.status-overlay-section.tone-outcome-unknown { border-left: 4px solid #6b4f7a; padding-left: 12px; }
+.status-overlay-section.tone-maintenance { border-left: 4px solid #8a6a3a; padding-left: 12px; }
+.status-overlay-section.tone-action { border-left: 4px solid #35557a; padding-left: 12px; }
+.status-overlay-section.tone-current { border-left: 4px solid #355d3a; padding-left: 12px; }

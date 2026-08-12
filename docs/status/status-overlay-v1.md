@@ -1,6 +1,6 @@
 # STATUS-OVERLAY-V1
 
-**Status: DESIGNED · runtime generator IMPLEMENTED · GitHub/workflow observer IMPLEMENTED · UI NOT IMPLEMENTED**
+**Status: DESIGNED · runtime generator IMPLEMENTED · GitHub/workflow observer IMPLEMENTED · UI IMPLEMENTED (read-only)**
 
 This document designs **STATUS-OVERLAY-V1**: a replaceable **current-state
 projection** that answers:
@@ -16,20 +16,23 @@ Companion modules:
 - Contract helpers: `src/domain/statusOverlayContract.ts`
 - Runtime generator (pure): `src/domain/statusOverlayGenerator.ts`
 - Read-only observer: `src/observer/statusOverlayGithubObserver.ts`
+- Read-only UI: `src/ui/statusOverlayViewModel.ts`, `src/ui/StatusOverlayPanel.tsx`
 
 STATUS-OVERLAY is **decision-support only**. It does **not** authorize
 mutation, Ready, Merge, Action Gateway, Agent execution, or Ledger writes.
 
-Observation flow:
+Observation / projection flow:
 
 ```
 read-only GitHub/workflow observer
   → explicit StatusOverlayGeneratorInput
   → generateStatusOverlay()
   → StatusOverlayDocument
+  → UI projection (read-only)
 ```
 
-No repository-file writer / HISTORY writer / UI in this slice.
+No repository-file writer / HISTORY writer in this slice. UI never observes
+GitHub itself and never exposes mutation controls.
 
 ---
 
@@ -325,20 +328,26 @@ create timestamps.
 
 ---
 
-## Human-readable rendering (optional)
+## Human-readable rendering
 
-Compact sections only:
+Compact sections (UI projection):
 
 ```
 CURRENT
 GATE
+NEXT
 AUTOMATION
 HOLDS
-UNKNOWN
-NEXT
+UNKNOWNS
+PRS
 ```
 
-No decorative metric strips. Markdown/HTML renderer is **NOT IMPLEMENTED**.
+Pure view-model: `buildStatusOverlayViewModel(document)`  
+Deterministic Markdown: `renderStatusOverlayMarkdown(document)`  
+React panel: `<StatusOverlayPanel document={document} />`
+
+No decorative metric strips. No write buttons. `authorizesMutation` remains
+false and is shown explicitly.
 
 ---
 
@@ -397,6 +406,6 @@ No decorative metric strips. Markdown/HTML renderer is **NOT IMPLEMENTED**.
 | GitHub / workflow observer | **IMPLEMENTED** (`statusOverlayGithubObserver.ts`, read-only) |
 | Repository-file writer | **NOT IMPLEMENTED** |
 | HISTORY writer | **NOT IMPLEMENTED** |
-| UI | **NOT IMPLEMENTED** |
+| UI | **IMPLEMENTED** (read-only view-model + panel) |
 | Action Gateway binding | **NOT IMPLEMENTED** |
 | Approval Ledger / Agent execution | **NOT IMPLEMENTED** |

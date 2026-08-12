@@ -15,10 +15,12 @@ import {
   type LedgerSubmissionAttempt,
   type LedgerSubmissionState,
 } from "../domain/ledgerSubmission";
+import type { StatusOverlayDocument } from "../domain/statusOverlayContract";
 import { ApprovalIntentPanel } from "./ApprovalIntentPanel";
 import { fetchLedgerHistory, postLedgerRecord, type LedgerHistoryResult } from "./ledgerApi";
 import { LedgerHistoryPanel } from "./LedgerHistoryPanel";
 import { LedgerRecordControls } from "./LedgerRecordControls";
+import { StatusOverlayPanel } from "./StatusOverlayPanel";
 
 type PrEvidence = {
   pr: number;
@@ -53,7 +55,15 @@ const fallback: HumanAction = {
   sourceRefs: [],
 };
 
-export function App() {
+export interface AppProps {
+  /**
+   * Optional STATUS-OVERLAY document for read-only display.
+   * The UI never observes GitHub/workflow itself — callers supply the document.
+   */
+  statusOverlay?: StatusOverlayDocument | null;
+}
+
+export function App({ statusOverlay = null }: AppProps = {}) {
   const [data, setData] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [intentDraft, setIntentDraft] = useState<ApprovalIntentDraft | null>(null);
@@ -156,6 +166,8 @@ export function App() {
           <div><dt>observedAt</dt><dd>{data?.observedAt ?? "確認中"}</dd></div>
         </dl>
       </section>
+
+      {statusOverlay && <StatusOverlayPanel document={statusOverlay} />}
 
       {!loading && approvalAllowed && data && (
         <ApprovalIntentPanel
