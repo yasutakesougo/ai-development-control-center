@@ -81,13 +81,42 @@ evaluateChangedPathsPolicy()
 | `expectedTask` | Exact `AgentTaskV1` to re-bind and revalidate |
 | `publicationAttemptId` | Bounded idempotency / attempt id |
 | `observedAt` | Observation timestamp |
-| `sourceArtifact` | `{ repository, baseRevision, headRevision, branchName, changedPaths }` |
+| `sourceArtifact` | `{ repository, baseRevision, baseBranch, headRevision, branchName, changedPaths }` |
 | `proposedDraftPr` | `{ title, body, baseBranch, headBranch, draft }` |
 
 Natural-language notes are never authority.
 
 `proposedDraftPr.draft` must be **exactly** `true`.
 
+Branch identity binding (required):
+
+```text
+proposedDraftPr.headBranch === sourceArtifact.branchName
+proposedDraftPr.baseBranch === sourceArtifact.baseBranch
+```
+
+Adapter evidence is untrusted and revalidated before `PUBLISHED_DRAFT`:
+
+```text
+observedBaseRevision === expectedTask.baseRevision
+branchPrepared === true
+commitCreated === true
+verifiedPathsWritten == exact set sourceArtifact.changedPaths
+headRevision === expected/committed headRevision
+draftPrNumber = valid positive integer
+draftPrUrl = non-empty bounded string
+draft === true
+```
+
+Verifier metadata requires exact `false` for:
+
+```text
+publicationAuthorized
+readyAuthorized
+mergeAuthorized
+githubMutationAuthorized
+deployAuthorized
+```
 ---
 
 ## 4. Output
@@ -214,6 +243,8 @@ taskId
 repository
 baseRevision
 source headRevision
+source branchName
+source baseBranch
 source changedPaths
 proposed Draft PR metadata (title/body/baseBranch/headBranch/draft)
 ```

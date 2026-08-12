@@ -164,6 +164,7 @@ function sourceArtifact(
     changedPaths?: string[];
     headRevision?: string;
     branchName?: string;
+    baseBranch?: string;
     repository?: string;
     baseRevision?: string;
   } = {},
@@ -171,6 +172,7 @@ function sourceArtifact(
   return {
     repository: overrides.repository ?? task.repository,
     baseRevision: overrides.baseRevision ?? task.baseRevision,
+    baseBranch: overrides.baseBranch ?? "main",
     headRevision: overrides.headRevision ?? HEAD,
     branchName: overrides.branchName ?? BRANCH,
     changedPaths: overrides.changedPaths ?? [ALLOWED_DOC, ALLOWED_SRC],
@@ -788,6 +790,8 @@ describe("DRAFT-PUBLISH-V1 base observation + idempotency", () => {
       repository: task.repository,
       baseRevision: task.baseRevision,
       headRevision: HEAD,
+      branchName: BRANCH,
+      baseBranch: "main",
       changedPaths: [ALLOWED_DOC, ALLOWED_SRC],
       proposedDraftPr: proposedDraftPr() as {
         title: string;
@@ -802,6 +806,8 @@ describe("DRAFT-PUBLISH-V1 base observation + idempotency", () => {
       repository: task.repository,
       baseRevision: task.baseRevision,
       headRevision: HEAD,
+      branchName: BRANCH,
+      baseBranch: "main",
       changedPaths: [ALLOWED_SRC, ALLOWED_DOC],
       proposedDraftPr: proposedDraftPr() as {
         title: string;
@@ -913,6 +919,24 @@ describe("DRAFT-PUBLISH-V1 verifier metadata + input", () => {
     expect(out.reasonCode).toBe("REJECT_READY_AUTHORIZED");
   });
 
+  it("readyAuthorized missing → REJECT", () => {
+    const task = eligibleTask();
+    const verified = verifiedStub(task);
+    const { readyAuthorized: _omit, ...metaRest } = verified.metadata as unknown as Record<
+      string,
+      unknown
+    > & { readyAuthorized: boolean };
+    void _omit;
+    const out = publish(task, {
+      verified: {
+        ...verified,
+        metadata: metaRest,
+      } as unknown as IndependentVerifyResultV1,
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_READY_AUTHORIZED");
+  });
+
   it("unknown root properties fail closed", () => {
     const task = eligibleTask();
     const out = publishDraftPrV1(
@@ -921,5 +945,116 @@ describe("DRAFT-PUBLISH-V1 verifier metadata + input", () => {
     );
     expect(out.status).toBe("REJECT");
     expect(out.reasonCode).toBe("REJECT_INPUT");
+  });
+});
+
+describe("DRAFT-PUBLISH-V1 P1 evidence revalidation + branch binding", () => {
+  it("P1-2. headBranch !== source branchName → REJECT", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      proposed: proposedDraftPr({ headBranch: "other-branch" }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_BRANCH_MISMATCH");
+  });
+
+  it("P1-2. baseBranch !== source baseBranch → REJECT", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      proposed: proposedDraftPr({ baseBranch: "develop" }),
+      source: sourceArtifact(task, { baseBranch: "main" }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_BASE_BRANCH_MISMATCH");
+  });
+
+  it("P1-1. branchPrepared=false → REJECT", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { branchPrepared: false },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_BRANCH_NOT_PREPARED");
+  });
+
+  it("P1-1. commitCreated=false → REJECT", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { commitCreated: false },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_COMMIT_NOT_CREATED");
+  });
+
+  it("P1-1. written path missing → REJECT", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { verifiedPathsWritten: [ALLOWED_DOC] },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_PATH_MISMATCH");
+  });
+
+  it("P1-1. written extra path → REJECT", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: {
+          verifiedPathsWritten: [ALLOWED_DOC, ALLOWED_SRC, ALLOWED_ADAPTER],
+        },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_PATH_MISMATCH");
+  });
+
+  it("P1-1. headRevision mismatch → REJECT", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { headRevision: OTHER_HEAD },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_HEAD_MISMATCH");
+  });
+
+  it("P1-1. observedBaseRevision mismatch → HOLD", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { observedBaseRevision: OTHER_BASE },
+      }),
+    });
+    expect(out.status).toBe("HOLD");
+    expect(out.reasonCode).toBe("HOLD_EVIDENCE_BASE_MISMATCH");
+  });
+
+  it("P1-1. draftPrNumber missing/invalid → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { draftPrNumber: null },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_PR_NUMBER");
+  });
+
+  it("P1-1. draftPrUrl missing → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { draftPrUrl: "" },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_PR_URL");
   });
 });

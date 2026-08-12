@@ -31,6 +31,8 @@ export type DraftPublishAdapterPhaseFailure =
 export interface DraftPublishSourceArtifactV1 {
   repository: string;
   baseRevision: string;
+  /** Target base branch name (e.g. main); bound to proposedDraftPr.baseBranch. */
+  baseBranch: string;
   headRevision: string;
   branchName: string;
   changedPaths: string[];
@@ -155,6 +157,8 @@ export interface FakeDraftPublishAdapterOptionsV1 {
   failAt?: DraftPublishAdapterPhaseFailure;
   /** When true, publish evidence reports draft=false (fail closed upstream). */
   forceDraftFalse?: boolean;
+  /** Override fields on collected evidence for negative evidence-boundary tests. */
+  evidenceOverrides?: Partial<DraftPublishEvidenceV1>;
   failureReasonCode?: string;
   failureReasonMessage?: string;
   /**
@@ -201,6 +205,7 @@ export function createFakeDraftPublishAdapterV1(
 ): DraftPublishAdapterV1 {
   const failAt = options.failAt;
   const forceDraftFalse = options.forceDraftFalse === true;
+  const evidenceOverrides = options.evidenceOverrides ?? {};
   const failureReasonCode = options.failureReasonCode ?? "ADAPTER_FAILURE";
   const failureReasonMessage =
     options.failureReasonMessage ?? "Fake draft-publish adapter forced failure.";
@@ -385,6 +390,7 @@ export function createFakeDraftPublishAdapterV1(
           productionMutationPerformed: false,
           replayed,
           notes: holdNotes(ctx.expectedTask.taskId, replayed),
+          ...evidenceOverrides,
         },
       };
     },
