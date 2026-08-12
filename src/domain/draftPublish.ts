@@ -14,7 +14,6 @@
  */
 
 import {
-  normalizeRepoPath,
   parseAgentTaskV1,
   validateAgentTaskV1,
   type AgentTaskRiskClass,
@@ -33,6 +32,9 @@ import {
   type IndependentVerifyResultV1,
   type IndependentVerifyStatus,
 } from "./independentVerify";
+import {
+  deriveCanonicalPublicationHandoffIdentities,
+} from "./publicationHandoffCanonical";
 import {
   DRAFT_PUBLISH_ADAPTER_FAKE,
   DRAFT_PUBLISH_GITHUB_MUTATION_PERFORMED,
@@ -94,6 +96,7 @@ export const DRAFT_PUBLISH_AUTHORIZED_HANDOFF_KEYS = [
   "verifiedChangedPaths",
   "verificationAttemptId",
   "verificationFingerprint",
+  "authorityFingerprint",
   "requestedPublicationCapability",
   "requestedRiskClass",
   "requestedStopAt",
@@ -168,6 +171,8 @@ export type DraftPublishReasonCode =
   | "REJECT_HANDOFF_VERIFICATION_BINDING"
   | "REJECT_HANDOFF_PATHS"
   | "REJECT_HANDOFF_AUTHORITY"
+  | "REJECT_HANDOFF_CANONICAL_TASK_ID"
+  | "REJECT_HANDOFF_AUTHORITY_FINGERPRINT"
   | "HOLD_TASK_VALIDATION"
   | "HOLD_REPOSITORY_MISMATCH"
   | "HOLD_BASE_REVISION_MISMATCH"
@@ -227,6 +232,8 @@ export interface DraftPublishAuthorizedHandoffV1 {
   verifiedChangedPaths: string[];
   verificationAttemptId: string;
   verificationFingerprint: string;
+  /** Required — recomputed by DRAFT-PUBLISH against shared canonical helpers. */
+  authorityFingerprint: string;
   requestedPublicationCapability: typeof DRAFT_PUBLISH_REQUIRED_CAPABILITY;
   requestedRiskClass: typeof DRAFT_PUBLISH_REQUIRED_RISK_CLASS;
   requestedStopAt: typeof DRAFT_PUBLISH_REQUIRED_STOP_AT;
@@ -514,32 +521,6 @@ export function computeDraftPublishPayloadFingerprint(input: {
   return `fp:v1:${JSON.stringify(payload)}`;
 }
 
-/**
- * Deterministic verification binding fingerprint (must match
- * publicationHandoff.computeVerificationFingerprint format).
- * observedAt is intentionally excluded — audit metadata, not authority.
- */
-export function computeDraftPublishVerificationFingerprint(input: {
-  verificationAttemptId: string;
-  taskId: string;
-  repository: string;
-  baseRevision: string;
-  verifiedChangedPaths: string[];
-  status: string;
-}): string {
-  const paths = [...input.verifiedChangedPaths]
-    .map((p) => normalizeRepoPath(p))
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  return `vf:v1:${JSON.stringify({
-    verificationAttemptId: input.verificationAttemptId,
-    taskId: input.taskId,
-    repository: input.repository,
-    baseRevision: input.baseRevision,
-    verifiedChangedPaths: paths,
-    status: input.status,
-  })}`;
-}
-
 function parseAuthorizedPublicationHandoff(
   value: unknown,
 ):
@@ -681,6 +662,17 @@ function parseAuthorizedPublicationHandoff(
         "authorizedPublicationHandoff.verificationAttemptId/fingerprint required.",
     };
   }
+  if (
+    typeof value.authorityFingerprint !== "string" ||
+    value.authorityFingerprint.length < 1
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY_FINGERPRINT",
+      reasonMessage:
+        "authorizedPublicationHandoff.authorityFingerprint is required; missing fails closed.",
+    };
+  }
   if (typeof value.observedAt !== "string" || value.observedAt.length < 1) {
     return {
       ok: false,
@@ -727,6 +719,7 @@ function parseAuthorizedPublicationHandoff(
       verifiedChangedPaths: value.verifiedChangedPaths as string[],
       verificationAttemptId: value.verificationAttemptId,
       verificationFingerprint: value.verificationFingerprint,
+      authorityFingerprint: value.authorityFingerprint,
       requestedPublicationCapability: DRAFT_PUBLISH_REQUIRED_CAPABILITY,
       requestedRiskClass: DRAFT_PUBLISH_REQUIRED_RISK_CLASS,
       requestedStopAt: DRAFT_PUBLISH_REQUIRED_STOP_AT,
@@ -738,6 +731,8 @@ function parseAuthorizedPublicationHandoff(
 /**
  * Bind verified execution A + publication task B through an authorized handoff.
  * Does not mutate verifiedResult or rewrite taskIds.
+ * Independently recomputes canonical publicationTaskId + fingerprints via
+ * shared RUNNER-PUBLISH-HANDOFF-V1 helpers — self-asserted handoffs fail closed.
  */
 function bindAuthorizedPublicationHandoff(input: {
   handoff: DraftPublishAuthorizedHandoffV1;
@@ -818,15 +813,54 @@ function bindAuthorizedPublicationHandoff(input: {
     };
   }
 
-  const expectedFingerprint = computeDraftPublishVerificationFingerprint({
-    verificationAttemptId: verifiedResult.verificationAttemptId,
-    taskId: String(verifiedResult.taskId),
-    repository: String(verifiedResult.repository),
-    baseRevision: String(verifiedResult.baseRevision),
-    verifiedChangedPaths: verifiedResult.verifiedChangedPaths,
-    status: "VERIFIED",
-  });
-  if (handoff.verificationFingerprint !== expectedFingerprint) {
+  // Independent canonical recompute — do not trust self-asserted IDs/fingerprints.
+  const canonical = deriveCanonicalPublicationHandoffIdentities(
+    {
+      handoffId: handoff.handoffId,
+      sourceExecutionTaskId: handoff.sourceExecutionTaskId,
+      sourceIssue: handoff.sourceIssue,
+      repository: handoff.repository,
+      baseRevision: handoff.baseRevision,
+      verifiedChangedPaths: handoff.verifiedChangedPaths,
+      verificationAttemptId: handoff.verificationAttemptId,
+      requestedPublicationCapability: handoff.requestedPublicationCapability,
+      requestedRiskClass: handoff.requestedRiskClass,
+      requestedStopAt: handoff.requestedStopAt,
+    },
+    {
+      verificationAttemptId: String(verifiedResult.verificationAttemptId),
+      sourceExecutionTaskId: String(verifiedResult.taskId),
+      repository: String(verifiedResult.repository),
+      baseRevision: String(verifiedResult.baseRevision),
+      verifiedChangedPaths: verifiedResult.verifiedChangedPaths,
+    },
+  );
+
+  if (handoff.publicationTaskId !== canonical.publicationTaskId) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_CANONICAL_TASK_ID",
+      reasonMessage:
+        "handoff.publicationTaskId is not the canonical RUNNER-PUBLISH-HANDOFF-V1 derivation; forged/self-asserted publication task rejected.",
+    };
+  }
+  if (expectedTask.taskId !== canonical.publicationTaskId) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_CANONICAL_TASK_ID",
+      reasonMessage:
+        "expectedTask.taskId is not the canonical publication taskId derived from authorized handoff fields.",
+    };
+  }
+  if (handoff.authorityFingerprint !== canonical.authorityFingerprint) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_HANDOFF_AUTHORITY_FINGERPRINT",
+      reasonMessage:
+        "handoff.authorityFingerprint does not recompute exactly; forged/stale authority rejected.",
+    };
+  }
+  if (handoff.verificationFingerprint !== canonical.verificationFingerprint) {
     return {
       ok: false,
       reasonCode: "REJECT_HANDOFF_VERIFICATION_BINDING",

@@ -105,18 +105,23 @@ is carried on `PublicationHandoffV1` and passed to DRAFT-PUBLISH-V1 as
 `authorizedPublicationHandoff` — not by rewriting verify taskId or mutating
 the execution task.
 
-DRAFT-PUBLISH-V1 accepts A→B only when that authorized handoff binds:
+DRAFT-PUBLISH-V1 accepts A→B only when that authorized handoff binds **and**
+independently recomputes (via shared `publicationHandoffCanonical` helpers):
 
 ```text
 verifiedResult.taskId === handoff.sourceExecutionTaskId
-expectedTask.taskId === handoff.publicationTaskId
+expectedTask.taskId === canonical publicationTaskId
+handoff.publicationTaskId === canonical publicationTaskId
+authorityFingerprint recomputes exactly
+verificationFingerprint recomputes exactly
 repository / baseRevision / sourceIssue exact
-verificationAttemptId / verificationFingerprint exact
 verifiedChangedPaths === publicationTask.allowedPaths
 capability / risk / stopAt exact publication authority
 ```
 
-Forged or mismatched handoff provenance fails closed.
+Self-asserted handoff objects paired with an arbitrary valid R2 PublicationTask
+fail closed (`REJECT_HANDOFF_CANONICAL_TASK_ID` /
+`REJECT_HANDOFF_AUTHORITY_FINGERPRINT`). Forged provenance fails closed.
 
 ---
 

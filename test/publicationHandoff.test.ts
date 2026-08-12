@@ -870,4 +870,155 @@ describe("RUNNER-PUBLISH-HANDOFF-V1 → DRAFT-PUBLISH-V1 A→B binding", () => {
     expect(out.status).toBe("REJECT");
     expect(out.reasonCode).toBe("REJECT_HANDOFF_VERIFICATION_BINDING");
   });
+
+  it("P1: attacker-created R2 B + matching synthetic handoff rejected (non-canonical taskId)", () => {
+    const { sourceExecutionTask, independentVerifyResult, sourceSnapshot } =
+      realVerified();
+    const legitimate = runHandoff(sourceExecutionTask, independentVerifyResult);
+    expect(legitimate.status).toBe("READY_FOR_PUBLICATION_TASK");
+
+    // Attacker builds a separately valid R2 publication-shaped task (builder id),
+    // not the canonical pub-handoff-* derivation.
+    const attackerBuilt = buildAgentTaskFromIssue(
+      {
+        repository: REPO,
+        issueNumber: 57,
+        baseRevision: BASE,
+        issueTitle: "attacker publication task",
+        issueBody: "Forged R2 publication task outside handoff derivation.",
+        observedAt: OBSERVED_AT,
+        proposal: {
+          taskId: "attacker-r2-publication-task-not-canonical",
+          allowedPaths: [...independentVerifyResult.verifiedChangedPaths],
+          forbiddenPaths: [".github/workflows/", "migrations/"],
+          acceptanceCriteria: ["attacker"],
+          verificationCommands: [
+            { id: "verify.all", command: "npm run verify" },
+          ],
+          allowedCapabilities: [DRAFT_PUBLISH_REQUIRED_CAPABILITY],
+          riskClass: DRAFT_PUBLISH_REQUIRED_RISK_CLASS,
+          stopAt: DRAFT_PUBLISH_REQUIRED_STOP_AT,
+        },
+      },
+      { validatedAt: VALIDATED_AT },
+    );
+    expect(attackerBuilt.status).toBe("BUILT");
+    const attackerTask = attackerBuilt.task!;
+    expect(attackerTask.taskId).toBe(
+      "attacker-r2-publication-task-not-canonical",
+    );
+    expect(attackerTask.taskId).not.toBe(sourceExecutionTask.taskId);
+    expect(attackerTask.taskId).not.toBe(legitimate.publicationTaskId);
+    expect(publicationTaskMeetsDraftPublishAuthority(attackerTask)).toBe(true);
+
+    // Synthetic handoff copies legitimate authority fields/fingerprints but
+    // asserts attackerTask.taskId as publicationTaskId (self-asserted A→B).
+    const syntheticHandoff = {
+      ...legitimate.handoff!,
+      publicationTaskId: attackerTask.taskId,
+    };
+
+    const out = publishDraftPrV1(
+      {
+        verifiedResult: independentVerifyResult,
+        expectedTask: attackerTask,
+        publicationAttemptId: "publish-57-attacker-b",
+        observedAt: OBSERVED_AT,
+        sourceArtifact: {
+          repository: sourceExecutionTask.repository,
+          baseRevision: sourceExecutionTask.baseRevision,
+          baseBranch: "main",
+          headRevision: "dddddddddddddddddddddddddddddddddddddddd",
+          branchName: "cursor/handoff-57-attack",
+          changedPaths: [...independentVerifyResult.verifiedChangedPaths],
+        },
+        proposedDraftPr: {
+          title: "attacker publish",
+          body: "fake",
+          baseBranch: "main",
+          headBranch: "cursor/handoff-57-attack",
+          draft: true,
+        },
+        authorizedPublicationHandoff: syntheticHandoff,
+      },
+      { validatedAt: VALIDATED_AT, adapter: createFakeDraftPublishAdapterV1() },
+    );
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_HANDOFF_CANONICAL_TASK_ID");
+    expect(JSON.stringify(sourceExecutionTask)).toBe(sourceSnapshot);
+    expect(independentVerifyResult.taskId).toBe(sourceExecutionTask.taskId);
+  });
+
+  it("P1: missing authorityFingerprint fails closed", () => {
+    const { sourceExecutionTask, independentVerifyResult } = realVerified();
+    const handoff = runHandoff(sourceExecutionTask, independentVerifyResult);
+    const { authorityFingerprint: _omit, ...withoutFp } = handoff.handoff!;
+    void _omit;
+    const out = publishDraftPrV1(
+      {
+        verifiedResult: independentVerifyResult,
+        expectedTask: handoff.publicationTask!,
+        publicationAttemptId: "publish-57-missing-ah",
+        observedAt: OBSERVED_AT,
+        sourceArtifact: {
+          repository: sourceExecutionTask.repository,
+          baseRevision: sourceExecutionTask.baseRevision,
+          baseBranch: "main",
+          headRevision: "dddddddddddddddddddddddddddddddddddddddd",
+          branchName: "cursor/handoff-57-publish",
+          changedPaths: [...independentVerifyResult.verifiedChangedPaths],
+        },
+        proposedDraftPr: {
+          title: "handoff publish",
+          body: "fake",
+          baseBranch: "main",
+          headBranch: "cursor/handoff-57-publish",
+          draft: true,
+        },
+        authorizedPublicationHandoff: withoutFp,
+      },
+      { validatedAt: VALIDATED_AT, adapter: createFakeDraftPublishAdapterV1() },
+    );
+    expect(out.status).toBe("REJECT");
+    expect([
+      "REJECT_HANDOFF_AUTHORITY_FINGERPRINT",
+      "REJECT_PUBLICATION_HANDOFF",
+    ]).toContain(out.reasonCode);
+  });
+
+  it("P1: forged authorityFingerprint rejected", () => {
+    const { sourceExecutionTask, independentVerifyResult } = realVerified();
+    const handoff = runHandoff(sourceExecutionTask, independentVerifyResult);
+    const forged = {
+      ...handoff.handoff!,
+      authorityFingerprint: "ah:v1:forged",
+    };
+    const out = publishDraftPrV1(
+      {
+        verifiedResult: independentVerifyResult,
+        expectedTask: handoff.publicationTask!,
+        publicationAttemptId: "publish-57-forged-ah",
+        observedAt: OBSERVED_AT,
+        sourceArtifact: {
+          repository: sourceExecutionTask.repository,
+          baseRevision: sourceExecutionTask.baseRevision,
+          baseBranch: "main",
+          headRevision: "dddddddddddddddddddddddddddddddddddddddd",
+          branchName: "cursor/handoff-57-publish",
+          changedPaths: [...independentVerifyResult.verifiedChangedPaths],
+        },
+        proposedDraftPr: {
+          title: "handoff publish",
+          body: "fake",
+          baseBranch: "main",
+          headBranch: "cursor/handoff-57-publish",
+          draft: true,
+        },
+        authorizedPublicationHandoff: forged,
+      },
+      { validatedAt: VALIDATED_AT, adapter: createFakeDraftPublishAdapterV1() },
+    );
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_HANDOFF_AUTHORITY_FINGERPRINT");
+  });
 });

@@ -18,12 +18,10 @@
 
 import {
   AGENT_TASK_SCHEMA,
-  normalizeRepoPath,
   parseAgentTaskV1,
   validateAgentTaskV1,
   type AgentTaskRiskClass,
   type AgentTaskSourceIssue,
-  type AgentTaskStopAt,
   type AgentTaskV1,
   type AgentTaskValidationResultV1,
 } from "./agentTaskContract";
@@ -39,6 +37,30 @@ import {
   type IndependentVerifyStatus,
 } from "./independentVerify";
 import type { IndependentVerifyEvidenceV1 } from "./independentVerifyAdapter";
+import {
+  PUBLICATION_HANDOFF_CANONICAL_CAPABILITY,
+  PUBLICATION_HANDOFF_CANONICAL_RISK_CLASS,
+  PUBLICATION_HANDOFF_CANONICAL_STOP_AT,
+  authorityFingerprintsEqual,
+  buildDeterministicPublicationTaskId,
+  capturePublicationHandoffAuthorityFingerprint,
+  computeVerificationFingerprint,
+  deriveCanonicalPublicationHandoffIdentities,
+  deterministicHexFromSeed,
+  serializeAuthorityFingerprint,
+  type PublicationHandoffAuthoritySeedV1,
+} from "./publicationHandoffCanonical";
+
+export {
+  authorityFingerprintsEqual,
+  buildDeterministicPublicationTaskId,
+  capturePublicationHandoffAuthorityFingerprint,
+  computeVerificationFingerprint,
+  deriveCanonicalPublicationHandoffIdentities,
+  deterministicHexFromSeed,
+  serializeAuthorityFingerprint,
+};
+export type { PublicationHandoffAuthoritySeedV1 };
 
 export const PUBLICATION_HANDOFF_VERSION = "RUNNER-PUBLISH-HANDOFF-V1" as const;
 export const PUBLICATION_HANDOFF_SCHEMA = "PUBLICATION-HANDOFF-V1" as const;
@@ -47,15 +69,14 @@ export const PUBLICATION_HANDOFF_RESULT_SCHEMA =
 
 /**
  * Publication authority constants — string-identical to DRAFT-PUBLISH-V1
- * requirements. Kept local (no draftPublish import) to avoid cycles so
- * DRAFT-PUBLISH-V1 can consume handoff provenance.
+ * requirements. Sourced from shared canonical module.
  */
 export const PUBLICATION_HANDOFF_REQUIRED_CAPABILITY =
-  "github.draft-pr.publish.v1" as const;
+  PUBLICATION_HANDOFF_CANONICAL_CAPABILITY;
 export const PUBLICATION_HANDOFF_REQUIRED_RISK_CLASS =
-  "R2" as const satisfies AgentTaskRiskClass;
+  PUBLICATION_HANDOFF_CANONICAL_RISK_CLASS;
 export const PUBLICATION_HANDOFF_REQUIRED_STOP_AT =
-  "DRAFT_PR" as const satisfies AgentTaskStopAt;
+  PUBLICATION_HANDOFF_CANONICAL_STOP_AT;
 
 /** Frozen snapshot of runner allowlists — must never expand in this slice. */
 export const PUBLICATION_HANDOFF_RUNNER_RISK_CLASSES_SNAPSHOT = [
@@ -135,24 +156,16 @@ export interface PublicationHandoffV1 {
   verifiedChangedPaths: string[];
   verificationAttemptId: string;
   verificationFingerprint: string;
+  /** Canonical authority fingerprint — recomputed by DRAFT-PUBLISH-V1. */
+  authorityFingerprint: string;
   requestedPublicationCapability: typeof PUBLICATION_HANDOFF_REQUIRED_CAPABILITY;
   requestedRiskClass: typeof PUBLICATION_HANDOFF_REQUIRED_RISK_CLASS;
   requestedStopAt: typeof PUBLICATION_HANDOFF_REQUIRED_STOP_AT;
   observedAt: string;
 }
 
-export interface PublicationHandoffAuthorityFingerprintV1 {
-  handoffId: string;
-  sourceExecutionTaskId: string;
-  sourceIssue: AgentTaskSourceIssue;
-  repository: string;
-  baseRevision: string;
-  verifiedChangedPaths: string[];
-  verificationAttemptId: string;
-  requestedPublicationCapability: string;
-  requestedRiskClass: string;
-  requestedStopAt: string;
-}
+export type PublicationHandoffAuthorityFingerprintV1 =
+  PublicationHandoffAuthoritySeedV1;
 
 export interface PublicationHandoffMetadataV1 {
   observedAt: string;
@@ -222,108 +235,6 @@ function hasOnlyKeys(
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value);
-}
-
-function sortPathsStable(paths: string[]): string[] {
-  return [...paths]
-    .map((p) => normalizeRepoPath(p))
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-}
-
-/** Deterministic 40-hex token from seed (not cryptographic security). */
-export function deterministicHexFromSeed(seed: string): string {
-  let h1 = 0x811c9dc5;
-  let h2 = 0x811c9dc5 ^ 0xabcdef;
-  for (let i = 0; i < seed.length; i++) {
-    const c = seed.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193);
-    h2 = Math.imul(h2 ^ (c + 1), 0x01000193);
-  }
-  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, "0");
-  const out = `${hex(h1)}${hex(h2)}${hex(h1 ^ h2)}${hex(~h1)}${hex(h1 + h2)}`;
-  return out.slice(0, 40);
-}
-
-export function computeVerificationFingerprint(input: {
-  verificationAttemptId: string;
-  taskId: string;
-  repository: string;
-  baseRevision: string;
-  verifiedChangedPaths: string[];
-  status: string;
-}): string {
-  const paths = sortPathsStable(input.verifiedChangedPaths);
-  return `vf:v1:${stableJson({
-    verificationAttemptId: input.verificationAttemptId,
-    taskId: input.taskId,
-    repository: input.repository,
-    baseRevision: input.baseRevision,
-    verifiedChangedPaths: paths,
-    status: input.status,
-  })}`;
-}
-
-export function capturePublicationHandoffAuthorityFingerprint(
-  input: PublicationHandoffAuthorityFingerprintV1,
-): PublicationHandoffAuthorityFingerprintV1 {
-  return {
-    handoffId: input.handoffId,
-    sourceExecutionTaskId: input.sourceExecutionTaskId,
-    sourceIssue: {
-      repository: input.sourceIssue.repository,
-      number: input.sourceIssue.number,
-    },
-    repository: input.repository,
-    baseRevision: input.baseRevision,
-    verifiedChangedPaths: sortPathsStable(input.verifiedChangedPaths),
-    verificationAttemptId: input.verificationAttemptId,
-    requestedPublicationCapability: input.requestedPublicationCapability,
-    requestedRiskClass: input.requestedRiskClass,
-    requestedStopAt: input.requestedStopAt,
-  };
-}
-
-export function serializeAuthorityFingerprint(
-  fp: PublicationHandoffAuthorityFingerprintV1,
-): string {
-  return `ah:v1:${stableJson(capturePublicationHandoffAuthorityFingerprint(fp))}`;
-}
-
-export function authorityFingerprintsEqual(
-  a: PublicationHandoffAuthorityFingerprintV1,
-  b: PublicationHandoffAuthorityFingerprintV1,
-): boolean {
-  return (
-    serializeAuthorityFingerprint(a) === serializeAuthorityFingerprint(b)
-  );
-}
-
-/**
- * Deterministic publication taskId. Seed includes handoff + source identity +
- * verified paths + requested publication authority.
- */
-export function buildDeterministicPublicationTaskId(input: {
-  handoffId: string;
-  sourceExecutionTaskId: string;
-  repository: string;
-  baseRevision: string;
-  verifiedChangedPaths: string[];
-  requestedPublicationCapability: string;
-  requestedRiskClass: string;
-  requestedStopAt: string;
-}): string {
-  const seed = stableJson({
-    handoffId: input.handoffId,
-    sourceExecutionTaskId: input.sourceExecutionTaskId,
-    repository: input.repository,
-    baseRevision: input.baseRevision,
-    verifiedChangedPaths: sortPathsStable(input.verifiedChangedPaths),
-    requestedPublicationCapability: input.requestedPublicationCapability,
-    requestedRiskClass: input.requestedRiskClass,
-    requestedStopAt: input.requestedStopAt,
-  });
-  const hex = deterministicHexFromSeed(seed);
-  return `pub-handoff-${hex}`.slice(0, 128);
 }
 
 /**
@@ -1058,28 +969,32 @@ export function createPublicationHandoffV1(
     });
   }
 
-  const verificationFingerprint = computeVerificationFingerprint({
-    verificationAttemptId,
-    taskId: sourceExecutionTask.taskId,
-    repository: sourceExecutionTask.repository,
-    baseRevision: sourceExecutionTask.baseRevision,
-    verifiedChangedPaths,
-    status: "VERIFIED",
-  });
-
-  const authorityFp = capturePublicationHandoffAuthorityFingerprint({
-    handoffId,
-    sourceExecutionTaskId: sourceExecutionTask.taskId,
-    sourceIssue: sourceExecutionTask.sourceIssue,
-    repository: sourceExecutionTask.repository,
-    baseRevision: sourceExecutionTask.baseRevision,
-    verifiedChangedPaths,
-    verificationAttemptId,
-    requestedPublicationCapability,
-    requestedRiskClass,
-    requestedStopAt,
-  });
-  const authorityFingerprint = serializeAuthorityFingerprint(authorityFp);
+  const canonical = deriveCanonicalPublicationHandoffIdentities(
+    {
+      handoffId,
+      sourceExecutionTaskId: sourceExecutionTask.taskId,
+      sourceIssue: sourceExecutionTask.sourceIssue,
+      repository: sourceExecutionTask.repository,
+      baseRevision: sourceExecutionTask.baseRevision,
+      verifiedChangedPaths,
+      verificationAttemptId,
+      requestedPublicationCapability,
+      requestedRiskClass,
+      requestedStopAt,
+    },
+    {
+      verificationAttemptId,
+      sourceExecutionTaskId: sourceExecutionTask.taskId,
+      repository: sourceExecutionTask.repository,
+      baseRevision: sourceExecutionTask.baseRevision,
+      verifiedChangedPaths,
+    },
+  );
+  const {
+    publicationTaskId,
+    authorityFingerprint,
+    verificationFingerprint,
+  } = canonical;
 
   if (registry) {
     const prior = registry.get(handoffId);
@@ -1104,17 +1019,6 @@ export function createPublicationHandoffV1(
       });
     }
   }
-
-  const publicationTaskId = buildDeterministicPublicationTaskId({
-    handoffId,
-    sourceExecutionTaskId: sourceExecutionTask.taskId,
-    repository: sourceExecutionTask.repository,
-    baseRevision: sourceExecutionTask.baseRevision,
-    verifiedChangedPaths,
-    requestedPublicationCapability,
-    requestedRiskClass,
-    requestedStopAt,
-  });
 
   if (publicationTaskId === sourceExecutionTask.taskId) {
     return buildResult({
@@ -1289,6 +1193,7 @@ export function createPublicationHandoffV1(
     verifiedChangedPaths: [...verifiedChangedPaths],
     verificationAttemptId,
     verificationFingerprint,
+    authorityFingerprint,
     requestedPublicationCapability,
     requestedRiskClass,
     requestedStopAt,
