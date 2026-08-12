@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": [
     "schemaVersion",
+    "taskId",
     "status",
     "reasonCode",
     "reasonMessage",
@@ -15,6 +16,7 @@
   "properties": {
     "schemaVersion": { "const": "AGENT-TASK-VALIDATION-RESULT-V1" },
     "taskId": {
+      "description": "Always present. Use null when the source taskId is unknown (e.g. structural parse failed before taskId was available).",
       "type": ["string", "null"],
       "minLength": 1,
       "maxLength": 128,

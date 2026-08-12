@@ -204,9 +204,9 @@ export interface AgentTaskValidationResultV1 {
 const REPOSITORY_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 const BASE_REVISION_PATTERN = /^[a-f0-9]{40}$/;
 const TASK_ID_PATTERN = /^[\x20-\x7E]+$/;
-/** Mirrors schema path pattern: no absolute, no //, no . / .. segments. */
+/** Mirrors schema path pattern: no absolute, no \, no //, no . / .. segments. */
 const REPO_PATH_PATTERN =
-  /^(?!\/)(?!.*\/\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*(?:^|\/)\.(?:\/|$))[^\x00]+$/;
+  /^(?!\/)(?!.*\\)(?!.*\/\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*(?:^|\/)\.(?:\/|$))[^\x00\\]+$/;
 const CAPABILITY_ID_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z0-9]+)+\.v[0-9]+$/;
 const VERIFICATION_COMMAND_ID_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
@@ -255,7 +255,11 @@ export function normalizeRepoPath(path: string): string {
   return path.replace(/\/+$/, "");
 }
 
-function isRepoRelativePath(value: unknown): value is string {
+/**
+ * Structural path grammar shared by schema path items and candidate boundary checks.
+ * Rejects absolute paths, backslash separators, empty segments, and `.` / `..`.
+ */
+export function isRepoRelativePath(value: unknown): value is string {
   if (
     typeof value !== "string" ||
     value.length < 1 ||
@@ -922,11 +926,14 @@ export function parseAgentTaskValidationResult(
       reasonMessage: `schemaVersion must be ${AGENT_TASK_VALIDATION_RESULT_SCHEMA}.`,
     };
   }
-  if (
-    value.taskId !== null &&
-    value.taskId !== undefined &&
-    !isTaskId(value.taskId)
-  ) {
+  if (!Object.prototype.hasOwnProperty.call(value, "taskId")) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "taskId is required (use null when unknown).",
+    };
+  }
+  if (value.taskId !== null && !isTaskId(value.taskId)) {
     return {
       ok: false,
       reasonCode: "REJECTED_SCHEMA",
@@ -1007,7 +1014,7 @@ export function parseAgentTaskValidationResult(
     ok: true,
     result: {
       schemaVersion: AGENT_TASK_VALIDATION_RESULT_SCHEMA,
-      taskId: (value.taskId ?? null) as string | null,
+      taskId: value.taskId as string | null,
       status,
       reasonCode: value.reasonCode,
       reasonMessage: value.reasonMessage,
@@ -1034,12 +1041,13 @@ export function assertAgentExecutionNotImplemented(): void {
 
 /**
  * Returns whether a repository-relative path is explicitly allowed by the task.
- * Does not authorize execution — boundary check helper only.
+ * Malformed candidates fail closed (false). Does not authorize execution.
  */
 export function isPathExplicitlyAllowed(
   task: AgentTaskV1,
   path: string,
 ): boolean {
+  if (!isRepoRelativePath(path)) return false;
   const normalizedPath = normalizeRepoPath(path);
   return task.allowedPaths.some((allowed) => {
     const normalizedAllowed = normalizeRepoPath(allowed);
@@ -1052,11 +1060,13 @@ export function isPathExplicitlyAllowed(
 
 /**
  * Returns whether a repository-relative path is explicitly forbidden by the task.
+ * Malformed candidates fail closed (false).
  */
 export function isPathExplicitlyForbidden(
   task: AgentTaskV1,
   path: string,
 ): boolean {
+  if (!isRepoRelativePath(path)) return false;
   const normalizedPath = normalizeRepoPath(path);
   return task.forbiddenPaths.some((forbidden) => {
     const normalizedForbidden = normalizeRepoPath(forbidden);
@@ -1069,12 +1079,14 @@ export function isPathExplicitlyForbidden(
 
 /**
  * Path authorization helper: allowed only when explicitly in allowedPaths and
- * not matched by forbiddenPaths. Does not authorize Agent execution.
+ * not matched by forbiddenPaths. Malformed candidates are UNKNOWN (fail closed).
+ * Does not authorize Agent execution.
  */
 export function evaluatePathBoundary(
   task: AgentTaskV1,
   path: string,
 ): "ALLOWED" | "FORBIDDEN" | "UNKNOWN" {
+  if (!isRepoRelativePath(path)) return "UNKNOWN";
   if (isPathExplicitlyForbidden(task, path)) return "FORBIDDEN";
   if (isPathExplicitlyAllowed(task, path)) return "ALLOWED";
   return "UNKNOWN";

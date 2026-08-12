@@ -57,14 +57,14 @@
     "objective": { "type": "string", "minLength": 1, "maxLength": 4096 },
     "allowedPaths": {
       "type": "array",
-      "description": "Repository-relative path boundaries. Entries must be unique after trailing-slash normalization (runtime rejects docs/foo vs docs/foo/). Absolute paths, empty segments, and . / .. segments are forbidden.",
+      "description": "Repository-relative path boundaries. Entries must be unique after trailing-slash normalization (runtime rejects docs/foo vs docs/foo/). Absolute paths, backslash separators, empty segments, and . / .. segments are forbidden.",
       "minItems": 1,
       "maxItems": 256,
       "items": {
         "type": "string",
         "minLength": 1,
         "maxLength": 512,
-        "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00]+$"
+        "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
       },
       "uniqueItems": true
     },
@@ -76,7 +76,7 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 512,
-        "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00]+$"
+        "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
       },
       "uniqueItems": true
     },
@@ -107,7 +107,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 512,
-            "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00]+$"
+            "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
           },
           "description": { "type": "string", "minLength": 1, "maxLength": 512 }
         }

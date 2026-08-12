@@ -21,6 +21,9 @@ import {
   READY_AUTOMATION_IMPLEMENTED,
   assertAgentExecutionNotImplemented,
   evaluatePathBoundary,
+  isPathExplicitlyAllowed,
+  isPathExplicitlyForbidden,
+  isRepoRelativePath,
   normalizeRepoPath,
   parseAgentTaskJsonBody,
   parseAgentTaskValidationResult,
@@ -551,6 +554,78 @@ describe("AGENT-TASK-V1 path boundary regressions", () => {
   });
 });
 
+describe("AGENT-TASK-V1 candidate path fail-closed regressions", () => {
+  it("rejects backslash separators in task path lists", () => {
+    expect(
+      parseAgentTaskV1({
+        ...validTask(),
+        allowedPaths: ["src\\domain\\agentTaskContract.ts"],
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseAgentTaskV1({
+        ...validTask(),
+        forbiddenPaths: ["migrations\\legacy"],
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseAgentTaskV1({
+        ...validTask(),
+        verificationCommands: [
+          {
+            id: "verify.all",
+            command: "npm run verify",
+            workingDirectory: "scripts\\ci",
+          },
+        ],
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("isRepoRelativePath rejects traversal and separator attacks", () => {
+    expect(isRepoRelativePath("docs/agent-task/agent-task-v1.md")).toBe(true);
+    expect(isRepoRelativePath("../secrets")).toBe(false);
+    expect(isRepoRelativePath("docs/../../etc/passwd")).toBe(false);
+    expect(isRepoRelativePath("docs/foo/../../../etc/passwd")).toBe(false);
+    expect(isRepoRelativePath("foo/..")).toBe(false);
+    expect(isRepoRelativePath("foo/../bar")).toBe(false);
+    expect(isRepoRelativePath("..\\secrets")).toBe(false);
+    expect(isRepoRelativePath("docs\\agent-task\\x.md")).toBe(false);
+    expect(isRepoRelativePath("C:\\Windows\\System32")).toBe(false);
+    expect(isRepoRelativePath("/etc/passwd")).toBe(false);
+    expect(isRepoRelativePath("")).toBe(false);
+    expect(isRepoRelativePath(".")).toBe(false);
+  });
+
+  it("evaluatePathBoundary returns UNKNOWN for malformed candidates", () => {
+    const task = validTask();
+    const attacks = [
+      "../secrets",
+      "docs/../../etc/passwd",
+      "docs\\agent-task\\agent-task-v1.md",
+      "..\\secrets",
+      "/etc/passwd",
+      "docs/agent-task/../../../.env",
+      "src/domain/..\\worker",
+    ];
+    for (const candidate of attacks) {
+      expect(isRepoRelativePath(candidate)).toBe(false);
+      expect(evaluatePathBoundary(task, candidate)).toBe("UNKNOWN");
+      expect(isPathExplicitlyAllowed(task, candidate)).toBe(false);
+      expect(isPathExplicitlyForbidden(task, candidate)).toBe(false);
+    }
+  });
+
+  it("does not treat backslash candidates as matching allowedPrefixes", () => {
+    const task = validTask();
+    // Even though the string starts with an allowed prefix textually with /,
+    // a backslash form must never become ALLOWED.
+    expect(evaluatePathBoundary(task, "docs/agent-task\\agent-task-v1.md")).toBe(
+      "UNKNOWN",
+    );
+  });
+});
+
 describe("AGENT-TASK-V1 schema / TypeScript / runtime parity", () => {
   it("mirrors AgentTaskV1 schema root keys and required fields", () => {
     const schema = loadSchema("agent-task-v1.schema.json");
@@ -585,6 +660,21 @@ describe("AGENT-TASK-V1 schema / TypeScript / runtime parity", () => {
     expect(AGENT_TASK_VERIFICATION_COMMAND_IDS_MUST_BE_UNIQUE).toBe(true);
   });
 
+  it("schema path patterns reject backslash separators", () => {
+    const schema = loadSchema("agent-task-v1.schema.json");
+    const properties = schema.properties as Record<
+      string,
+      { items?: { pattern?: string }; description?: string }
+    >;
+    const allowedPattern = properties.allowedPaths.items?.pattern ?? "";
+    const forbiddenPattern = properties.forbiddenPaths.items?.pattern ?? "";
+    expect(allowedPattern).toContain("\\\\");
+    expect(forbiddenPattern).toContain("\\\\");
+    expect(properties.allowedPaths.description).toMatch(/backslash/i);
+    // Runtime mirrors the same rejection.
+    expect(isRepoRelativePath("src\\domain")).toBe(false);
+  });
+
   it("mirrors validation-result schema root keys and bounds", () => {
     const schema = loadSchema("agent-task-validation-result-v1.schema.json");
     expect(schema.additionalProperties).toBe(false);
@@ -595,6 +685,14 @@ describe("AGENT-TASK-V1 schema / TypeScript / runtime parity", () => {
     expect((properties.schemaVersion as { const: string }).const).toBe(
       AGENT_TASK_VALIDATION_RESULT_SCHEMA,
     );
+    expect(schema.required).toEqual([
+      "schemaVersion",
+      "taskId",
+      "status",
+      "reasonCode",
+      "reasonMessage",
+      "validatedAt",
+    ]);
     const taskId = properties.taskId as {
       type: unknown;
       pattern?: string;
@@ -619,6 +717,30 @@ describe("AGENT-TASK-V1 schema / TypeScript / runtime parity", () => {
     expect(findings.items.properties.message.maxLength).toBe(
       AGENT_TASK_FINDING_MESSAGE_MAX,
     );
+  });
+
+  it("requires ValidationResult.taskId (null allowed; omission rejected)", () => {
+    const withNull = {
+      schemaVersion: AGENT_TASK_VALIDATION_RESULT_SCHEMA,
+      taskId: null,
+      status: "INVALID",
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "ok",
+      validatedAt: VALIDATED_AT,
+    };
+    expect(parseAgentTaskValidationResult(withNull).ok).toBe(true);
+
+    const omitted = {
+      schemaVersion: AGENT_TASK_VALIDATION_RESULT_SCHEMA,
+      status: "INVALID",
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "ok",
+      validatedAt: VALIDATED_AT,
+    };
+    const parsed = parseAgentTaskValidationResult(omitted);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.reasonMessage).toContain("taskId is required");
   });
 
   it("rejects validation findings that exceed schema maxLengths", () => {
