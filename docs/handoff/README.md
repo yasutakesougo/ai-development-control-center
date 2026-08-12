@@ -65,9 +65,10 @@ HANDOFF-V1 does not regenerate the Architecture Snapshot.
 
 AUTO-REFRESH-V1 is **designed** with a **manual** pilot
 (`npm run auto-refresh:pilot`) that may open a Draft refresh PR only.
-Persistent automation is **not enabled**. Snapshot staleness is maintenance
-evidence only and must never be upgraded into HANDOFF / Approval Ledger
-`ACTION_REQUIRED`. See `docs/architecture/auto-refresh-v1.md`.
+Persistent AUTO-REFRESH is **designed but NOT ENABLED**
+(`docs/architecture/persistent-auto-refresh-v1.md`). Snapshot staleness is
+maintenance evidence only and must never be upgraded into HANDOFF / Approval
+Ledger `ACTION_REQUIRED`.
 
 ## Next action
 

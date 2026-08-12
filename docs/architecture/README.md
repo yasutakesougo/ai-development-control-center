@@ -20,5 +20,6 @@ Unknowns and assumptions are retained explicitly; they must not be upgraded to
 confirmed facts without repository evidence.
 
 AUTO-REFRESH-V1 is **designed**; a **manual** pilot exists
-(`npm run auto-refresh:pilot`). Persistent/scheduled automation is
-**not enabled**. See [`auto-refresh-v1.md`](./auto-refresh-v1.md).
+(`npm run auto-refresh:pilot`). Persistent AUTO-REFRESH is **designed but not
+enabled** — see [`persistent-auto-refresh-v1.md`](./persistent-auto-refresh-v1.md).
+No active scheduler/push workflow is installed by the design-only slice.

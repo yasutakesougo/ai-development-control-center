@@ -13,6 +13,10 @@ The pilot may regenerate the Snapshot and open a **Draft** PR when eligible.
 It does **not** enable cron, push triggers, Ready, Merge, Action Gateway, or
 Agent execution.
 
+Persistent AUTO-REFRESH is designed separately in
+[`persistent-auto-refresh-v1.md`](./persistent-auto-refresh-v1.md) and remains
+**NOT ENABLED** (no active `.github/workflows` trigger in this repository yet).
+
 ---
 
 ## Objective
