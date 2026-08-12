@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ai-development-control-center.local/schemas/roadmap-contract-v1.json",
   "title": "RoadmapContractV1",
-  "description": "Machine-readable dependency-aware roadmap DAG bound to ProjectContractV1. Runtime parser must mirror this schema (additionalProperties:false). metadata/observedAt are audit-only and excluded from the authority fingerprint. Semantic DAG rules (cycles, missing deps, project binding) are enforced at runtime.",
+  "description": "Machine-readable dependency-aware roadmap DAG bound to ProjectContractV1. Runtime parser must mirror this schema (additionalProperties:false). Authority fingerprint hashes plan/DAG/scope fields only. node.status is mutable progress/observation and is excluded from the fingerprint; metadata/observedAt are audit-only and also excluded. Semantic DAG rules (cycles, missing deps, project binding) are enforced at runtime.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -64,7 +64,7 @@
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$"
           },
           "dependsOn": {
-            "description": "nodeId references. Runtime rejects missing refs, self-deps, duplicates, and cycles.",
+            "description": "Authority-bearing nodeId dependencies. Runtime rejects missing refs, self-deps, duplicates, and cycles. Changes alter the roadmap authority fingerprint.",
             "type": "array",
             "maxItems": 64,
             "items": {
@@ -76,6 +76,7 @@
             "uniqueItems": true
           },
           "completionCriteria": {
+            "description": "Authority-bearing completion conditions. Required non-empty. Changes alter the roadmap authority fingerprint.",
             "type": "array",
             "minItems": 1,
             "maxItems": 32,
@@ -83,9 +84,11 @@
             "uniqueItems": true
           },
           "estimatedComplexity": {
+            "description": "Authority-bearing complexity band.",
             "enum": ["XS", "S", "M", "L", "XL"]
           },
           "status": {
+            "description": "Mutable progress / observation state (PLANNED → READY → IN_PROGRESS → COMPLETE, etc.). Structurally validated, but MUST NOT participate in the authority fingerprint.",
             "enum": [
               "PLANNED",
               "READY",
@@ -97,7 +100,7 @@
             ]
           },
           "repository": {
-            "description": "Optional repository binding. When present, runtime requires membership in ProjectContractV1.repositories.",
+            "description": "Optional repository binding (authority-bearing when present). Runtime requires membership in ProjectContractV1.repositories.",
             "type": "string",
             "minLength": 3,
             "maxLength": 256,

@@ -17,6 +17,7 @@ import {
   ROADMAP_CONTRACT_VALIDATION_RESULT_SCHEMA,
   ROADMAP_GITHUB_ISSUE_MUTATION_IMPLEMENTED,
   ROADMAP_ISSUE_PROPOSAL_GENERATION_IMPLEMENTED,
+  ROADMAP_NODE_AUTHORITY_FINGERPRINT_KEYS,
   ROADMAP_NODE_COMPLEXITY_VALUES,
   ROADMAP_NODE_STATUS_VALUES,
   ROADMAP_PLANNER_IMPLEMENTED,
@@ -356,6 +357,104 @@ describe("ROADMAP-CONTRACT-V1 contract", () => {
     expect(roadmapContractAuthorityFingerprintsEqual(fpA, fpB)).toBe(true);
   });
 
+  it("P1: same authority + different node.status → same fingerprint", async () => {
+    const a = validRoadmap();
+    const progressStatuses = [
+      "PLANNED",
+      "READY",
+      "IN_PROGRESS",
+      "COMPLETE",
+    ] as const;
+    const fingerprints: string[] = [];
+    for (const status of progressStatuses) {
+      const variant: RoadmapContractV1 = {
+        ...a,
+        nodes: a.nodes.map((node) => cloneNode(node, { status })),
+      };
+      expect(parseRoadmapContractV1(variant).ok).toBe(true);
+      fingerprints.push(
+        await computeRoadmapContractAuthorityFingerprint(variant),
+      );
+    }
+    const baseline = fingerprints[0]!;
+    for (const fp of fingerprints) {
+      expect(fp).toBe(baseline);
+    }
+    const facts = captureRoadmapContractAuthorityFacts(a);
+    for (const node of facts.nodes) {
+      expect(Object.prototype.hasOwnProperty.call(node, "status")).toBe(false);
+      expect(Object.keys(node).sort()).toEqual(
+        Object.keys(node)
+          .filter((key) =>
+            (ROADMAP_NODE_AUTHORITY_FINGERPRINT_KEYS as readonly string[]).includes(
+              key,
+            ),
+          )
+          .sort(),
+      );
+    }
+  });
+
+  it("P1: dependency change → different fingerprint", async () => {
+    const a = validRoadmap();
+    const firstId = a.nodes[0]!.nodeId;
+    const second = a.nodes[1]!;
+    expect(second.dependsOn).not.toContain(firstId);
+    const b: RoadmapContractV1 = {
+      ...a,
+      nodes: [
+        a.nodes[0]!,
+        cloneNode(second, { dependsOn: [...second.dependsOn, firstId] }),
+        ...a.nodes.slice(2),
+      ],
+    };
+    const fpA = await computeRoadmapContractAuthorityFingerprint(a);
+    const fpB = await computeRoadmapContractAuthorityFingerprint(b);
+    expect(fpA).not.toBe(fpB);
+  });
+
+  it("P1: completionCriteria change → different fingerprint", async () => {
+    const a = validRoadmap();
+    const b: RoadmapContractV1 = {
+      ...a,
+      nodes: [
+        cloneNode(a.nodes[0]!, {
+          completionCriteria: [
+            ...a.nodes[0]!.completionCriteria,
+            "Additional authority-bearing completion criterion",
+          ],
+        }),
+        ...a.nodes.slice(1),
+      ],
+    };
+    const fpA = await computeRoadmapContractAuthorityFingerprint(a);
+    const fpB = await computeRoadmapContractAuthorityFingerprint(b);
+    expect(fpA).not.toBe(fpB);
+  });
+
+  it("P1: repository binding change → different fingerprint", async () => {
+    const a = validRoadmap();
+    const project = validProject();
+    const repos = project.repositories.map((ref) => ref.repository);
+    expect(repos.length).toBeGreaterThanOrEqual(1);
+    const current = a.nodes[0]!.repository;
+    const alternate =
+      repos.find((repo) => repo !== current) ?? `${repos[0]!}-alt-binding`;
+    // Prefer a second in-project repo when available; otherwise use a distinct
+    // string so fingerprint input changes (validation is not required here).
+    const b: RoadmapContractV1 = {
+      ...a,
+      nodes: [
+        cloneNode(a.nodes[0]!, { repository: alternate }),
+        ...a.nodes.slice(1),
+      ],
+    };
+    expect(b.nodes[0]!.repository).not.toBe(current);
+    const fpA = await computeRoadmapContractAuthorityFingerprint(a);
+    const fpB = await computeRoadmapContractAuthorityFingerprint(b);
+    expect(fpA).not.toBe(fpB);
+  });
+
   it("authority fingerprint changes when node objective changes", async () => {
     const a = validRoadmap();
     const b: RoadmapContractV1 = {
@@ -372,15 +471,22 @@ describe("ROADMAP-CONTRACT-V1 contract", () => {
     expect(fpA).not.toBe(fpB);
   });
 
-  it("captureRoadmapContractAuthorityFacts excludes metadata and sorts nodes", () => {
+  it("captureRoadmapContractAuthorityFacts excludes metadata, status, and sorts nodes", () => {
     const facts = captureRoadmapContractAuthorityFacts(validRoadmap());
     expect(Object.keys(facts).sort()).toEqual(
       [...ROADMAP_CONTRACT_AUTHORITY_FINGERPRINT_KEYS].sort(),
     );
     expect(Object.prototype.hasOwnProperty.call(facts, "metadata")).toBe(false);
     expect(ROADMAP_CONTRACT_METADATA_KEYS).toContain("observedAt");
+    expect(ROADMAP_NODE_AUTHORITY_FINGERPRINT_KEYS).not.toContain("status");
     const ids = facts.nodes.map((node) => node.nodeId);
     expect(ids).toEqual([...ids].sort());
+    for (const node of facts.nodes) {
+      expect(Object.prototype.hasOwnProperty.call(node, "status")).toBe(false);
+      for (const key of Object.keys(node)) {
+        expect(ROADMAP_NODE_AUTHORITY_FINGERPRINT_KEYS).toContain(key);
+      }
+    }
   });
 
   it("authority fingerprint is stable across node and key insertion order", async () => {

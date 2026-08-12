@@ -68,6 +68,8 @@ Roadmap validation ≠ Agent execution authority
 Roadmap validation ≠ scheduler / dispatch authority
 metadata / observedAt are audit-only and never silently become
   authority-bearing fingerprint input
+node.status is mutable progress / observation and never silently becomes
+  authority-bearing fingerprint input
 ```
 
 ---
@@ -97,16 +99,25 @@ metadata / observedAt are audit-only and never silently become
 
 ### Node fields
 
-| Field | Role |
-|---|---|
-| `nodeId` | Stable node identity |
-| `title` / `objective` | Bounded intent |
-| `phase` | Phase label |
-| `dependsOn` | Explicit nodeId dependencies |
-| `completionCriteria` | Required non-empty completion conditions |
-| `estimatedComplexity` | `XS` / `S` / `M` / `L` / `XL` |
-| `status` | Planning status (not execution authority) |
-| `repository` | Optional; must be within ProjectContract repositories |
+| Field | Role | Authority fingerprint |
+|---|---|---|
+| `nodeId` | Stable node identity | yes |
+| `title` / `objective` | Bounded intent | yes |
+| `phase` | Phase label | yes |
+| `dependsOn` | Explicit nodeId dependencies | yes |
+| `completionCriteria` | Required non-empty completion conditions | yes |
+| `estimatedComplexity` | `XS` / `S` / `M` / `L` / `XL` | yes |
+| `repository` | Optional; must be within ProjectContract repositories | yes (when present) |
+| `status` | Mutable progress / observation (`PLANNED` → `READY` → `IN_PROGRESS` → `COMPLETE`, etc.). Structurally validated; not plan authority. | **no** |
+
+Authority vs progress:
+
+```text
+Authority = plan / DAG / scope / completion criteria / repository binding
+Progress  = node.status transitions while the plan is unchanged
+```
+
+Ordinary progress transitions must not change the Roadmap authority identity.
 
 ---
 
@@ -136,13 +147,21 @@ Authority-bearing fields (hashed):
 schemaVersion, roadmapId, projectId, projectAuthorityFingerprint, nodes
 ```
 
+Per-node authority facts (hashed):
+
+```text
+nodeId, title, objective, phase, dependsOn, completionCriteria,
+estimatedComplexity, repository (when present)
+```
+
 Within nodes, fingerprint capture sorts by `nodeId` and sorts
 `dependsOn` / `completionCriteria` so insertion order is non-semantic.
 
-Excluded (audit only):
+Excluded (not authority):
 
 ```text
-metadata.* including metadata.observedAt
+node.status — mutable progress / observation
+metadata.* including metadata.observedAt — audit only
 validatedAt on validation results
 ```
 
@@ -153,7 +172,11 @@ SHA-256 hex over deterministic canonical JSON
 (canonicalJson from decisionFingerprint.ts — sorted object keys)
 ```
 
+Same authority facts with different `node.status` ⇒ **same** fingerprint.
+
 Same authority facts with different `metadata.observedAt` ⇒ **same** fingerprint.
+
+Changes to `dependsOn`, `completionCriteria`, or `repository` ⇒ **different** fingerprint.
 
 ---
 

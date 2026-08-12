@@ -88,6 +88,7 @@ export const ROADMAP_NODE_KEYS = [
 /**
  * Authority fingerprint includes project binding + node DAG authority.
  * Audit-only metadata (including observedAt) is excluded.
+ * Node `status` is progress/observation and is also excluded.
  */
 export const ROADMAP_CONTRACT_AUTHORITY_FINGERPRINT_KEYS = [
   "schemaVersion",
@@ -95,6 +96,23 @@ export const ROADMAP_CONTRACT_AUTHORITY_FINGERPRINT_KEYS = [
   "projectId",
   "projectAuthorityFingerprint",
   "nodes",
+] as const;
+
+/**
+ * Per-node authority facts hashed inside the roadmap fingerprint.
+ * `status` remains on RoadmapNodeV1 for progress observation but is not
+ * authority-bearing — PLANNED→READY→IN_PROGRESS→COMPLETE must not change
+ * the roadmap authority identity.
+ */
+export const ROADMAP_NODE_AUTHORITY_FINGERPRINT_KEYS = [
+  "nodeId",
+  "title",
+  "objective",
+  "phase",
+  "dependsOn",
+  "completionCriteria",
+  "estimatedComplexity",
+  "repository",
 ] as const;
 
 export const ROADMAP_CONTRACT_METADATA_KEYS = [
@@ -148,6 +166,11 @@ export interface RoadmapNodeV1 {
   dependsOn: string[];
   completionCriteria: string[];
   estimatedComplexity: RoadmapNodeComplexity;
+  /**
+   * Mutable progress / observation state (PLANNED → READY → IN_PROGRESS →
+   * COMPLETE, etc.). Structurally validated, but never part of the authority
+   * fingerprint.
+   */
   status: RoadmapNodeStatus;
   /** Optional; when present must be within ProjectContractV1 repositories. */
   repository?: string;
@@ -175,6 +198,10 @@ export interface RoadmapContractV1 {
   metadata?: RoadmapContractMetadataV1;
 }
 
+/**
+ * Authority-bearing node facts only.
+ * Excludes `status` (progress/observation) and any audit metadata.
+ */
 export interface RoadmapNodeAuthorityFactsV1 {
   nodeId: string;
   title: string;
@@ -183,7 +210,6 @@ export interface RoadmapNodeAuthorityFactsV1 {
   dependsOn: string[];
   completionCriteria: string[];
   estimatedComplexity: RoadmapNodeComplexity;
-  status: RoadmapNodeStatus;
   repository?: string;
 }
 
@@ -576,7 +602,11 @@ function sortStringsStable(values: string[]): string[] {
 }
 
 /**
- * Authority-bearing facts only. Excludes metadata (including observedAt).
+ * Authority-bearing facts only.
+ * Excludes:
+ * - metadata (including observedAt)
+ * - node.status (mutable progress / observation; not plan authority)
+ *
  * Nodes are sorted by nodeId; dependsOn / completionCriteria are sorted
  * so insertion order does not change the fingerprint.
  */
@@ -584,7 +614,7 @@ export function captureRoadmapContractAuthorityFacts(
   roadmap: RoadmapContractV1,
 ): RoadmapContractAuthorityFactsV1 {
   const nodes = [...roadmap.nodes]
-    .map((node) => ({
+    .map((node): RoadmapNodeAuthorityFactsV1 => ({
       nodeId: node.nodeId,
       title: node.title,
       objective: node.objective,
@@ -592,7 +622,6 @@ export function captureRoadmapContractAuthorityFacts(
       dependsOn: sortStringsStable(node.dependsOn),
       completionCriteria: sortStringsStable(node.completionCriteria),
       estimatedComplexity: node.estimatedComplexity,
-      status: node.status,
       ...(node.repository !== undefined
         ? { repository: node.repository }
         : {}),
@@ -612,7 +641,7 @@ export function captureRoadmapContractAuthorityFacts(
 
 /**
  * Deterministic SHA-256 hex over canonical JSON of authority facts.
- * metadata / observedAt never participate.
+ * metadata / observedAt / node.status never participate.
  */
 export async function computeRoadmapContractAuthorityFingerprint(
   roadmap: RoadmapContractV1,
