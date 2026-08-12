@@ -102,6 +102,16 @@ type ActionGatewayCommentRequestV1 = {
       subjectId: string;
       issuer?: string;
     };
+    /**
+     * Trusted provenance handle (server-issued). Caller cannot forge the
+     * artifact body. Gateway MUST re-verify against authoritative store.
+     * evidenceRefs alone never authorize.
+     */
+    authorizationArtifact: {
+      kind: "SERVER_ISSUED_AUTHORIZATION_V1";
+      artifactId: string;
+      artifactLocator?: string; // non-secret audit locator only
+    };
     authorizedAt: string; // ISO-8601
     /**
      * Absolute expiry. If omitted, effective expiry =
@@ -109,7 +119,8 @@ type ActionGatewayCommentRequestV1 = {
      * Validity window: authorizedAt <= nowIso <= effectiveExpiry.
      */
     expiresAt?: string;
-    evidenceRefs: string[]; // non-secret refs (e.g. authorizing comment URLs)
+    /** Supplemental audit pointers only — not authorization provenance. */
+    evidenceRefs: string[];
   };
 
   /**
@@ -156,8 +167,38 @@ Canonicalization: deterministic JSON (sorted object keys) → SHA-256 hex
 (same family as Approval Ledger `canonicalJson` / decision fingerprint).
 
 Human authorization must bind to that fingerprint **and** to
-`authorizedIdempotencyKey === request.idempotencyKey`. Content fingerprint
-alone is not enough to reuse one authorization across different attempt keys.
+`authorizedIdempotencyKey === request.idempotencyKey` **and** to
+`authorizedRequestedBy === request.requestedBy`. Content fingerprint
+alone is not enough to reuse one authorization across different attempt keys
+or requesters.
+
+### Authorization provenance (trusted artifact)
+
+Caller-assembled JSON is never sufficient authorization.
+
+```text
+Gateway auth layer
+  → authenticatedPrincipal (server-derived)
+  → must equal request.requestedBy
+  → must equal humanAuthorization.authorizedRequestedBy
+
+humanAuthorization.authorizationArtifact.artifactId
+  → trusted store lookup (Approval Ledger grant / authz table / signed artifact)
+  → trustedAuthorizationLookup.status === VERIFIED
+  → bindings must match capability + repository + target + fingerprint
+       + idempotencyKey + requestedBy + authorizedAt/expiresAt
+```
+
+`evidenceRefs` are supplemental audit pointers only. Non-empty `evidenceRefs`
+without a VERIFIED trusted artifact ⇒ `REJECTED_AUTHORIZATION_ARTIFACT`.
+
+Future artifact issuers (design candidates; implementation NOT AUTHORIZED yet):
+
+```text
+Approval Ledger authorization grant id
+dedicated Action Gateway authorization table row
+server-signed authorization artifact verified by Gateway key material
+```
 
 ### Authorization lifetime
 
@@ -182,55 +223,73 @@ observedTargetNumber   == request.target.number
 (+ nodeId/title when expected)
 ```
 
-Malformed runtime JSON is fail-closed via structural parse helpers
-(`parseActionGatewayCommentRequest` / `parseActionGatewayPreWriteOptions`) —
-helpers must not throw; they return `REJECTED_SCHEMA`.
+### Gateway JSON entry + schema parity
+
+```text
+raw HTTP body
+  → parseGatewayJsonBody (syntax errors → REJECTED_SCHEMA, no throw)
+  → parseActionGatewayCommentRequest
+       mirrors JSON Schema including additionalProperties:false
+       and evidenceRefs maxItems/maxLength
+  → evaluateCommentRequestPreWrite
+```
+
+Canonical JSON Schema and runtime accepted shape MUST NOT drift.
+Unknown properties (e.g. `operation`) ⇒ `REJECTED_SCHEMA`.
 
 ---
 
 ## 3. Machine-readable result contract
 
 ```ts
-type ActionGatewayCommentResultStatus =
-  | "SUCCEEDED"
-  | "REJECTED"
-  | "FAILED"
-  | "UNKNOWN";
-
-type ActionGatewayCommentResultV1 = {
-  schemaVersion: "ACTION-GATEWAY-COMMENT-RESULT-V1";
-  capabilityId: "github.comment.create.v1";
-  status: ActionGatewayCommentResultStatus;
-
-  repository: string;
-  target: { kind: "ISSUE" | "PULL_REQUEST"; number: number };
-
-  /** Present only when status === SUCCEEDED and creation is positively confirmed. */
-  comment?: {
-    id: number;
-    url: string;
-  };
-
-  requestFingerprint: string;
-  idempotencyKey: string;
-
-  authorization: {
-    matched: boolean;
-    evidenceRefs: string[];
-  };
-
-  timestamps: {
-    acceptedAt?: string;  // gateway accepted request for evaluation
-    attemptedAt?: string; // adapter write attempted (absent on REJECTED)
-    completedAt: string;  // terminal result time
-  };
-
-  reasonCode: string;     // stable machine code (see §6)
-  reasonMessage: string;  // non-secret human-readable summary
-
-  /** Never include tokens, Authorization headers, or raw credential material. */
-};
+type ActionGatewayCommentResultV1 =
+  | {
+      schemaVersion: "ACTION-GATEWAY-COMMENT-RESULT-V1";
+      capabilityId: "github.comment.create.v1";
+      status: "SUCCEEDED";
+      repository: string;
+      target: { kind: "ISSUE" | "PULL_REQUEST"; number: number };
+      comment: { id: number; url: string };
+      requestFingerprint: string;
+      idempotencyKey: string;
+      authorization: {
+        matched: boolean;
+        evidenceRefs: string[];
+        artifactId?: string;
+      };
+      timestamps: {
+        acceptedAt?: string;
+        attemptedAt?: string;
+        completedAt: string;
+      };
+      reasonCode: string;
+      reasonMessage: string;
+    }
+  | {
+      schemaVersion: "ACTION-GATEWAY-COMMENT-RESULT-V1";
+      capabilityId: "github.comment.create.v1";
+      status: "REJECTED" | "FAILED" | "UNKNOWN";
+      repository: string;
+      target: { kind: "ISSUE" | "PULL_REQUEST"; number: number };
+      comment?: undefined;
+      requestFingerprint: string;
+      idempotencyKey: string;
+      authorization: {
+        matched: boolean;
+        evidenceRefs: string[];
+        artifactId?: string;
+      };
+      timestamps: {
+        acceptedAt?: string;
+        attemptedAt?: string;
+        completedAt: string;
+      };
+      reasonCode: string;
+      reasonMessage: string;
+    };
 ```
+
+`comment.id/url` may appear **only** on `SUCCEEDED`.
 
 ---
 
@@ -240,7 +299,9 @@ type ActionGatewayCommentResultV1 = {
 2. `recommendedNextAction.authorizesMutation` remains **`false`** and is not an
    input to the Gateway authorizer.
 3. Mutation requires `humanAuthorization` bound to **exact**
-   `capabilityId + repository + target + requestFingerprint + idempotencyKey + requestedBy`.
+   `capabilityId + repository + target + requestFingerprint + idempotencyKey + requestedBy`
+   **and** a VERIFIED server-issued `authorizationArtifact` re-checked by Gateway.
+   Also: `authenticatedPrincipal == requestedBy == authorizedRequestedBy`.
 4. Missing / malformed / expired / not-yet-valid / mismatched authorization ⇒ `REJECTED`
    before any GitHub write. Default TTL applies when `expiresAt` is omitted.
    Validity window is `authorizedAt <= nowIso <= effectiveExpiry`.
@@ -254,29 +315,37 @@ type ActionGatewayCommentResultV1 = {
 8. Authorization for `github.comment.create.v1` cannot authorize Ready / Merge /
    Close / workflow dispatch / repository-file writes / other capabilities.
 9. Same `idempotencyKey` (within principal+capability+repository scope) must not
-   create a second comment; return the prior terminal result.
+   create a second comment; return the prior terminal result **only when**
+   stored `repository/target/requestFingerprint/requestedBy` match.
+   Mismatch ⇒ `REJECTED_IDEMPOTENCY_CONFLICT`.
    Different key **or** different `requestedBy` requires a **new** Human
-   authorization bound to that key and requester.
+   authorization bound to that key and requester (plus new trusted artifact).
 10. Secrets / tokens never appear in request, result, UI, logs, or persisted
     evidence documents.
 
 ### Authorization binder checklist
 
 ```text
+authenticatedPrincipal  == request.requestedBy
+authorizedRequestedBy   == request.requestedBy
 authorizedCapabilityId  == request.capabilityId == allowlist entry
 authorizedRepository    == request.repository == allowlist repo
                             == expectedObservations.repository
 authorizedTarget        == request.target == expectedObservations target
 authorizedRequestFingerprint == computeCommentRequestFingerprint(...)
 authorizedIdempotencyKey == request.idempotencyKey
-authorizedRequestedBy   == request.requestedBy
+authorizationArtifact   → trustedAuthorizationLookup.status == VERIFIED
+                          + bindings match request + auth timestamps
 nowIso provided independently of authorizedAt
-authorizedAt <= nowIso <= effectiveExpiry (expiresAt or authorizedAt+DEFAULT_TTL)
-evidenceRefs non-empty and non-secret
+authorizedAt <= nowIso <= effectiveExpiry
+evidenceRefs            = supplemental audit only (still schema-limited)
 live re-observation:
   observedTargetExists === true
   observedRepository/kind/number == request target
   + if expected targetNodeId/title set → live observed values required and equal
+idempotency existing record (if any):
+  same repository + target + fingerprint + requestedBy + key → REPLAY
+  else → REJECTED_IDEMPOTENCY_CONFLICT
 ```
 
 Any failure ⇒ `REJECTED` / no adapter call.
@@ -299,17 +368,18 @@ idempotency scope =
 
 | Situation | Required behavior |
 |---|---|
-| First attempt, all checks pass, write confirmed | Store terminal `SUCCEEDED` under key; return comment id/url |
-| Retry with **same** key after `SUCCEEDED` | Return prior `SUCCEEDED` (**no** second GitHub POST) |
-| Retry with **same** key after `REJECTED` | Return prior `REJECTED` (deterministic); do not invent success |
-| Retry with **same** key after `FAILED` | Return prior `FAILED` unless a later Human-authorized recovery design says otherwise (V1: no auto-retry write) |
-| Retry with **same** key while prior is `UNKNOWN` | Run **reconciliation only** (§6); do not blindly POST again |
-| Different key, same content fingerprint | **Forbidden** with the prior Human auth. Requires a **new** authorization whose `authorizedIdempotencyKey` equals the new key. Reusing prior auth ⇒ `REJECTED_IDEMPOTENCY_KEY_MISMATCH` |
+| First attempt, all checks pass, write confirmed | Store terminal `SUCCEEDED` under key **with** repository/target/fingerprint/requestedBy; return comment id/url |
+| Retry with **same** key after `SUCCEEDED` and **same** identity | Return prior `SUCCEEDED` (**no** second GitHub POST) |
+| Same key, **different** fingerprint/target/repository/requestedBy | `REJECTED_IDEMPOTENCY_CONFLICT` (do not replay foreign result) |
+| Retry with **same** key after `REJECTED` (same identity) | Return prior `REJECTED` (deterministic); do not invent success |
+| Retry with **same** key after `FAILED` (same identity) | Return prior `FAILED` unless a later Human-authorized recovery design says otherwise (V1: no auto-retry write) |
+| Retry with **same** key while prior is `UNKNOWN` (same identity) | Run **reconciliation only** (§6); do not blindly POST again |
+| Different key, same content fingerprint | **Forbidden** with the prior Human auth/artifact. Requires a **new** authorization + artifact whose `authorizedIdempotencyKey` equals the new key |
 | Missing / empty idempotencyKey | `REJECTED` |
 | Auth `authorizedIdempotencyKey` ≠ request key | `REJECTED_IDEMPOTENCY_KEY_MISMATCH` |
 
 Duplicate publication for the same `idempotencyKey` is **forbidden**.
-One Human authorization authorizes **exactly one** idempotencyKey.
+One Human authorization + trusted artifact authorizes **exactly one** idempotencyKey.
 
 ---
 
@@ -324,16 +394,18 @@ One Human authorization authorizes **exactly one** idempotencyKey.
 
 ### UNKNOWN reconciliation (mandatory)
 
-On `UNKNOWN` or UNKNOWN retry:
+On `UNKNOWN` or UNKNOWN retry, promotion to `SUCCEEDED` requires **positive proof
+stronger than ordinary validation**:
 
 ```text
-1. Look up idempotency store for a prior terminal SUCCEEDED under the same scope.
+1. Look up idempotency store for a prior terminal SUCCEEDED under the same scope
+   where ALL of the following match the current request:
+     repository, target.kind, target.number, idempotencyKey, requestFingerprint
    - If found → return that SUCCEEDED (no new write).
-2. Optionally search recent comments on the target for an embedded
-   non-secret idempotency marker (design: HTML comment or footer line
-   containing the idempotencyKey). If exactly one match → treat as SUCCEEDED
-   and record it.
-3. If still unproven → remain UNKNOWN.
+2. Marker search (optional): a candidate comment must embed / carry proof of
+     repository + target + idempotencyKey + requestFingerprint
+   (not merely the raw key string). Exactly one full match → SUCCEEDED.
+3. Partial matches (key-only, wrong target, wrong fingerprint) remain UNKNOWN.
 4. Do NOT automatically POST again unless reconciliation proves no prior success
    AND a later Human-authorized recovery slice explicitly allows a new attempt
    (NOT AUTHORIZED in this design-only slice).
@@ -351,12 +423,15 @@ REJECTED_AUTHORIZATION_MISSING
 REJECTED_AUTHORIZATION_MISMATCH
 REJECTED_AUTHORIZATION_EXPIRED
 REJECTED_AUTHORIZATION_NOT_YET_VALID
+REJECTED_AUTHORIZATION_ARTIFACT
+REJECTED_AUTHENTICATED_PRINCIPAL_MISMATCH
 REJECTED_FINGERPRINT_MISMATCH
 REJECTED_TARGET_NOT_FOUND
 REJECTED_TARGET_MISMATCH
 REJECTED_PAYLOAD_LIMIT
 REJECTED_IDEMPOTENCY_KEY_MISSING
 REJECTED_IDEMPOTENCY_KEY_MISMATCH
+REJECTED_IDEMPOTENCY_CONFLICT
 REJECTED_REQUESTER_MISMATCH
 REJECTED_OBSERVATION_MISSING
 REJECTED_EVALUATION_CLOCK_MISSING
@@ -418,12 +493,16 @@ detail; design requires a deny-on-secret-scan hook before write).
 | Overlay “next action” treated as auth | Explicit rule: overlay never authorizes; reason `REJECTED_OVERLAY_NOT_AUTHORIZATION` |
 | Auth replay on different Issue/PR | Exact target + fingerprint binding |
 | Auth reused with a different idempotencyKey | `authorizedIdempotencyKey` exact match |
-| Auth reused under a different requestedBy / scope | `authorizedRequestedBy` exact match |
+| Auth reused under a different requestedBy / scope | `authorizedRequestedBy` + authenticatedPrincipal exact match |
+| Caller forges humanAuthorization JSON | Trusted `authorizationArtifact` + server-side VERIFIED lookup required |
+| Same idempotencyKey, different target/fingerprint | `REJECTED_IDEMPOTENCY_CONFLICT` |
+| UNKNOWN promoted from foreign prior/marker | Require repository+target+key+fingerprint proof |
 | Clock derived from `authorizedAt` skips expiry | Independent required `nowIso`; default TTL always applied when `expiresAt` omitted |
 | Future-dated authorization used early | `authorizedAt <= nowIso <= expiry` |
 | Skipping live target probe / identity | existence + repository/kind/number required; expected nodeId/title require live values |
-| FAILED/UNKNOWN carrying comment ids | Result invariant: comment only on SUCCEEDED |
-| Malformed runtime JSON throws | Structural parse helpers fail closed as `REJECTED_SCHEMA` |
+| FAILED/UNKNOWN carrying comment ids | Result invariant + discriminated union: comment only on SUCCEEDED |
+| Schema/runtime drift (unknown props, evidence limits) | Parser mirrors JSON Schema; contract tests reject extras |
+| Malformed JSON syntax throws | `parseGatewayJsonBody` → `REJECTED_SCHEMA` |
 | Auth for comment used as Ready/Merge | Capability allowlist exact-match only |
 | Cross-repo write | Repository allowlist exact-match |
 | Network retry duplicates comment | Idempotency key scope + replay prior result |

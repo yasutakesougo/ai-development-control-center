@@ -22,6 +22,11 @@
       "subjectId": "example-human-subject",
       "issuer": "https://example.invalid/issuer"
     },
+    "authorizationArtifact": {
+      "kind": "SERVER_ISSUED_AUTHORIZATION_V1",
+      "artifactId": "authz-grant-41-a1",
+      "artifactLocator": "ledger://authorization/authz-grant-41-a1"
+    },
     "authorizedAt": "2026-08-12T06:30:00.000Z",
     "expiresAt": "2026-08-12T18:30:00.000Z",
     "evidenceRefs": [

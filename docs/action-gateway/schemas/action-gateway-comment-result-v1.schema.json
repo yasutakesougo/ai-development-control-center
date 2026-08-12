@@ -51,7 +51,8 @@
         "evidenceRefs": {
           "type": "array",
           "items": { "type": "string" }
-        }
+        },
+        "artifactId": { "type": "string", "minLength": 1, "maxLength": 128 }
       }
     },
     "timestamps": {

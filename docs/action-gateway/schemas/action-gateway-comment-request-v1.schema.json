@@ -57,6 +57,7 @@
         "authorizedRequestFingerprint",
         "authorizedIdempotencyKey",
         "authorizedRequestedBy",
+        "authorizationArtifact",
         "authorizedAt",
         "evidenceRefs"
       ],
@@ -90,6 +91,25 @@
             "principalKind": { "const": "HUMAN" },
             "subjectId": { "type": "string", "minLength": 1 },
             "issuer": { "type": "string", "minLength": 1 }
+          }
+        },
+        "authorizationArtifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "artifactId"],
+          "properties": {
+            "kind": { "const": "SERVER_ISSUED_AUTHORIZATION_V1" },
+            "artifactId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[\\x20-\\x7E]+$"
+            },
+            "artifactLocator": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
           }
         },
         "authorizedAt": { "type": "string", "minLength": 1 },

@@ -16,6 +16,8 @@ export const ACTION_GATEWAY_COMMENT_RESULT_SCHEMA =
   "ACTION-GATEWAY-COMMENT-RESULT-V1" as const;
 export const GITHUB_COMMENT_CREATE_CAPABILITY_ID =
   "github.comment.create.v1" as const;
+export const ACTION_GATEWAY_AUTHORIZATION_ARTIFACT_KIND =
+  "SERVER_ISSUED_AUTHORIZATION_V1" as const;
 
 /** Execution / adapter remains unimplemented in this design-only slice. */
 export const ACTION_GATEWAY_EXECUTION_IMPLEMENTED = false as const;
@@ -32,6 +34,9 @@ export const ACTION_GATEWAY_ALLOWED_REPOSITORIES = [
 export const ACTION_GATEWAY_COMMENT_BODY_MAX = 65536 as const;
 export const ACTION_GATEWAY_COMMENT_PURPOSE_MAX = 2048 as const;
 export const ACTION_GATEWAY_IDEMPOTENCY_KEY_MAX = 128 as const;
+export const ACTION_GATEWAY_EVIDENCE_REFS_MAX = 16 as const;
+export const ACTION_GATEWAY_EVIDENCE_REF_MAX_LEN = 2048 as const;
+export const ACTION_GATEWAY_ARTIFACT_ID_MAX = 128 as const;
 
 /**
  * When `humanAuthorization.expiresAt` is omitted, authorization expires at
@@ -40,17 +45,44 @@ export const ACTION_GATEWAY_IDEMPOTENCY_KEY_MAX = 128 as const;
  */
 export const ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS = 60 * 60 * 1000;
 
-export type ActionGatewayTargetKind = "ISSUE" | "PULL_REQUEST";
+/** Exact root keys accepted by the V1 request schema (additionalProperties: false). */
+export const ACTION_GATEWAY_REQUEST_ROOT_KEYS = [
+  "schemaVersion",
+  "capabilityId",
+  "repository",
+  "target",
+  "body",
+  "purpose",
+  "idempotencyKey",
+  "requestedBy",
+  "humanAuthorization",
+  "expectedObservations",
+] as const;
 
-export type ActionGatewayCommentResultStatus =
-  | "SUCCEEDED"
-  | "REJECTED"
-  | "FAILED"
-  | "UNKNOWN";
+export const ACTION_GATEWAY_HUMAN_AUTH_KEYS = [
+  "authorizedCapabilityId",
+  "authorizedRepository",
+  "authorizedTarget",
+  "authorizedRequestFingerprint",
+  "authorizedIdempotencyKey",
+  "authorizedRequestedBy",
+  "authorizationArtifact",
+  "authorizedAt",
+  "expiresAt",
+  "evidenceRefs",
+] as const;
+
+export type ActionGatewayTargetKind = "ISSUE" | "PULL_REQUEST";
 
 export interface ActionGatewayCommentTarget {
   kind: ActionGatewayTargetKind;
   number: number;
+}
+
+export interface ActionGatewayPrincipal {
+  principalKind: "HUMAN";
+  subjectId: string;
+  issuer?: string;
 }
 
 export interface ActionGatewayCommentRequestFacts {
@@ -61,28 +93,37 @@ export interface ActionGatewayCommentRequestFacts {
   purpose: string;
 }
 
+/**
+ * Opaque handle to a server-issued authorization artifact.
+ * Callers may present the id; they must not invent the artifact contents.
+ * Gateway re-verifies against a trusted store (future Approval Ledger grant,
+ * dedicated authorization table, or signed server artifact).
+ */
+export interface ActionGatewayAuthorizationArtifactRef {
+  kind: typeof ACTION_GATEWAY_AUTHORIZATION_ARTIFACT_KIND;
+  artifactId: string;
+  /** Optional non-secret locator for humans/audit; never a token. */
+  artifactLocator?: string;
+}
+
 export interface ActionGatewayHumanAuthorization {
   authorizedCapabilityId: typeof GITHUB_COMMENT_CREATE_CAPABILITY_ID;
   authorizedRepository: string;
   authorizedTarget: ActionGatewayCommentTarget;
   authorizedRequestFingerprint: string;
-  /**
-   * Exact attempt binding. Must equal `request.idempotencyKey`.
-   * Prevents reusing one Human authorization across different keys.
-   */
   authorizedIdempotencyKey: string;
+  authorizedRequestedBy: ActionGatewayPrincipal;
   /**
-   * Exact requester binding. Must equal `request.requestedBy`.
-   * Prevents moving one authorization into another idempotency scope.
+   * Trusted provenance handle. evidenceRefs alone never authorize.
+   * Server must re-verify this artifact before any write eligibility.
    */
-  authorizedRequestedBy: {
-    principalKind: "HUMAN";
-    subjectId: string;
-    issuer?: string;
-  };
+  authorizationArtifact: ActionGatewayAuthorizationArtifactRef;
   authorizedAt: string;
-  /** Optional absolute expiry. If omitted, default TTL from authorizedAt applies. */
   expiresAt?: string;
+  /**
+   * Supplemental non-secret audit pointers only.
+   * Not sufficient as authorization provenance by themselves.
+   */
   evidenceRefs: string[];
 }
 
@@ -103,27 +144,28 @@ export interface ActionGatewayCommentRequestV1 {
   body: string;
   purpose: string;
   idempotencyKey: string;
-  requestedBy: {
-    principalKind: "HUMAN";
-    subjectId: string;
-    issuer?: string;
-  };
+  requestedBy: ActionGatewayPrincipal;
   humanAuthorization: ActionGatewayHumanAuthorization;
   expectedObservations: ActionGatewayExpectedObservations;
 }
 
-export interface ActionGatewayCommentResultV1 {
+export type ActionGatewayCommentResultStatus =
+  | "SUCCEEDED"
+  | "REJECTED"
+  | "FAILED"
+  | "UNKNOWN";
+
+interface ActionGatewayCommentResultBase {
   schemaVersion: typeof ACTION_GATEWAY_COMMENT_RESULT_SCHEMA;
   capabilityId: typeof GITHUB_COMMENT_CREATE_CAPABILITY_ID;
-  status: ActionGatewayCommentResultStatus;
   repository: string;
   target: ActionGatewayCommentTarget;
-  comment?: { id: number; url: string };
   requestFingerprint: string;
   idempotencyKey: string;
   authorization: {
     matched: boolean;
     evidenceRefs: string[];
+    artifactId?: string;
   };
   timestamps: {
     acceptedAt?: string;
@@ -134,6 +176,17 @@ export interface ActionGatewayCommentResultV1 {
   reasonMessage: string;
 }
 
+/** Discriminated result: comment is present only on SUCCEEDED. */
+export type ActionGatewayCommentResultV1 =
+  | (ActionGatewayCommentResultBase & {
+      status: "SUCCEEDED";
+      comment: { id: number; url: string };
+    })
+  | (ActionGatewayCommentResultBase & {
+      status: "REJECTED" | "FAILED" | "UNKNOWN";
+      comment?: undefined;
+    });
+
 export type ActionGatewayRejectReason =
   | "REJECTED_SCHEMA"
   | "REJECTED_CAPABILITY_NOT_ALLOWED"
@@ -142,12 +195,15 @@ export type ActionGatewayRejectReason =
   | "REJECTED_AUTHORIZATION_MISMATCH"
   | "REJECTED_AUTHORIZATION_EXPIRED"
   | "REJECTED_AUTHORIZATION_NOT_YET_VALID"
+  | "REJECTED_AUTHORIZATION_ARTIFACT"
+  | "REJECTED_AUTHENTICATED_PRINCIPAL_MISMATCH"
   | "REJECTED_FINGERPRINT_MISMATCH"
   | "REJECTED_TARGET_NOT_FOUND"
   | "REJECTED_TARGET_MISMATCH"
   | "REJECTED_PAYLOAD_LIMIT"
   | "REJECTED_IDEMPOTENCY_KEY_MISSING"
   | "REJECTED_IDEMPOTENCY_KEY_MISMATCH"
+  | "REJECTED_IDEMPOTENCY_CONFLICT"
   | "REJECTED_REQUESTER_MISMATCH"
   | "REJECTED_OBSERVATION_MISSING"
   | "REJECTED_EVALUATION_CLOCK_MISSING"
@@ -167,13 +223,70 @@ export interface ActionGatewayEvaluationEligible {
   reasonMessage: string;
   requestFingerprint: string;
   writeAttempted: false;
-  /** Execution remains unimplemented — callers must not invoke GitHub. */
   executionImplemented: false;
 }
 
 export type ActionGatewayPreWriteEvaluation =
   | ActionGatewayEvaluationRejected
   | ActionGatewayEvaluationEligible;
+
+/**
+ * Server-side lookup of a trusted authorization artifact.
+ * Populated only after Gateway loads the artifact from an authoritative store.
+ */
+export type TrustedAuthorizationLookup =
+  | {
+      status: "VERIFIED";
+      artifactId: string;
+      boundCapabilityId: typeof GITHUB_COMMENT_CREATE_CAPABILITY_ID;
+      boundRepository: string;
+      boundTarget: ActionGatewayCommentTarget;
+      boundRequestFingerprint: string;
+      boundIdempotencyKey: string;
+      boundRequestedBy: ActionGatewayPrincipal;
+      boundAuthorizedAt: string;
+      boundExpiresAt?: string;
+    }
+  | {
+      status: "MISSING" | "MISMATCH" | "REVOKED" | "EXPIRED";
+      artifactId: string;
+    };
+
+export interface ActionGatewayIdempotencyRecord {
+  capabilityId: typeof GITHUB_COMMENT_CREATE_CAPABILITY_ID;
+  repository: string;
+  target: ActionGatewayCommentTarget;
+  requestFingerprint: string;
+  idempotencyKey: string;
+  requestedBy: ActionGatewayPrincipal;
+  result: ActionGatewayCommentResultV1;
+}
+
+export interface ActionGatewayPreWriteOptions {
+  nowIso: string;
+  /**
+   * Authenticated caller from the Gateway auth layer (not request JSON).
+   * Must equal request.requestedBy and authorizedRequestedBy.
+   */
+  authenticatedPrincipal: ActionGatewayPrincipal;
+  /**
+   * Result of server-side authorization artifact re-verification.
+   * Required for eligibility; caller-supplied artifact bodies are never trusted.
+   */
+  trustedAuthorizationLookup: TrustedAuthorizationLookup;
+  /**
+   * Existing idempotency-store record for this scope, if any.
+   * When present, repository/target/fingerprint/requestedBy must match or CONFLICT.
+   */
+  existingIdempotencyRecord?: ActionGatewayIdempotencyRecord | null;
+  observedTargetExists?: boolean;
+  observedRepository?: string;
+  observedTargetKind?: ActionGatewayTargetKind;
+  observedTargetNumber?: number;
+  observedTargetNodeId?: string;
+  observedTargetTitle?: string;
+  overlayUsedAsAuthorization?: boolean;
+}
 
 /** Semantic facts included in the request fingerprint (no audit/auth fields). */
 export function commentRequestFingerprintFacts(
@@ -229,8 +342,8 @@ function targetsEqual(
 }
 
 function requestedByEqual(
-  a: { principalKind: string; subjectId: string; issuer?: string },
-  b: { principalKind: string; subjectId: string; issuer?: string },
+  a: ActionGatewayPrincipal,
+  b: ActionGatewayPrincipal,
 ): boolean {
   return (
     a.principalKind === b.principalKind &&
@@ -243,6 +356,13 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key));
+}
+
 function isTargetKind(value: unknown): value is ActionGatewayTargetKind {
   return value === "ISSUE" || value === "PULL_REQUEST";
 }
@@ -250,6 +370,7 @@ function isTargetKind(value: unknown): value is ActionGatewayTargetKind {
 function isTarget(value: unknown): value is ActionGatewayCommentTarget {
   return (
     isPlainObject(value) &&
+    hasOnlyKeys(value, ["kind", "number"]) &&
     isTargetKind(value.kind) &&
     typeof value.number === "number" &&
     Number.isInteger(value.number) &&
@@ -257,10 +378,9 @@ function isTarget(value: unknown): value is ActionGatewayCommentTarget {
   );
 }
 
-function isRequestedBy(
-  value: unknown,
-): value is { principalKind: "HUMAN"; subjectId: string; issuer?: string } {
+function isPrincipal(value: unknown): value is ActionGatewayPrincipal {
   if (!isPlainObject(value)) return false;
+  if (!hasOnlyKeys(value, ["principalKind", "subjectId", "issuer"])) return false;
   if (value.principalKind !== "HUMAN") return false;
   if (typeof value.subjectId !== "string" || value.subjectId.length < 1) return false;
   if (value.issuer !== undefined && (typeof value.issuer !== "string" || value.issuer.length < 1)) {
@@ -269,33 +389,74 @@ function isRequestedBy(
   return true;
 }
 
-export interface ActionGatewayPreWriteOptions {
-  /**
-   * Independent evaluation clock (ISO-8601). Required.
-   * Must not be derived from `authorizedAt`.
-   * Validity window: authorizedAt <= nowIso <= effectiveExpiry.
-   */
-  nowIso: string;
-  /**
-   * Live read-only re-observation of target existence.
-   * Must be the boolean `true` to proceed; omitted/false ⇒ REJECTED.
-   */
-  observedTargetExists?: boolean;
-  /** Live observed repository; required and must equal request.repository. */
-  observedRepository?: string;
-  /** Live observed target kind; required and must equal request.target.kind. */
-  observedTargetKind?: ActionGatewayTargetKind;
-  /** Live observed target number; required and must equal request.target.number. */
-  observedTargetNumber?: number;
-  observedTargetNodeId?: string;
-  observedTargetTitle?: string;
-  /** If caller attempts to pass STATUS-OVERLAY as authorization. */
-  overlayUsedAsAuthorization?: boolean;
+function isAuthorizationArtifactRef(
+  value: unknown,
+): value is ActionGatewayAuthorizationArtifactRef {
+  if (!isPlainObject(value)) return false;
+  if (!hasOnlyKeys(value, ["kind", "artifactId", "artifactLocator"])) return false;
+  if (value.kind !== ACTION_GATEWAY_AUTHORIZATION_ARTIFACT_KIND) return false;
+  if (
+    typeof value.artifactId !== "string" ||
+    value.artifactId.length < 1 ||
+    value.artifactId.length > ACTION_GATEWAY_ARTIFACT_ID_MAX ||
+    !/^[\x20-\x7E]+$/.test(value.artifactId)
+  ) {
+    return false;
+  }
+  if (
+    value.artifactLocator !== undefined &&
+    (typeof value.artifactLocator !== "string" ||
+      value.artifactLocator.length < 1 ||
+      value.artifactLocator.length > ACTION_GATEWAY_EVIDENCE_REF_MAX_LEN)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isEvidenceRefs(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= ACTION_GATEWAY_EVIDENCE_REFS_MAX &&
+    value.every(
+      (ref) =>
+        typeof ref === "string" &&
+        ref.length >= 1 &&
+        ref.length <= ACTION_GATEWAY_EVIDENCE_REF_MAX_LEN,
+    )
+  );
+}
+
+/**
+ * Gateway entry: raw HTTP body → JSON value.
+ * Syntax errors become REJECTED_SCHEMA (never throw to callers).
+ */
+export function parseGatewayJsonBody(raw: unknown):
+  | { ok: true; value: unknown }
+  | { ok: false; reasonCode: "REJECTED_SCHEMA"; reasonMessage: string } {
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "Gateway body must be a UTF-8 JSON string.",
+    };
+  }
+  try {
+    return { ok: true, value: JSON.parse(raw) as unknown };
+  } catch {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "Gateway body is not valid JSON syntax.",
+    };
+  }
 }
 
 /**
  * Structural fail-closed parse for request documents.
- * Never throws on malformed JSON-shaped input.
+ * Mirrors docs/action-gateway/schemas/action-gateway-comment-request-v1.schema.json
+ * including additionalProperties:false and evidenceRefs limits.
  */
 export function parseActionGatewayCommentRequest(
   value: unknown,
@@ -309,6 +470,13 @@ export function parseActionGatewayCommentRequest(
       reasonMessage: "Request must be a JSON object.",
     };
   }
+  if (!hasOnlyKeys(value, ACTION_GATEWAY_REQUEST_ROOT_KEYS)) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "Request contains unknown properties (additionalProperties forbidden).",
+    };
+  }
   if (
     value.schemaVersion !== ACTION_GATEWAY_COMMENT_REQUEST_SCHEMA ||
     value.capabilityId !== GITHUB_COMMENT_CREATE_CAPABILITY_ID
@@ -319,18 +487,28 @@ export function parseActionGatewayCommentRequest(
       reasonMessage: "Request schemaVersion/capabilityId are not the V1 comment contract.",
     };
   }
-  if (typeof value.repository !== "string" || !isTarget(value.target)) {
+  if (
+    value.repository !== "yasutakesougo/ai-development-control-center" ||
+    !isTarget(value.target)
+  ) {
     return {
       ok: false,
       reasonCode: "REJECTED_SCHEMA",
       reasonMessage: "Request repository/target are malformed.",
     };
   }
-  if (typeof value.body !== "string" || typeof value.purpose !== "string") {
+  if (
+    typeof value.body !== "string" ||
+    value.body.length < 1 ||
+    value.body.length > ACTION_GATEWAY_COMMENT_BODY_MAX ||
+    typeof value.purpose !== "string" ||
+    value.purpose.length < 1 ||
+    value.purpose.length > ACTION_GATEWAY_COMMENT_PURPOSE_MAX
+  ) {
     return {
       ok: false,
       reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: "Request body/purpose must be strings.",
+      reasonMessage: "Request body/purpose failed schema size constraints.",
     };
   }
   if (!validIdempotencyKey(value.idempotencyKey)) {
@@ -340,7 +518,7 @@ export function parseActionGatewayCommentRequest(
       reasonMessage: "Request idempotencyKey is malformed.",
     };
   }
-  if (!isRequestedBy(value.requestedBy)) {
+  if (!isPrincipal(value.requestedBy)) {
     return {
       ok: false,
       reasonCode: "REJECTED_SCHEMA",
@@ -354,18 +532,28 @@ export function parseActionGatewayCommentRequest(
       reasonMessage: "Request humanAuthorization/expectedObservations are malformed.",
     };
   }
+  if (!hasOnlyKeys(value.humanAuthorization, ACTION_GATEWAY_HUMAN_AUTH_KEYS)) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "humanAuthorization contains unknown properties.",
+    };
+  }
   const auth = value.humanAuthorization;
   if (
     auth.authorizedCapabilityId !== GITHUB_COMMENT_CREATE_CAPABILITY_ID ||
     typeof auth.authorizedRepository !== "string" ||
     !isTarget(auth.authorizedTarget) ||
     typeof auth.authorizedRequestFingerprint !== "string" ||
+    !/^[a-f0-9]{64}$/.test(auth.authorizedRequestFingerprint) ||
     !validIdempotencyKey(auth.authorizedIdempotencyKey) ||
-    !isRequestedBy(auth.authorizedRequestedBy) ||
+    !isPrincipal(auth.authorizedRequestedBy) ||
+    !isAuthorizationArtifactRef(auth.authorizationArtifact) ||
     typeof auth.authorizedAt !== "string" ||
-    (auth.expiresAt !== undefined && typeof auth.expiresAt !== "string") ||
-    !Array.isArray(auth.evidenceRefs) ||
-    !auth.evidenceRefs.every((ref) => typeof ref === "string")
+    auth.authorizedAt.length < 1 ||
+    (auth.expiresAt !== undefined &&
+      (typeof auth.expiresAt !== "string" || auth.expiresAt.length < 1)) ||
+    !isEvidenceRefs(auth.evidenceRefs)
   ) {
     return {
       ok: false,
@@ -375,9 +563,19 @@ export function parseActionGatewayCommentRequest(
   }
   const expected = value.expectedObservations;
   if (
+    !hasOnlyKeys(expected, [
+      "repository",
+      "targetKind",
+      "targetNumber",
+      "targetExists",
+      "targetNodeId",
+      "targetTitle",
+    ]) ||
     typeof expected.repository !== "string" ||
     !isTargetKind(expected.targetKind) ||
     typeof expected.targetNumber !== "number" ||
+    !Number.isInteger(expected.targetNumber) ||
+    expected.targetNumber < 1 ||
     expected.targetExists !== true ||
     (expected.targetNodeId !== undefined && typeof expected.targetNodeId !== "string") ||
     (expected.targetTitle !== undefined && typeof expected.targetTitle !== "string")
@@ -395,10 +593,6 @@ export function parseActionGatewayCommentRequest(
   };
 }
 
-/**
- * Structural fail-closed parse for evaluation options.
- * Never throws on malformed input.
- */
 export function parseActionGatewayPreWriteOptions(
   value: unknown,
 ):
@@ -418,55 +612,23 @@ export function parseActionGatewayPreWriteOptions(
       reasonMessage: "Evaluation options.nowIso must be a string.",
     };
   }
-  if (
-    value.observedTargetExists !== undefined &&
-    typeof value.observedTargetExists !== "boolean"
-  ) {
+  if (!isPrincipal(value.authenticatedPrincipal)) {
     return {
       ok: false,
       reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: "Evaluation options.observedTargetExists must be boolean when present.",
+      reasonMessage: "Evaluation options.authenticatedPrincipal is required and malformed.",
     };
   }
-  if (
-    value.observedRepository !== undefined &&
-    typeof value.observedRepository !== "string"
-  ) {
+  if (!isPlainObject(value.trustedAuthorizationLookup)) {
     return {
       ok: false,
       reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: "Evaluation options.observedRepository must be a string when present.",
-    };
-  }
-  if (
-    value.observedTargetKind !== undefined &&
-    !isTargetKind(value.observedTargetKind)
-  ) {
-    return {
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: "Evaluation options.observedTargetKind is malformed.",
-    };
-  }
-  if (
-    value.observedTargetNumber !== undefined &&
-    (typeof value.observedTargetNumber !== "number" ||
-      !Number.isInteger(value.observedTargetNumber))
-  ) {
-    return {
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: "Evaluation options.observedTargetNumber is malformed.",
+      reasonMessage: "Evaluation options.trustedAuthorizationLookup is required.",
     };
   }
   return { ok: true, options: value as unknown as ActionGatewayPreWriteOptions };
 }
 
-/**
- * Effective authorization expiry:
- * - explicit `expiresAt` when present and valid
- * - otherwise `authorizedAt + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS`
- */
 export function effectiveAuthorizationExpiryMs(
   authorizedAtIso: string,
   expiresAtIso?: string,
@@ -481,9 +643,42 @@ export function effectiveAuthorizationExpiryMs(
 }
 
 /**
- * Pure pre-write evaluation. Never calls GitHub. Accepts unknown runtime JSON
- * and fail-closes as REJECTED_SCHEMA instead of throwing.
- * On success returns ELIGIBLE with executionImplemented=false.
+ * Idempotency conflict check: same key under mismatched semantic identity
+ * must not replay a foreign SUCCEEDED/FAILED/UNKNOWN/REJECTED result.
+ */
+export function evaluateIdempotencyConflict(input: {
+  existing: ActionGatewayIdempotencyRecord | null | undefined;
+  current: {
+    capabilityId: typeof GITHUB_COMMENT_CREATE_CAPABILITY_ID;
+    repository: string;
+    target: ActionGatewayCommentTarget;
+    requestFingerprint: string;
+    idempotencyKey: string;
+    requestedBy: ActionGatewayPrincipal;
+  };
+}):
+  | { outcome: "NO_EXISTING" }
+  | { outcome: "REPLAY"; record: ActionGatewayIdempotencyRecord }
+  | { outcome: "CONFLICT"; reasonCode: "REJECTED_IDEMPOTENCY_CONFLICT" } {
+  if (!input.existing) return { outcome: "NO_EXISTING" };
+  const existing = input.existing;
+  const current = input.current;
+  const sameIdentity =
+    existing.capabilityId === current.capabilityId &&
+    existing.repository === current.repository &&
+    targetsEqual(existing.target, current.target) &&
+    existing.requestFingerprint === current.requestFingerprint &&
+    existing.idempotencyKey === current.idempotencyKey &&
+    requestedByEqual(existing.requestedBy, current.requestedBy);
+  if (!sameIdentity) {
+    return { outcome: "CONFLICT", reasonCode: "REJECTED_IDEMPOTENCY_CONFLICT" };
+  }
+  return { outcome: "REPLAY", record: existing };
+}
+
+/**
+ * Pure pre-write evaluation. Never calls GitHub.
+ * Fail-closes malformed runtime JSON as REJECTED_SCHEMA (no throw).
  */
 export async function evaluateCommentRequestPreWrite(
   requestInput: unknown,
@@ -525,27 +720,6 @@ export async function evaluateCommentRequestPreWrite(
     );
   }
 
-  if (!validIdempotencyKey(request.idempotencyKey)) {
-    return rejected(
-      "REJECTED_IDEMPOTENCY_KEY_MISSING",
-      "idempotencyKey is required and must be printable ASCII ≤128 chars.",
-      null,
-    );
-  }
-
-  if (
-    request.body.length < 1 ||
-    request.body.length > ACTION_GATEWAY_COMMENT_BODY_MAX ||
-    request.purpose.length < 1 ||
-    request.purpose.length > ACTION_GATEWAY_COMMENT_PURPOSE_MAX
-  ) {
-    return rejected(
-      "REJECTED_PAYLOAD_LIMIT",
-      "body/purpose failed size or emptiness limits.",
-      null,
-    );
-  }
-
   const auth = request.humanAuthorization;
   const fingerprint = await computeCommentRequestFingerprint({
     capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
@@ -554,6 +728,22 @@ export async function evaluateCommentRequestPreWrite(
     body: request.body,
     purpose: request.purpose,
   });
+
+  if (!requestedByEqual(options.authenticatedPrincipal, request.requestedBy)) {
+    return rejected(
+      "REJECTED_AUTHENTICATED_PRINCIPAL_MISMATCH",
+      "Authenticated principal must equal request.requestedBy.",
+      fingerprint,
+    );
+  }
+
+  if (!requestedByEqual(auth.authorizedRequestedBy, request.requestedBy)) {
+    return rejected(
+      "REJECTED_REQUESTER_MISMATCH",
+      "Human authorization is not bound to this requestedBy principal.",
+      fingerprint,
+    );
+  }
 
   if (
     auth.authorizedCapabilityId !== request.capabilityId ||
@@ -566,14 +756,6 @@ export async function evaluateCommentRequestPreWrite(
     return rejected(
       "REJECTED_AUTHORIZATION_MISMATCH",
       "Human authorization is not bound to this capability/repository/target.",
-      fingerprint,
-    );
-  }
-
-  if (!requestedByEqual(auth.authorizedRequestedBy, request.requestedBy)) {
-    return rejected(
-      "REJECTED_REQUESTER_MISMATCH",
-      "Human authorization is not bound to this requestedBy principal and cannot be moved across idempotency scopes.",
       fingerprint,
     );
   }
@@ -594,10 +776,28 @@ export async function evaluateCommentRequestPreWrite(
     );
   }
 
-  if (auth.evidenceRefs.length < 1) {
+  const lookup = options.trustedAuthorizationLookup;
+  if (lookup.status !== "VERIFIED") {
     return rejected(
-      "REJECTED_AUTHORIZATION_MISSING",
-      "humanAuthorization.evidenceRefs must be non-empty.",
+      "REJECTED_AUTHORIZATION_ARTIFACT",
+      `Trusted authorization artifact lookup status=${lookup.status}.`,
+      fingerprint,
+    );
+  }
+  if (
+    lookup.artifactId !== auth.authorizationArtifact.artifactId ||
+    lookup.boundCapabilityId !== request.capabilityId ||
+    lookup.boundRepository !== request.repository ||
+    !targetsEqual(lookup.boundTarget, request.target) ||
+    lookup.boundRequestFingerprint !== fingerprint ||
+    lookup.boundIdempotencyKey !== request.idempotencyKey ||
+    !requestedByEqual(lookup.boundRequestedBy, request.requestedBy) ||
+    lookup.boundAuthorizedAt !== auth.authorizedAt ||
+    (lookup.boundExpiresAt ?? undefined) !== (auth.expiresAt ?? undefined)
+  ) {
+    return rejected(
+      "REJECTED_AUTHORIZATION_ARTIFACT",
+      "Trusted authorization artifact bindings do not match this request.",
       fingerprint,
     );
   }
@@ -641,6 +841,25 @@ export async function evaluateCommentRequestPreWrite(
     return rejected(
       "REJECTED_AUTHORIZATION_EXPIRED",
       "Human authorization is expired (explicit expiresAt or default TTL from authorizedAt).",
+      fingerprint,
+    );
+  }
+
+  const idempotency = evaluateIdempotencyConflict({
+    existing: options.existingIdempotencyRecord,
+    current: {
+      capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
+      repository: request.repository,
+      target: request.target,
+      requestFingerprint: fingerprint,
+      idempotencyKey: request.idempotencyKey,
+      requestedBy: request.requestedBy,
+    },
+  });
+  if (idempotency.outcome === "CONFLICT") {
+    return rejected(
+      "REJECTED_IDEMPOTENCY_CONFLICT",
+      "idempotencyKey already bound to a different repository/target/fingerprint/requestedBy.",
       fingerprint,
     );
   }
@@ -753,11 +972,28 @@ function rejected(
   };
 }
 
+export interface UnknownReconciliationCurrent {
+  repository: string;
+  target: ActionGatewayCommentTarget;
+  idempotencyKey: string;
+  requestFingerprint: string;
+}
+
+export interface UnknownReconciliationMarkerProof {
+  id: number;
+  url: string;
+  repository: string;
+  target: ActionGatewayCommentTarget;
+  idempotencyKey: string;
+  requestFingerprint: string;
+}
+
 /**
- * Idempotent UNKNOWN reconciliation: prefer a prior SUCCEEDED under the same
- * idempotency scope; never invent a new write. Malformed priors fail closed to UNKNOWN.
+ * UNKNOWN → SUCCEEDED requires positive proof stronger than normal validation:
+ * prior/marker must match repository + target + idempotencyKey + requestFingerprint.
  */
 export function reconcileUnknownCommentOutcome(input: {
+  current: UnknownReconciliationCurrent;
   priorByIdempotencyKey: unknown;
   markerMatch: unknown;
 }):
@@ -765,8 +1001,14 @@ export function reconcileUnknownCommentOutcome(input: {
   | { status: "UNKNOWN"; source: "UNPROVEN" } {
   if (isPlainObject(input.priorByIdempotencyKey)) {
     const prior = input.priorByIdempotencyKey;
+    const priorTarget = prior.target;
     if (
       prior.status === "SUCCEEDED" &&
+      prior.repository === input.current.repository &&
+      isTarget(priorTarget) &&
+      targetsEqual(priorTarget, input.current.target) &&
+      prior.idempotencyKey === input.current.idempotencyKey &&
+      prior.requestFingerprint === input.current.requestFingerprint &&
       isPlainObject(prior.comment) &&
       typeof prior.comment.id === "number" &&
       typeof prior.comment.url === "string"
@@ -778,26 +1020,34 @@ export function reconcileUnknownCommentOutcome(input: {
       };
     }
   }
-  if (
-    isPlainObject(input.markerMatch) &&
-    typeof input.markerMatch.id === "number" &&
-    typeof input.markerMatch.url === "string"
-  ) {
-    return {
-      status: "SUCCEEDED",
-      source: "MARKER",
-      resultHint: { id: input.markerMatch.id, url: input.markerMatch.url },
-    };
+
+  if (isPlainObject(input.markerMatch)) {
+    const marker = input.markerMatch;
+    const markerTarget = marker.target;
+    if (
+      typeof marker.id === "number" &&
+      typeof marker.url === "string" &&
+      marker.repository === input.current.repository &&
+      isTarget(markerTarget) &&
+      targetsEqual(markerTarget, input.current.target) &&
+      marker.idempotencyKey === input.current.idempotencyKey &&
+      marker.requestFingerprint === input.current.requestFingerprint
+    ) {
+      return {
+        status: "SUCCEEDED",
+        source: "MARKER",
+        resultHint: { id: marker.id, url: marker.url },
+      };
+    }
   }
+
   return { status: "UNKNOWN", source: "UNPROVEN" };
 }
 
-/** Result shape invariants used by tests and future adapters. Never throws. */
+/** Result shape invariants. Never throws. comment only on SUCCEEDED. */
 export function assertCommentResultInvariants(result: unknown): string[] {
   const errors: string[] = [];
-  if (!isPlainObject(result)) {
-    return ["result_not_object"];
-  }
+  if (!isPlainObject(result)) return ["result_not_object"];
   if (result.schemaVersion !== ACTION_GATEWAY_COMMENT_RESULT_SCHEMA) {
     errors.push("schemaVersion");
   }
@@ -819,9 +1069,7 @@ export function assertCommentResultInvariants(result: unknown): string[] {
     status === "FAILED" ||
     status === "UNKNOWN"
   ) {
-    if (comment !== undefined) {
-      errors.push(`${status}_forbids_comment`);
-    }
+    if (comment !== undefined) errors.push(`${status}_forbids_comment`);
   }
   if (status === "REJECTED") {
     const timestamps = result.timestamps;
