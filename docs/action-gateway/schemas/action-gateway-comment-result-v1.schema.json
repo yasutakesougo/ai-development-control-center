@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-development-control-center.local/schemas/action-gateway-comment-result-v1.json",
+  "title": "ActionGatewayCommentResultV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "capabilityId",
+    "status",
+    "repository",
+    "target",
+    "requestFingerprint",
+    "idempotencyKey",
+    "authorization",
+    "timestamps",
+    "reasonCode",
+    "reasonMessage"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ACTION-GATEWAY-COMMENT-RESULT-V1" },
+    "capabilityId": { "const": "github.comment.create.v1" },
+    "status": { "enum": ["SUCCEEDED", "REJECTED", "FAILED", "UNKNOWN"] },
+    "repository": { "type": "string", "minLength": 1 },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "number"],
+      "properties": {
+        "kind": { "enum": ["ISSUE", "PULL_REQUEST"] },
+        "number": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "url"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string", "minLength": 1 }
+      }
+    },
+    "requestFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched", "evidenceRefs"],
+      "properties": {
+        "matched": { "type": "boolean" },
+        "evidenceRefs": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "timestamps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completedAt"],
+      "properties": {
+        "acceptedAt": { "type": "string" },
+        "attemptedAt": { "type": "string" },
+        "completedAt": { "type": "string" }
+      }
+    },
+    "reasonCode": { "type": "string", "minLength": 1 },
+    "reasonMessage": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "SUCCEEDED" } } },
+      "then": { "required": ["comment"] }
+    },
+    {
+      "if": { "properties": { "status": { "const": "REJECTED" } } },
+      "then": {
+        "not": { "required": ["comment"] },
+        "properties": {
+          "timestamps": {
+            "not": { "required": ["attemptedAt"] }
+          }
+        }
+      }
+    }
+  ]
+}

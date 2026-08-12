@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "ACTION-GATEWAY-COMMENT-RESULT-V1",
+  "capabilityId": "github.comment.create.v1",
+  "status": "REJECTED",
+  "repository": "yasutakesougo/ai-development-control-center",
+  "target": { "kind": "ISSUE", "number": 41 },
+  "requestFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "idempotencyKey": "agw-comment-41-bad-auth",
+  "authorization": {
+    "matched": false,
+    "evidenceRefs": []
+  },
+  "timestamps": {
+    "acceptedAt": "2026-08-12T06:32:00.000Z",
+    "completedAt": "2026-08-12T06:32:00.100Z"
+  },
+  "reasonCode": "REJECTED_FINGERPRINT_MISMATCH",
+  "reasonMessage": "authorizedRequestFingerprint does not match the request semantic fingerprint."
+}

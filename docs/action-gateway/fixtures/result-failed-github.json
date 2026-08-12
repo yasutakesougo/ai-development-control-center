@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "ACTION-GATEWAY-COMMENT-RESULT-V1",
+  "capabilityId": "github.comment.create.v1",
+  "status": "FAILED",
+  "repository": "yasutakesougo/ai-development-control-center",
+  "target": { "kind": "PULL_REQUEST", "number": 40 },
+  "requestFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "idempotencyKey": "agw-comment-40-failed",
+  "authorization": {
+    "matched": true,
+    "evidenceRefs": [
+      "https://github.com/yasutakesougo/ai-development-control-center/pull/40"
+    ]
+  },
+  "timestamps": {
+    "acceptedAt": "2026-08-12T06:33:00.000Z",
+    "attemptedAt": "2026-08-12T06:33:01.000Z",
+    "completedAt": "2026-08-12T06:33:02.000Z"
+  },
+  "reasonCode": "FAILED_GITHUB_HTTP",
+  "reasonMessage": "GitHub Issues Comments API returned a conclusive failure response."
+}

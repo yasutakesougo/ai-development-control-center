@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-development-control-center.local/schemas/action-gateway-comment-request-v1.json",
+  "title": "ActionGatewayCommentRequestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "capabilityId",
+    "repository",
+    "target",
+    "body",
+    "purpose",
+    "idempotencyKey",
+    "requestedBy",
+    "humanAuthorization",
+    "expectedObservations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ACTION-GATEWAY-COMMENT-REQUEST-V1" },
+    "capabilityId": { "const": "github.comment.create.v1" },
+    "repository": { "const": "yasutakesougo/ai-development-control-center" },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "number"],
+      "properties": {
+        "kind": { "enum": ["ISSUE", "PULL_REQUEST"] },
+        "number": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "body": { "type": "string", "minLength": 1, "maxLength": 65536 },
+    "purpose": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7E]+$"
+    },
+    "requestedBy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principalKind", "subjectId"],
+      "properties": {
+        "principalKind": { "const": "HUMAN" },
+        "subjectId": { "type": "string", "minLength": 1 },
+        "issuer": { "type": "string", "minLength": 1 }
+      }
+    },
+    "humanAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authorizedCapabilityId",
+        "authorizedRepository",
+        "authorizedTarget",
+        "authorizedRequestFingerprint",
+        "authorizedAt",
+        "evidenceRefs"
+      ],
+      "properties": {
+        "authorizedCapabilityId": { "const": "github.comment.create.v1" },
+        "authorizedRepository": { "type": "string", "minLength": 1 },
+        "authorizedTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "number"],
+          "properties": {
+            "kind": { "enum": ["ISSUE", "PULL_REQUEST"] },
+            "number": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "authorizedRequestFingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "authorizedAt": { "type": "string", "minLength": 1 },
+        "expiresAt": { "type": "string", "minLength": 1 },
+        "evidenceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 2048 }
+        }
+      }
+    },
+    "expectedObservations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "targetKind", "targetNumber", "targetExists"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "targetKind": { "enum": ["ISSUE", "PULL_REQUEST"] },
+        "targetNumber": { "type": "integer", "minimum": 1 },
+        "targetExists": { "const": true },
+        "targetNodeId": { "type": "string", "minLength": 1 },
+        "targetTitle": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
