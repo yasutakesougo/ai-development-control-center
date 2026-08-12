@@ -223,6 +223,98 @@ describe("STATUS-OVERLAY-V1 design contract", () => {
     expect(action.secondaryContext?.some((s) => s.includes("live wins"))).toBe(true);
   });
 
+  it("uncovered architecture stale outranks unrelated DESIGN Draft", () => {
+    const designDraft: StatusOverlayPullRequest = {
+      number: 41,
+      title: "docs(status): design STATUS-OVERLAY-V1",
+      draft: true,
+      mergeable: "UNKNOWN",
+      head: "aaa",
+      base: "main",
+      reviewState: "UNKNOWN",
+      ciState: "UNKNOWN",
+      classification: "DESIGN",
+      humanAction: "REVIEW_DRAFT",
+    };
+    const action = selectRecommendedNextAction({
+      architectureAffectingStale: true,
+      autoRefreshCoverage: "NOT_COVERED",
+      openPullRequests: [designDraft],
+    });
+    expect(action.code).toBe("MAINTAIN_STALE_SNAPSHOT");
+    expect(action.gateKind).toBe("SystemMaintenanceRequired");
+    expect(action.authorizesMutation).toBe(false);
+    expect(action.secondaryContext?.some((s) => s.includes("DESIGN"))).toBe(true);
+    expect(
+      classifyOverlayGateKind({
+        architectureAffectingStale: true,
+        autoRefreshCoverage: "NOT_COVERED",
+        openPullRequests: [designDraft],
+      }),
+    ).toBe("SystemMaintenanceRequired");
+  });
+
+  it("unrelated OTHER Draft does not suppress MAINTAIN_STALE_SNAPSHOT", () => {
+    const otherDraft = draftPr(42, {
+      classification: "OTHER",
+      title: "chore: unrelated",
+    });
+    const action = selectRecommendedNextAction({
+      architectureAffectingStale: true,
+      autoRefreshCoverage: "NOT_COVERED",
+      openPullRequests: [otherDraft, readyPr(43)],
+    });
+    expect(action.code).toBe("MAINTAIN_STALE_SNAPSHOT");
+    expect(action.authorizesMutation).toBe(false);
+  });
+
+  it("COVERED_BY_DRAFT + REFRESH_DRAFT still recommends Draft review", () => {
+    const action = selectRecommendedNextAction({
+      architectureAffectingStale: true,
+      autoRefreshCoverage: "COVERED_BY_DRAFT",
+      openPullRequests: [
+        {
+          number: 50,
+          title: "docs: design only",
+          draft: true,
+          mergeable: "UNKNOWN",
+          head: "bbb",
+          base: "main",
+          reviewState: "UNKNOWN",
+          ciState: "UNKNOWN",
+          classification: "DESIGN",
+          humanAction: "REVIEW_DRAFT",
+        },
+        draftPr(51),
+      ],
+    });
+    expect(action.code).toBe("REVIEW_DRAFT_PR");
+    expect(action.targets?.pullRequest).toBe(51);
+    expect(action.secondaryContext?.some((s) => s.includes("duplicate refresh"))).toBe(true);
+  });
+
+  it("HOLD / OUTCOME_UNKNOWN / HANDOFF / FAILED still outrank uncovered stale", () => {
+    const staleWithDesign = {
+      architectureAffectingStale: true,
+      autoRefreshCoverage: "NOT_COVERED" as const,
+      openPullRequests: [
+        draftPr(60, { classification: "DESIGN", title: "design" }),
+      ],
+    };
+    expect(selectRecommendedNextAction({ ...staleWithDesign, outcomeUnknown: true }).code).toBe(
+      "RESOLVE_OUTCOME_UNKNOWN",
+    );
+    expect(selectRecommendedNextAction({ ...staleWithDesign, safetyHold: true }).code).toBe(
+      "RESOLVE_HOLD",
+    );
+    expect(
+      selectRecommendedNextAction({ ...staleWithDesign, handoffActionRequired: true }).code,
+    ).toBe("HANDOFF_ACTION_REQUIRED");
+    expect(selectRecommendedNextAction({ ...staleWithDesign, automationFailed: true }).code).toBe(
+      "REVIEW_FAILED_AUTOMATION",
+    );
+  });
+
   it("last successful run does not prove freshness after main moves", () => {
     expect(
       lastRunProvesCurrentFreshness({

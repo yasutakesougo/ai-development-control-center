@@ -205,6 +205,30 @@ export function classifyAutoRefreshCoverage(input: {
 }
 
 /**
+ * Active refresh Draft coverage requires both:
+ * - supplied autoRefreshCoverage === COVERED_BY_DRAFT
+ * - a live open Draft classified as REFRESH_DRAFT
+ *
+ * Unrelated DESIGN / OTHER Drafts never count as Snapshot stale coverage.
+ */
+export function hasActiveRefreshDraftCoverage(input: {
+  autoRefreshCoverage?: AutoRefreshCoverage;
+  openPullRequests?: StatusOverlayPullRequest[];
+}): boolean {
+  if ((input.autoRefreshCoverage ?? "UNKNOWN") !== "COVERED_BY_DRAFT") return false;
+  return pickActiveRefreshDraft(input.openPullRequests ?? []) != null;
+}
+
+/** Uncovered architecture-affecting stale (priority 4) — ignores unrelated Draft/Ready PRs. */
+export function isUncoveredArchitectureStale(input: SelectNextActionInput): boolean {
+  if (!input.architectureAffectingStale) return false;
+  const coverage = input.autoRefreshCoverage ?? "UNKNOWN";
+  if (coverage === "COVERED_BY_ENABLED_AUTOMATION_IDLE") return false;
+  if (hasActiveRefreshDraftCoverage(input)) return false;
+  return true;
+}
+
+/**
  * Classify Human/system gate kind from live facts.
  * Maintenance staleness alone is never HANDOFF ACTION_REQUIRED.
  */
@@ -214,19 +238,13 @@ export function classifyOverlayGateKind(input: SelectNextActionInput): StatusOve
   if (input.handoffActionRequired) return "HumanActionRequired";
   if (input.automationFailed) return "HumanActionRequired";
 
+  // Priority 4 before unrelated Draft/Ready review (priority 5).
+  if (isUncoveredArchitectureStale(input)) return "SystemMaintenanceRequired";
+
   const prs = input.openPullRequests ?? [];
   const draft = pickPrimaryPr(prs.filter((p) => p.draft));
   const ready = pickPrimaryPr(prs.filter((p) => !p.draft));
   if (draft || ready) return "HumanActionRequired";
-
-  const coverage = input.autoRefreshCoverage ?? "UNKNOWN";
-  if (
-    input.architectureAffectingStale &&
-    coverage !== "COVERED_BY_DRAFT" &&
-    coverage !== "COVERED_BY_ENABLED_AUTOMATION_IDLE"
-  ) {
-    return "SystemMaintenanceRequired";
-  }
 
   return "NoAction";
 }
@@ -236,6 +254,12 @@ function pickPrimaryPr(
 ): StatusOverlayPullRequest | null {
   if (prs.length === 0) return null;
   return [...prs].sort((a, b) => a.number - b.number)[0] ?? null;
+}
+
+function pickActiveRefreshDraft(
+  prs: readonly StatusOverlayPullRequest[],
+): StatusOverlayPullRequest | null {
+  return pickPrimaryPr(prs.filter((p) => p.draft && p.classification === "REFRESH_DRAFT"));
 }
 
 /**
@@ -300,38 +324,48 @@ export function selectRecommendedNextAction(
 
   const prs = input.openPullRequests ?? [];
   // Live open PRs only — historicalDraftOpen must not invent a current Draft.
+  const refreshDraft = pickActiveRefreshDraft(prs);
   const draft = pickPrimaryPr(prs.filter((p) => p.draft));
   const ready = pickPrimaryPr(prs.filter((p) => !p.draft));
   const coverage = input.autoRefreshCoverage ?? "UNKNOWN";
 
-  if (
-    input.architectureAffectingStale &&
-    coverage !== "COVERED_BY_DRAFT" &&
-    coverage !== "COVERED_BY_ENABLED_AUTOMATION_IDLE" &&
-    !draft
-  ) {
+  // Priority 4: uncovered architecture stale outranks unrelated DESIGN/OTHER Draft/Ready.
+  if (isUncoveredArchitectureStale(input)) {
+    const secondary: string[] = [];
+    if (input.historicalDraftOpen) {
+      secondary.push("HISTORY claimed a Draft was open; live coverage evidence does not — live wins");
+    }
+    if (draft && draft.classification !== "REFRESH_DRAFT") {
+      secondary.push(
+        `Open Draft #${draft.number} is ${draft.classification}, not REFRESH_DRAFT — does not cover stale Snapshot`,
+      );
+    }
     return {
       code: "MAINTAIN_STALE_SNAPSHOT",
       status: "STALE",
       gateKind: "SystemMaintenanceRequired",
       summary: "Architecture-affecting Snapshot is stale without active automation coverage",
       ...denyAuth,
-      secondaryContext: input.historicalDraftOpen
-        ? ["HISTORY claimed a Draft was open; live open PRs show none — live wins"]
-        : undefined,
+      secondaryContext: secondary.length > 0 ? secondary : undefined,
     };
   }
 
-  if (draft) {
+  // Covered refresh Draft is the preferred review target when present.
+  const reviewDraft =
+    coverage === "COVERED_BY_DRAFT" && refreshDraft != null ? refreshDraft : draft;
+
+  if (reviewDraft) {
     return {
       code: "REVIEW_DRAFT_PR",
       status: "ACTION_REQUIRED",
       gateKind: "HumanActionRequired",
-      summary: `Review Draft PR #${draft.number}`,
+      summary: `Review Draft PR #${reviewDraft.number}`,
       ...denyAuth,
-      targets: { pullRequest: draft.number },
+      targets: { pullRequest: reviewDraft.number },
       secondaryContext:
-        input.architectureAffectingStale && coverage === "COVERED_BY_DRAFT"
+        input.architectureAffectingStale &&
+        coverage === "COVERED_BY_DRAFT" &&
+        reviewDraft.classification === "REFRESH_DRAFT"
           ? ["Stale Snapshot already covered by active refresh Draft — do not start a duplicate refresh"]
           : undefined,
     };
