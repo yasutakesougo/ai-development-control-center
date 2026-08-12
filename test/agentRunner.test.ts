@@ -17,6 +17,7 @@ import {
   AGENT_RUNNER_RESULT_SCHEMA,
   AGENT_RUNNER_SUPPORTED_CAPABILITIES,
   AGENT_RUNNER_SUPPORTED_RISK_CLASSES,
+  AGENT_RUNNER_SUPPORTED_STOP_AT,
   AGENT_RUNNER_VERSION,
   assertAgentRunnerBoundaries,
   createFakeAgentRunnerAdapterV1,
@@ -184,6 +185,11 @@ describe("AGENT-RUNNER-V1 non-goals / boundaries", () => {
   it("documents runner allowlists", () => {
     expect(AGENT_RUNNER_SUPPORTED_CAPABILITIES).toEqual(["workspace.read.v1"]);
     expect(AGENT_RUNNER_SUPPORTED_RISK_CLASSES).toEqual(["R0", "R1"]);
+    expect(AGENT_RUNNER_SUPPORTED_STOP_AT).toEqual([
+      "AGENT_COMPLETE",
+      "VERIFY_COMPLETE",
+      "DRAFT_PR",
+    ]);
   });
 
   it("30. core tests require no production/network (fake adapter only)", () => {
@@ -406,6 +412,78 @@ describe("AGENT-RUNNER-V1 identity binding", () => {
     expect(out.status).toBe("HOLD");
     expect(out.reasonCode).toBe("HOLD_BASE_REVISION_MISMATCH");
     expect(out.metadata.executionInvoked).toBe(false);
+  });
+});
+
+describe("AGENT-RUNNER-V1 stopAt policy (independent of orchestrator)", () => {
+  it("forged DISPATCH_ELIGIBLE + stopAt=TASK_BUILT → HOLD, adapter not invoked", () => {
+    const orch = dispatchEligible();
+    const forged = syntheticOrchestrator({
+      decision: "DISPATCH_ELIGIBLE",
+      task: { ...orch.task!, stopAt: "TASK_BUILT", riskClass: "R1" },
+      metadata: {
+        ...orch.metadata,
+        dispatchEligible: true,
+        executionAuthorized: false,
+      },
+    });
+    expect(forged.decision).toBe("DISPATCH_ELIGIBLE");
+    expect(forged.metadata.dispatchEligible).toBe(true);
+    expect(forged.task!.stopAt).toBe("TASK_BUILT");
+
+    const out = run(forged, {
+      adapter: createFakeAgentRunnerAdapterV1({
+        changedPaths: [ALLOWED_DOC],
+      }),
+    });
+    expect(out.status).toBe("HOLD");
+    expect(out.reasonCode).toBe("HOLD_STOP_AT_TASK_BUILT");
+    expect(out.metadata.executionInvoked).toBe(false);
+  });
+
+  it("supported stopAt=AGENT_COMPLETE → existing positive path", () => {
+    const orch = dispatchEligible({ stopAt: "AGENT_COMPLETE" });
+    expect(orch.task!.stopAt).toBe("AGENT_COMPLETE");
+    const out = run(orch, {
+      adapter: createFakeAgentRunnerAdapterV1({
+        changedPaths: [ALLOWED_DOC],
+      }),
+    });
+    expect(out.status).toBe("COMPLETED");
+    expect(out.metadata.executionInvoked).toBe(true);
+  });
+
+  it("supported stopAt=VERIFY_COMPLETE may COMPLETE without claiming verification", () => {
+    const orch = dispatchEligible();
+    const forged = syntheticOrchestrator({
+      decision: "DISPATCH_ELIGIBLE",
+      task: { ...orch.task!, stopAt: "VERIFY_COMPLETE", riskClass: "R1" },
+    });
+    const out = run(forged, {
+      adapter: createFakeAgentRunnerAdapterV1({
+        changedPaths: [ALLOWED_SRC],
+      }),
+    });
+    expect(out.status).toBe("COMPLETED");
+    expect(out.metadata.independentVerificationComplete).toBe(false);
+    expect(out.metadata.publicationAuthorized).toBe(false);
+  });
+
+  it("supported stopAt=DRAFT_PR may COMPLETE without claiming publication", () => {
+    const orch = dispatchEligible();
+    const forged = syntheticOrchestrator({
+      decision: "DISPATCH_ELIGIBLE",
+      task: { ...orch.task!, stopAt: "DRAFT_PR", riskClass: "R1" },
+    });
+    const out = run(forged, {
+      adapter: createFakeAgentRunnerAdapterV1({
+        changedPaths: [ALLOWED_TEST],
+      }),
+    });
+    expect(out.status).toBe("COMPLETED");
+    expect(out.metadata.independentVerificationComplete).toBe(false);
+    expect(out.metadata.publicationAuthorized).toBe(false);
+    expect(out.metadata.githubMutationAuthorized).toBe(false);
   });
 });
 

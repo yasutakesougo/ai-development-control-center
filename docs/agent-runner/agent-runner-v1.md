@@ -142,6 +142,8 @@ realWorkspaceExecutionImplemented = false
 | `validation.taskId` / orchestrator taskId binding mismatch | `REJECT` |
 | `workspace.repository !== task.repository` | `HOLD` |
 | `workspace.baseRevision !== task.baseRevision` | `HOLD` |
+| `stopAt = TASK_BUILT` | `HOLD` (no runner activity; adapter not invoked) |
+| `stopAt` unsupported / unknown | `HOLD` |
 | `riskClass` ∈ {R2, R3, R4, R5} | `HOLD` |
 | Unsupported capability (incl. `workspace.write.v1`, `command.execute.v1`) | `HOLD` |
 | Adapter prepare/execute/collect error | `FAILED` |
@@ -159,6 +161,8 @@ No fetch-latest-main / rebase / base substitution.
 
 ## 6. Execution policy V1
 
+### Risk class
+
 | Risk | Policy |
 |---|---|
 | R0 | Supported as read-only isolated observation via fake adapter |
@@ -169,6 +173,24 @@ No fetch-latest-main / rebase / base substitution.
 | R5 | `HOLD` |
 
 No automatic escalation.
+
+### stopAt (independent runner re-check)
+
+Runner MUST re-check `task.stopAt` before adapter invocation. Do not trust
+`DISPATCH_ELIGIBLE` alone.
+
+| stopAt | Policy |
+|---|---|
+| `TASK_BUILT` | `HOLD` — contract-only; adapter MUST NOT be invoked |
+| `AGENT_COMPLETE` | Runner stage allowed |
+| `VERIFY_COMPLETE` | Runner stage allowed; runner does **not** claim verification complete |
+| `DRAFT_PR` | Runner stage allowed; runner does **not** claim Draft PR / publication |
+| Other / unknown | `HOLD` (`HOLD_UNSUPPORTED_STOP_AT`) — fail closed |
+
+```text
+Runner COMPLETED ≠ independentVerificationComplete
+Runner COMPLETED ≠ publicationAuthorized / Draft PR achieved
+```
 
 ---
 

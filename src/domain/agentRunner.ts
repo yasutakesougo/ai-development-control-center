@@ -17,6 +17,7 @@ import {
   parseAgentTaskV1,
   validateAgentTaskV1,
   type AgentTaskRiskClass,
+  type AgentTaskStopAt,
   type AgentTaskV1,
   type AgentTaskValidationResultV1,
 } from "./agentTaskContract";
@@ -105,6 +106,19 @@ export const AGENT_RUNNER_SUPPORTED_RISK_CLASSES = [
   "R1",
 ] as const satisfies readonly AgentTaskRiskClass[];
 
+/**
+ * stopAt values that may reach adapter invocation in V1.
+ * TASK_BUILT = contract-only / no runner activity → HOLD.
+ * AGENT_COMPLETE / VERIFY_COMPLETE / DRAFT_PR = runner stage allowed.
+ * Runner responsibility ends at isolated Agent activity; COMPLETED never
+ * means independent verification or Draft PR publication was achieved.
+ */
+export const AGENT_RUNNER_SUPPORTED_STOP_AT = [
+  "AGENT_COMPLETE",
+  "VERIFY_COMPLETE",
+  "DRAFT_PR",
+] as const satisfies readonly AgentTaskStopAt[];
+
 export type AgentRunnerStatus =
   | "COMPLETED"
   | "HOLD"
@@ -115,6 +129,8 @@ export type AgentRunnerStatus =
 export type AgentRunnerReasonCode =
   | "COMPLETED"
   | "HOLD_ORCHESTRATOR"
+  | "HOLD_STOP_AT_TASK_BUILT"
+  | "HOLD_UNSUPPORTED_STOP_AT"
   | "HOLD_UNSUPPORTED_RISK_CLASS"
   | "HOLD_UNSUPPORTED_CAPABILITY"
   | "HOLD_REPOSITORY_MISMATCH"
@@ -409,6 +425,10 @@ function isSupportedRiskClass(riskClass: AgentTaskRiskClass): boolean {
   return (AGENT_RUNNER_SUPPORTED_RISK_CLASSES as readonly string[]).includes(
     riskClass,
   );
+}
+
+function isSupportedStopAt(stopAt: AgentTaskStopAt): boolean {
+  return (AGENT_RUNNER_SUPPORTED_STOP_AT as readonly string[]).includes(stopAt);
 }
 
 /**
@@ -744,6 +764,36 @@ export function runAgentTaskV1(
       status: "HOLD",
       reasonCode: "HOLD_BASE_REVISION_MISMATCH",
       reasonMessage: `workspace.baseRevision (${workspace.baseRevision}) !== task.baseRevision (${upstreamTask.baseRevision}); exact equality required; no fetch/rebase/substitution.`,
+      runnerAttemptId,
+      taskId: upstreamTask.taskId,
+      repository: upstreamTask.repository,
+      baseRevision: upstreamTask.baseRevision,
+      validation: revalidation,
+      observedAt,
+    });
+  }
+
+  // Independent stopAt policy — never trust DISPATCH_ELIGIBLE alone.
+  if (upstreamTask.stopAt === "TASK_BUILT") {
+    return buildResult({
+      status: "HOLD",
+      reasonCode: "HOLD_STOP_AT_TASK_BUILT",
+      reasonMessage:
+        "stopAt=TASK_BUILT means no runner activity; adapter must not be invoked.",
+      runnerAttemptId,
+      taskId: upstreamTask.taskId,
+      repository: upstreamTask.repository,
+      baseRevision: upstreamTask.baseRevision,
+      validation: revalidation,
+      observedAt,
+    });
+  }
+
+  if (!isSupportedStopAt(upstreamTask.stopAt)) {
+    return buildResult({
+      status: "HOLD",
+      reasonCode: "HOLD_UNSUPPORTED_STOP_AT",
+      reasonMessage: `stopAt=${upstreamTask.stopAt} is unsupported for AGENT-RUNNER-V1; fail closed.`,
       runnerAttemptId,
       taskId: upstreamTask.taskId,
       repository: upstreamTask.repository,
