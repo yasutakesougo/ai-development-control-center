@@ -46,8 +46,11 @@ export interface StatusOverlayGeneratorInput {
     lastEvaluation?: string | null;
     lastPublicationOutcome?: string | null;
     /**
-     * Optional override. When omitted, derived from the lowest-number live
-     * open Draft with classification REFRESH_DRAFT.
+     * Optional override. Counts only when that exact live open PR is
+     * `draft === true` and `classification === "REFRESH_DRAFT"`.
+     * Invalid/stale overrides are rejected; generator falls back to the
+     * lowest-number live REFRESH_DRAFT (or null) so coverage fields stay
+     * consistent.
      */
     activeRefreshPr?: number | null;
   };
@@ -89,15 +92,52 @@ function normalizePullRequest(pr: StatusOverlayPullRequest): StatusOverlayPullRe
   };
 }
 
-function deriveActiveRefreshPr(
+function isLiveRefreshDraft(
   prs: readonly StatusOverlayPullRequest[],
-  override: number | null | undefined,
+  prNumber: number | null,
+): boolean {
+  if (prNumber == null) return false;
+  return prs.some(
+    (p) => p.number === prNumber && p.draft && p.classification === "REFRESH_DRAFT",
+  );
+}
+
+function lowestLiveRefreshDraftNumber(
+  prs: readonly StatusOverlayPullRequest[],
 ): number | null {
-  if (override !== undefined) return override;
   const refreshDrafts = prs
     .filter((p) => p.draft && p.classification === "REFRESH_DRAFT")
     .sort((a, b) => a.number - b.number);
   return refreshDrafts[0]?.number ?? null;
+}
+
+/**
+ * Resolve activeRefreshPr from live evidence.
+ *
+ * Rules:
+ * - omitted override → lowest-number live REFRESH_DRAFT (or null)
+ * - override === null → null (explicit none)
+ * - override number valid only if that exact live PR is draft + REFRESH_DRAFT
+ * - invalid/stale override → ignored; fall back to live-derived REFRESH_DRAFT
+ *   (documented fail-closed consistency: never emit contradictory activeRefreshPr)
+ */
+export function resolveActiveRefreshPr(input: {
+  openPullRequests: readonly StatusOverlayPullRequest[];
+  override?: number | null;
+}): { activeRefreshPr: number | null; overrideRejected: boolean } {
+  const liveDerived = lowestLiveRefreshDraftNumber(input.openPullRequests);
+
+  if (input.override === undefined) {
+    return { activeRefreshPr: liveDerived, overrideRejected: false };
+  }
+  if (input.override === null) {
+    return { activeRefreshPr: null, overrideRejected: false };
+  }
+  if (isLiveRefreshDraft(input.openPullRequests, input.override)) {
+    return { activeRefreshPr: input.override, overrideRejected: false };
+  }
+  // Invalid override must not stick; fall back to live-derived state.
+  return { activeRefreshPr: liveDerived, overrideRejected: true };
 }
 
 function deriveCoverage(input: {
@@ -107,22 +147,21 @@ function deriveCoverage(input: {
   liveObservationFailed: boolean;
   openPullRequests: StatusOverlayPullRequest[];
 }): AutoRefreshCoverage {
+  // Only the resolved activeRefreshPr that matches a live REFRESH_DRAFT covers.
+  const coveredByMatchedDraft = isLiveRefreshDraft(
+    input.openPullRequests,
+    input.activeRefreshPr,
+  );
   const base = classifyAutoRefreshCoverage({
     architectureAffectingStale: input.architectureAffectingStale,
     autoRefreshEnabled: input.autoRefreshEnabled,
-    activeRefreshPr: input.activeRefreshPr,
+    activeRefreshPr: coveredByMatchedDraft ? input.activeRefreshPr : null,
     livePrObservationFailed: input.liveObservationFailed,
   });
-  // COVERED_BY_DRAFT only when a live REFRESH_DRAFT exists.
-  if (base === "COVERED_BY_DRAFT") {
-    const hasRefreshDraft = input.openPullRequests.some(
-      (p) => p.draft && p.classification === "REFRESH_DRAFT",
-    );
-    if (!hasRefreshDraft) {
-      return input.autoRefreshEnabled
-        ? "COVERED_BY_ENABLED_AUTOMATION_IDLE"
-        : "NOT_COVERED";
-    }
+  if (base === "COVERED_BY_DRAFT" && !coveredByMatchedDraft) {
+    return input.autoRefreshEnabled
+      ? "COVERED_BY_ENABLED_AUTOMATION_IDLE"
+      : "NOT_COVERED";
   }
   return base;
 }
@@ -170,10 +209,10 @@ export function generateStatusOverlay(
 
   const architectureAffectingStale = isArchitectureAffectingStale(input);
   const liveObservationFailed = input.liveObservationFailed === true;
-  const activeRefreshPr = deriveActiveRefreshPr(
+  const { activeRefreshPr, overrideRejected } = resolveActiveRefreshPr({
     openPullRequests,
-    input.autoRefresh.activeRefreshPr,
-  );
+    override: input.autoRefresh.activeRefreshPr,
+  });
   const autoRefreshCoverage = deriveCoverage({
     architectureAffectingStale,
     autoRefreshEnabled: input.autoRefresh.enabled,
@@ -194,6 +233,7 @@ export function generateStatusOverlay(
     autoRefreshCoverage,
     openPullRequests,
     historicalDraftOpen: input.historicalDraftOpen === true,
+    activeRefreshPr,
   };
 
   const recommendedNextAction = selectRecommendedNextAction(decisionInput);
@@ -208,6 +248,9 @@ export function generateStatusOverlay(
   const unknowns = [...(input.unknowns ?? [])];
   if (liveObservationFailed && !unknowns.includes("live_observation_failed")) {
     unknowns.push("live_observation_failed");
+  }
+  if (overrideRejected && !unknowns.includes("activeRefreshPr_override_rejected")) {
+    unknowns.push("activeRefreshPr_override_rejected");
   }
   for (const pr of openPullRequests) {
     if (pr.ciState === "UNKNOWN") {

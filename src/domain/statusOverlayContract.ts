@@ -138,6 +138,11 @@ export interface SelectNextActionInput {
   openPullRequests?: StatusOverlayPullRequest[];
   /** Historical claim that a Draft is open — ignored when live PRs are supplied. */
   historicalDraftOpen?: boolean;
+  /**
+   * Resolved live REFRESH_DRAFT number (already validated). When set and present
+   * in openPullRequests as REFRESH_DRAFT, preferred for covered Draft review.
+   */
+  activeRefreshPr?: number | null;
 }
 
 /** UI / observer / writer / Gateway binding remain forbidden in this slice. */
@@ -330,7 +335,16 @@ export function selectRecommendedNextAction(
 
   const prs = input.openPullRequests ?? [];
   // Live open PRs only — historicalDraftOpen must not invent a current Draft.
-  const refreshDraft = pickActiveRefreshDraft(prs);
+  const preferredRefresh =
+    input.activeRefreshPr != null
+      ? prs.find(
+          (p) =>
+            p.number === input.activeRefreshPr &&
+            p.draft &&
+            p.classification === "REFRESH_DRAFT",
+        ) ?? null
+      : null;
+  const refreshDraft = preferredRefresh ?? pickActiveRefreshDraft(prs);
   const draft = pickPrimaryPr(prs.filter((p) => p.draft));
   const ready = pickPrimaryPr(prs.filter((p) => !p.draft));
   const coverage = input.autoRefreshCoverage ?? "UNKNOWN";

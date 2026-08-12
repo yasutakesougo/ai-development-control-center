@@ -8,6 +8,7 @@ import {
 } from "../src/domain/statusOverlayContract";
 import {
   generateStatusOverlay,
+  resolveActiveRefreshPr,
   type StatusOverlayGeneratorInput,
 } from "../src/domain/statusOverlayGenerator";
 
@@ -306,5 +307,88 @@ describe("STATUS-OVERLAY-V1 runtime generator", () => {
     expect(source).not.toMatch(/from ["']fs["']/);
     expect(source).not.toMatch(/process\.env/);
     expect(source).not.toMatch(/@octokit|octokit/);
+  });
+
+  it("rejects nonexistent activeRefreshPr override and falls back to live REFRESH_DRAFT", () => {
+    const prs = [refreshDraft(44)];
+    expect(
+      resolveActiveRefreshPr({ openPullRequests: prs, override: 999 }),
+    ).toEqual({ activeRefreshPr: 44, overrideRejected: true });
+
+    const doc = generateStatusOverlay(
+      baseInput({
+        snapshot: {
+          generatedFrom: from,
+          stale: true,
+          staleClassification: "stale_architecture_affecting",
+          architectureRelevantChanges: ["package.json"],
+        },
+        autoRefresh: {
+          enabled: true,
+          activeRefreshPr: 999,
+        },
+        openPullRequests: prs,
+      }),
+    );
+    expect(doc.autoRefresh.activeRefreshPr).toBe(44);
+    expect(doc.snapshot.autoRefreshCoverage).toBe("COVERED_BY_DRAFT");
+    expect(doc.recommendedNextAction.code).toBe("REVIEW_DRAFT_PR");
+    expect(doc.recommendedNextAction.targets?.pullRequest).toBe(44);
+    expect(doc.unknowns).toContain("activeRefreshPr_override_rejected");
+  });
+
+  it("rejects DESIGN/OTHER Draft override while live REFRESH_DRAFT exists", () => {
+    const prs = [designDraft(30), refreshDraft(44)];
+    expect(
+      resolveActiveRefreshPr({ openPullRequests: prs, override: 30 }),
+    ).toEqual({ activeRefreshPr: 44, overrideRejected: true });
+
+    const doc = generateStatusOverlay(
+      baseInput({
+        snapshot: {
+          generatedFrom: from,
+          stale: true,
+          staleClassification: "stale_architecture_affecting",
+          architectureRelevantChanges: ["package.json"],
+        },
+        autoRefresh: {
+          enabled: true,
+          activeRefreshPr: 30,
+        },
+        openPullRequests: prs,
+      }),
+    );
+    expect(doc.autoRefresh.activeRefreshPr).toBe(44);
+    expect(doc.snapshot.autoRefreshCoverage).toBe("COVERED_BY_DRAFT");
+    expect(doc.recommendedNextAction.targets?.pullRequest).toBe(44);
+    expect(doc.unknowns).toContain("activeRefreshPr_override_rejected");
+  });
+
+  it("accepts valid activeRefreshPr override pointing to live REFRESH_DRAFT", () => {
+    const prs = [refreshDraft(44), refreshDraft(50)];
+    expect(
+      resolveActiveRefreshPr({ openPullRequests: prs, override: 50 }),
+    ).toEqual({ activeRefreshPr: 50, overrideRejected: false });
+
+    const doc = generateStatusOverlay(
+      baseInput({
+        snapshot: {
+          generatedFrom: from,
+          stale: true,
+          staleClassification: "stale_architecture_affecting",
+          architectureRelevantChanges: ["package.json"],
+        },
+        autoRefresh: {
+          enabled: true,
+          activeRefreshPr: 50,
+        },
+        openPullRequests: prs,
+      }),
+    );
+    expect(doc.autoRefresh.activeRefreshPr).toBe(50);
+    expect(doc.snapshot.autoRefreshCoverage).toBe("COVERED_BY_DRAFT");
+    expect(doc.recommendedNextAction.code).toBe("REVIEW_DRAFT_PR");
+    expect(doc.recommendedNextAction.targets?.pullRequest).toBe(50);
+    expect(doc.unknowns).not.toContain("activeRefreshPr_override_rejected");
   });
 });
