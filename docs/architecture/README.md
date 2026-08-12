@@ -28,3 +28,7 @@ AUTO-REFRESH-V1 is **designed**; a **manual** pilot exists
 HISTORY-V1 is **designed** (append-only Snapshot/refresh audit) and **not
 implemented** — see [`../history/history-v1.md`](../history/history-v1.md).
 No persistence writer is enabled.
+
+STATUS-OVERLAY-V1 is **designed** (current-state projection) and **not
+implemented** — see [`../status/status-overlay-v1.md`](../status/status-overlay-v1.md).
+Runtime generator and UI are not enabled.
