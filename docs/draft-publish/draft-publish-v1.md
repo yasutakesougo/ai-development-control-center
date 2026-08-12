@@ -191,7 +191,11 @@ generic `github.write` / `repo.write`.
 | Verifier `HOLD` / `REJECT` / `FAILED` / `UNKNOWN` | same status |
 | Foreign verifier schema/version | `REJECT` |
 | `VERIFIED` + exact identity + R2 + capability + `DRAFT_PR` + draft=true + base exact + adapter success | `PUBLISHED_DRAFT` |
-| taskId mismatch | `REJECT` |
+| taskId mismatch without `authorizedPublicationHandoff` | `REJECT_PUBLICATION_HANDOFF_REQUIRED` |
+| taskId A→B with valid `authorizedPublicationHandoff` + canonical derivation | allowed (then normal eligibility) |
+| taskId A→B with self-asserted / non-canonical PublicationTask B | `REJECT_HANDOFF_CANONICAL_TASK_ID` |
+| missing / forged `authorityFingerprint` | `REJECT_HANDOFF_AUTHORITY_FINGERPRINT` |
+| forged / mismatched handoff provenance | `REJECT` (`REJECT_HANDOFF_*`) |
 | repository mismatch | `HOLD` |
 | baseRevision mismatch | `HOLD` |
 | path set mismatch / unsafe / forbidden / duplicate | `REJECT` / `FAILED` |

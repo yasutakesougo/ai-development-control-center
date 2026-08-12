@@ -428,12 +428,12 @@ describe("DRAFT-PUBLISH-V1 verifier / task identity", () => {
     );
   });
 
-  it("10. taskId mismatch → REJECT", () => {
+  it("10. taskId mismatch without authorized handoff → REJECT", () => {
     const task = eligibleTask();
     const verified = verifiedStub(task, { taskId: "other-task" });
     const out = publish(task, { verified });
     expect(out.status).toBe("REJECT");
-    expect(out.reasonCode).toBe("REJECT_TASK_ID_MISMATCH");
+    expect(out.reasonCode).toBe("REJECT_PUBLICATION_HANDOFF_REQUIRED");
   });
 
   it("11. repository mismatch → HOLD", () => {
