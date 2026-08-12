@@ -144,7 +144,9 @@ verifiedMeansFakeLocalEvidenceOnly = true
 | `executionInvoked=false` / `cleanupCompleted=false` | `REJECT` |
 | Runner self-claims `independentVerificationComplete=true` | `REJECT` |
 | Runner claims publication / Ready / Merge / GitHub auth | `REJECT` |
-| `workspaceOutcome` network/secrets/GitHub/production mutation | `REJECT` |
+| `workspaceOutcome` present but missing / non-false network/secrets/GitHub/production flags | `REJECT` |
+| `workspaceOutcome` present but `isolated !== true` | `REJECT` |
+| `workspaceOutcome === null` | allowed (no outcome reported) |
 | Unsafe / out-of-scope / forbidden changed path | `REJECT` / `FAILED` |
 | Independent evidence path set mismatch | `REJECT` (`REJECT_EVIDENCE_CHANGED_PATH_MISMATCH`) |
 | Duplicate path evidence | `REJECT` (`REJECT_CHANGED_PATH_DUPLICATE`) |

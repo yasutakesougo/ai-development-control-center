@@ -574,6 +574,78 @@ describe("INDEPENDENT-VERIFY-V1 metadata / workspace boundaries", () => {
     expect(out.status).toBe("REJECT");
     expect(out.reasonCode).toBe("REJECT_WORKSPACE_PRODUCTION_MUTATION");
   });
+
+  it("P1. COMPLETED + workspaceOutcome.networkAccess missing → REJECT", () => {
+    const { runnerResult, expectedTask } = completedRunner();
+    const { networkAccess: _omit, ...rest } = runnerResult.workspaceOutcome!;
+    void _omit;
+    const bad = cloneRunner(runnerResult, { workspaceOutcome: rest });
+    const out = verify(bad, expectedTask);
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_WORKSPACE_NETWORK");
+  });
+
+  it("P1. COMPLETED + secretsRequired missing → REJECT", () => {
+    const { runnerResult, expectedTask } = completedRunner();
+    const { secretsRequired: _omit, ...rest } = runnerResult.workspaceOutcome!;
+    void _omit;
+    const bad = cloneRunner(runnerResult, { workspaceOutcome: rest });
+    const out = verify(bad, expectedTask);
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_WORKSPACE_SECRETS");
+  });
+
+  it("P1. COMPLETED + githubMutationPerformed missing → REJECT", () => {
+    const { runnerResult, expectedTask } = completedRunner();
+    const { githubMutationPerformed: _omit, ...rest } =
+      runnerResult.workspaceOutcome!;
+    void _omit;
+    const bad = cloneRunner(runnerResult, { workspaceOutcome: rest });
+    const out = verify(bad, expectedTask);
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_WORKSPACE_GITHUB_MUTATION");
+  });
+
+  it("P1. COMPLETED + productionMutationPerformed missing → REJECT", () => {
+    const { runnerResult, expectedTask } = completedRunner();
+    const { productionMutationPerformed: _omit, ...rest } =
+      runnerResult.workspaceOutcome!;
+    void _omit;
+    const bad = cloneRunner(runnerResult, { workspaceOutcome: rest });
+    const out = verify(bad, expectedTask);
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_WORKSPACE_PRODUCTION_MUTATION");
+  });
+
+  it("P1. COMPLETED + workspaceOutcome={} empty object → REJECT", () => {
+    const { runnerResult, expectedTask } = completedRunner();
+    const bad = cloneRunner(runnerResult, { workspaceOutcome: {} });
+    const out = verify(bad, expectedTask);
+    expect(out.status).toBe("REJECT");
+  });
+
+  it("P1. COMPLETED + workspaceOutcome=null remains allowed; positive path VERIFIED with exact false flags", () => {
+    const { runnerResult, expectedTask } = completedRunner({
+      changedPaths: [ALLOWED_DOC],
+    });
+    // Positive path: present outcome with exact false (and isolated true) → VERIFIED
+    expect(runnerResult.workspaceOutcome?.networkAccess).toBe(false);
+    expect(runnerResult.workspaceOutcome?.secretsRequired).toBe(false);
+    expect(runnerResult.workspaceOutcome?.githubMutationPerformed).toBe(false);
+    expect(runnerResult.workspaceOutcome?.productionMutationPerformed).toBe(
+      false,
+    );
+    expect(runnerResult.workspaceOutcome?.isolated).toBe(true);
+    const withOutcome = verify(runnerResult, expectedTask);
+    expect(withOutcome.status).toBe("VERIFIED");
+
+    // Explicit policy: null workspaceOutcome is allowed.
+    const withNull = verify(
+      cloneRunner(runnerResult, { workspaceOutcome: null }),
+      expectedTask,
+    );
+    expect(withNull.status).toBe("VERIFIED");
+  });
 });
 
 describe("INDEPENDENT-VERIFY-V1 changed path re-verification", () => {

@@ -646,6 +646,12 @@ function checkRunnerMetadataBoundary(
   return { ok: true };
 }
 
+/**
+ * workspaceOutcome policy (COMPLETED path):
+ * - null is allowed (no workspace outcome reported).
+ * - when an object is present, fail closed on shape: missing / undefined /
+ *   wrong type / true are REJECT; only exact required literals PASS.
+ */
 function checkWorkspaceOutcomeBoundary(
   workspaceOutcome: unknown,
 ):
@@ -661,36 +667,45 @@ function checkWorkspaceOutcomeBoundary(
       reasonMessage: "workspaceOutcome must be an object or null.",
     };
   }
-  if (workspaceOutcome.networkAccess === true) {
+  // Align with AGENT-RUNNER-V1 workspaceOutcome literals when present.
+  if (workspaceOutcome.isolated !== true) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_INPUT",
+      reasonMessage:
+        "workspaceOutcome.isolated must be exactly true when workspaceOutcome is present; fail closed.",
+    };
+  }
+  if (workspaceOutcome.networkAccess !== false) {
     return {
       ok: false,
       reasonCode: "REJECT_WORKSPACE_NETWORK",
       reasonMessage:
-        "workspaceOutcome.networkAccess === true is not authorized in INDEPENDENT-VERIFY-V1.",
+        "workspaceOutcome.networkAccess must be exactly false when workspaceOutcome is present; missing/undefined/true/wrong-type fail closed.",
     };
   }
-  if (workspaceOutcome.secretsRequired === true) {
+  if (workspaceOutcome.secretsRequired !== false) {
     return {
       ok: false,
       reasonCode: "REJECT_WORKSPACE_SECRETS",
       reasonMessage:
-        "workspaceOutcome.secretsRequired === true is not authorized in INDEPENDENT-VERIFY-V1.",
+        "workspaceOutcome.secretsRequired must be exactly false when workspaceOutcome is present; missing/undefined/true/wrong-type fail closed.",
     };
   }
-  if (workspaceOutcome.githubMutationPerformed === true) {
+  if (workspaceOutcome.githubMutationPerformed !== false) {
     return {
       ok: false,
       reasonCode: "REJECT_WORKSPACE_GITHUB_MUTATION",
       reasonMessage:
-        "workspaceOutcome.githubMutationPerformed === true is not authorized in INDEPENDENT-VERIFY-V1.",
+        "workspaceOutcome.githubMutationPerformed must be exactly false when workspaceOutcome is present; missing/undefined/true/wrong-type fail closed.",
     };
   }
-  if (workspaceOutcome.productionMutationPerformed === true) {
+  if (workspaceOutcome.productionMutationPerformed !== false) {
     return {
       ok: false,
       reasonCode: "REJECT_WORKSPACE_PRODUCTION_MUTATION",
       reasonMessage:
-        "workspaceOutcome.productionMutationPerformed === true is not authorized in INDEPENDENT-VERIFY-V1.",
+        "workspaceOutcome.productionMutationPerformed must be exactly false when workspaceOutcome is present; missing/undefined/true/wrong-type fail closed.",
     };
   }
   return { ok: true };
