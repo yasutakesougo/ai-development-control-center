@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "ROADMAP-CONTRACT-V1",
+  "roadmapId": "roadmap-61-v1-2026-08-12",
+  "projectId": "project-contract-60-v1-2026-08-12",
+  "projectAuthorityFingerprint": "76a35f6c21df8eeb456e2bea8e568ee70ac2391aeb318a1bef95cb52960eb6df",
+  "nodes": [
+    {
+      "nodeId": "node-project-contract",
+      "title": "PROJECT-CONTRACT-V1",
+      "objective": "Establish machine-readable project source of truth.",
+      "phase": "foundation",
+      "dependsOn": [],
+      "completionCriteria": [
+        "ProjectContractV1 parse/validate/fingerprint available",
+        "Human gates remain mandatory"
+      ],
+      "estimatedComplexity": "S",
+      "status": "COMPLETE",
+      "repository": "yasutakesougo/ai-development-control-center"
+    },
+    {
+      "nodeId": "node-roadmap-contract",
+      "title": "ROADMAP-CONTRACT-V1",
+      "objective": "Represent project work as a deterministic DAG bound to ProjectContractV1.",
+      "phase": "foundation",
+      "dependsOn": ["node-project-contract"],
+      "completionCriteria": [
+        "RoadmapContractV1 parse/validate/fingerprint available",
+        "Cycles and missing dependencies reject fail-closed"
+      ],
+      "estimatedComplexity": "M",
+      "status": "PLANNED",
+      "repository": "yasutakesougo/ai-development-control-center"
+    },
+    {
+      "nodeId": "node-issue-decomposer-contract",
+      "title": "ISSUE-DECOMPOSER-CONTRACT-V1",
+      "objective": "Define IssueProposalV1 contract for later decomposition.",
+      "phase": "planning",
+      "dependsOn": ["node-roadmap-contract"],
+      "completionCriteria": [
+        "IssueProposalV1 schema exists",
+        "No GitHub Issue mutation authority granted"
+      ],
+      "estimatedComplexity": "M",
+      "status": "PLANNED",
+      "repository": "yasutakesougo/ai-development-control-center"
+    }
+  ],
+  "metadata": {
+    "createdAt": "2026-08-12T15:34:00.000Z",
+    "createdBy": "control-center-contract-v0",
+    "observedAt": "2026-08-12T15:34:00.000Z",
+    "sourceIssueUrl": "https://github.com/yasutakesougo/ai-development-control-center/issues/61",
+    "notes": [
+      "Slice: ROADMAP-CONTRACT-V1 only",
+      "Planner / IssueProposal / GitHub Issue mutation / Agent / scheduler = NOT IMPLEMENTED"
+    ]
+  }
+}
