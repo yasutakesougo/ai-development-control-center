@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 type EvidenceEntry = {
   id: string;
+  name?: string;
   status: "confirmed" | "assumed" | "unknown";
   confidence: "high" | "medium" | "low";
   evidence?: string[];
