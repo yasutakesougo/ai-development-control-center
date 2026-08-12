@@ -14,9 +14,9 @@ It does **not** enable cron, push triggers, Ready, Merge, Action Gateway, or
 Agent execution.
 
 Persistent AUTO-REFRESH is designed separately in
-[`persistent-auto-refresh-v1.md`](./persistent-auto-refresh-v1.md). A
-**DISABLED-MODE** workflow exists (`workflow_dispatch` only) and Persistent
-AUTO-REFRESH remains **NOT ENABLED** (no push-to-main automatic publication).
+[`persistent-auto-refresh-v1.md`](./persistent-auto-refresh-v1.md). The
+workflow (`.github/workflows/architecture-auto-refresh.yml`) uses `push` to
+`main` plus `workflow_dispatch` and remains Draft-only (no Ready/Merge).
 
 ---
 

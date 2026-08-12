@@ -30,12 +30,13 @@ import {
 } from "../src/domain/autoRefreshPublisher";
 import {
   assertGeneratedFromMatchesSourceMain,
-  assertPersistentAutoRefreshNotEnabled,
+  assertPersistentAutoRefreshEnabled,
   assertPersistentPublisherCannotReadyOrMerge,
   classifyPersistentDraftDisposition,
   classifyPersistentFailure,
   decidePersistentPublication,
   mayRetryPublication,
+  PERSISTENT_AUTO_REFRESH_ENABLED,
   PERSISTENT_AUTO_REFRESH_MODE,
   type PersistentAutoRefreshRunReport,
   type PersistentFailureClass,
@@ -128,7 +129,7 @@ function mapExistingPulls(
 }
 
 async function main(): Promise<void> {
-  assertPersistentAutoRefreshNotEnabled();
+  assertPersistentAutoRefreshEnabled();
   assertPersistentPublisherCannotReadyOrMerge();
 
   const args = parseArgs(process.argv.slice(2));
@@ -137,7 +138,9 @@ async function main(): Promise<void> {
   const trigger =
     triggerEnv === "workflow_dispatch"
       ? ("workflow_dispatch" as const)
-      : ("manual_cli" as const);
+      : triggerEnv === "push"
+        ? ("push_main" as const)
+        : ("manual_cli" as const);
   const runId = process.env.GITHUB_RUN_ID ?? null;
 
   const raw = JSON.parse(readFileSync(snapshotPath, "utf8"));
@@ -242,7 +245,7 @@ async function main(): Promise<void> {
     },
     failureClass,
     approvalActionRequired: false,
-    persistentAutoRefreshEnabled: false,
+    persistentAutoRefreshEnabled: PERSISTENT_AUTO_REFRESH_ENABLED,
     evaluatedAt,
   };
 

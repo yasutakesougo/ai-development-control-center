@@ -1,19 +1,19 @@
 # PERSISTENT-AUTO-REFRESH-V1
 
-**Status: DISABLED-MODE IMPLEMENTED · NOT ENABLED · NO PUSH TRIGGER · NO SCHEDULER**
+**Status: ENABLED (push to main + workflow_dispatch) · Draft-only · NO SCHEDULER**
 
 This document designs and tracks the **persistent** Architecture Snapshot
 refresh mechanism. It builds on:
 
 - `docs/architecture/auto-refresh-v1.md` (eligibility / anti-loop / identity)
 - AUTO-REFRESH-PILOT-V1 (`npm run auto-refresh:pilot`) — manual proof path
-- DISABLED-MODE runner: `npm run auto-refresh:persistent`
-- DISABLED-MODE workflow: `.github/workflows/architecture-auto-refresh.yml`
-  (`workflow_dispatch` only)
+- Persistent runner: `npm run auto-refresh:persistent`
+- Workflow: `.github/workflows/architecture-auto-refresh.yml`
+  (`push` to `main` + `workflow_dispatch`)
 
-**Persistent AUTO-REFRESH is NOT ENABLED.** Push-to-main automatic publication
-is absent. A later Human-authorized enablement slice may add the `push:`
-trigger without redesigning jobs/steps.
+**Enablement:** when the enabled workflow is present on the default branch,
+Persistent AUTO-REFRESH is **ENABLED** for push-to-main. Publication still
+stops at Draft PR. Ready/Merge remain Human.
 
 Companion pure helpers: `src/domain/persistentAutoRefreshContract.ts`  
 Example (historical) workflow sketch:
@@ -61,15 +61,16 @@ Human **Ready** and Human **Merge** remain unchanged.
 - Always apply repository-native contract evaluation when the workflow runs.
   Generic HEAD change alone is never sufficient for publication.
 
-### Explicit non-enablement
+### Explicit non-enablement of cron / Ready / Merge
 
-Until an accepted **enablement** slice lands:
+Until a separate Human-authorized expansion lands:
 
-- `.github/workflows/architecture-auto-refresh.yml` may exist only in
-  **DISABLED-MODE** (`workflow_dispatch` only; no `push`, no cron)
-- Persistent AUTO-REFRESH remains **NOT ENABLED** (no automatic push-to-main)
+- cron / schedule remains **NOT** selected for V1
+- Ready / Merge / auto-merge / PR close remain unauthorized
 - platform `pull-requests: write` is broader than intended Draft-only
   capability; publisher guards keep Ready/Merge/close unauthorized
+
+Push-to-main + `workflow_dispatch` are the accepted V1 triggers.
 
 ---
 
@@ -310,22 +311,18 @@ above.
 
 ---
 
-## Proposed implementation artifacts (future enablement)
+## Proposed implementation artifacts
 
 | Artifact | Role |
 |---|---|
-| `.github/workflows/architecture-auto-refresh.yml` | DISABLED-MODE workflow (`workflow_dispatch` only); enablement adds `push` |
-| `docs/architecture/persistent-auto-refresh-workflow.example.yml` | Historical example with commented push shape |
-| `scripts/run-persistent-auto-refresh.ts` | DISABLED-MODE runner (`npm run auto-refresh:persistent`) |
+| `.github/workflows/architecture-auto-refresh.yml` | ENABLED workflow (`push` to `main` + `workflow_dispatch`) |
+| `docs/architecture/persistent-auto-refresh-workflow.example.yml` | Historical example |
+| `scripts/run-persistent-auto-refresh.ts` | Persistent runner (`npm run auto-refresh:persistent`) |
 | `scripts/run-auto-refresh-pilot.ts` | Manual pilot runner |
 | `src/domain/autoRefreshContract.ts` | Eligibility / anti-loop / identity |
 | `src/domain/autoRefreshPilot.ts` | Publication decision helpers |
 | `src/domain/autoRefreshPublisher.ts` | Draft-only publisher caps |
 | `src/domain/persistentAutoRefreshContract.ts` | Concurrency / failure / draft disposition / workflow inspection |
-
-Enablement requires a **separate Human-authorized** PR that adds `push:` to
-the DISABLED-MODE workflow (with designed filters) while keeping Draft-only
-publisher guards.
 
 ---
 
@@ -335,10 +332,9 @@ publisher guards.
 |---|---|
 | Persistent design | this document |
 | Pure contract helpers + tests | present |
-| DISABLED-MODE workflow | `.github/workflows/architecture-auto-refresh.yml` (`workflow_dispatch` only) |
-| DISABLED-MODE runner | `npm run auto-refresh:persistent` |
-| Example workflow YAML | docs only (non-triggering historical sketch) |
-| Active push-to-main AUTO-REFRESH | **NOT ENABLED** |
+| ENABLED workflow | `.github/workflows/architecture-auto-refresh.yml` |
+| Persistent runner | `npm run auto-refresh:persistent` |
+| Active push-to-main AUTO-REFRESH | **ENABLED** (after this enablement merges) |
 | cron / webhook mutation | **NOT ENABLED** |
 | Ready / Merge automation | **NOT ENABLED** |
 | Action Gateway / Agent execution | **NOT IMPLEMENTED** |

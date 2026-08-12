@@ -9,8 +9,9 @@ import {
 import { AUTO_REFRESH_PILOT_PUBLISHER } from "../src/domain/autoRefreshPublisher";
 import {
   assertDisabledModeWorkflow,
+  assertEnabledModeWorkflow,
   assertGeneratedFromMatchesSourceMain,
-  assertPersistentAutoRefreshNotEnabled,
+  assertPersistentAutoRefreshEnabled,
   assertPersistentPublisherCannotReadyOrMerge,
   classifyPersistentDraftDisposition,
   classifyPersistentFailure,
@@ -41,23 +42,25 @@ const workflowYaml = readFileSync(
   "utf8",
 );
 
-describe("PERSISTENT-AUTO-REFRESH-V1 DISABLED-MODE", () => {
-  it("remains NOT ENABLED in DISABLED_MODE with workflow_dispatch-only active triggers", () => {
-    expect(PERSISTENT_AUTO_REFRESH_ENABLED).toBe(false);
-    expect(PERSISTENT_AUTO_REFRESH_MODE).toBe("DISABLED_MODE");
-    expect(PERSISTENT_ACTIVE_TRIGGERS).toEqual(["workflow_dispatch"]);
-    expect(PERSISTENT_ACTIVE_TRIGGERS).not.toContain("push_main");
+describe("PERSISTENT-AUTO-REFRESH-V1 ENABLEMENT", () => {
+  it("is ENABLED with push_main + workflow_dispatch active triggers", () => {
+    expect(PERSISTENT_AUTO_REFRESH_ENABLED).toBe(true);
+    expect(PERSISTENT_AUTO_REFRESH_MODE).toBe("ENABLED");
+    expect(PERSISTENT_ACTIVE_TRIGGERS).toEqual(["push_main", "workflow_dispatch"]);
     expect(PERSISTENT_ACTIVE_TRIGGERS).not.toContain("schedule");
-    expect(() => assertPersistentAutoRefreshNotEnabled()).not.toThrow();
+    expect(() => assertPersistentAutoRefreshEnabled()).not.toThrow();
   });
 
-  it("workflow only has workflow_dispatch; no push; no cron", () => {
+  it("workflow has push(main) + workflow_dispatch; no cron; no pull_request", () => {
     const inspection = inspectPersistentWorkflowYaml(workflowYaml);
     expect(inspection.path).toBe(PERSISTENT_WORKFLOW_PATH);
     expect(inspection.hasWorkflowDispatch).toBe(true);
-    expect(inspection.hasPushTrigger).toBe(false);
+    expect(inspection.hasPushTrigger).toBe(true);
+    expect(inspection.hasPushMainOnly).toBe(true);
+    expect(inspection.hasPullRequestTrigger).toBe(false);
+    expect(inspection.hasRepositoryDispatch).toBe(false);
     expect(inspection.hasScheduleCron).toBe(false);
-    expect(() => assertDisabledModeWorkflow(inspection)).not.toThrow();
+    expect(() => assertEnabledModeWorkflow(inspection)).not.toThrow();
   });
 
   it("permissions are expected minimum and concurrency group exists", () => {
@@ -261,17 +264,19 @@ describe("PERSISTENT-AUTO-REFRESH-V1 DISABLED-MODE", () => {
     expect(PERSISTENT_AUTO_REFRESH_PUBLISHER.canMerge).toBe(false);
     expect(PERSISTENT_AUTO_REFRESH_PUBLISHER.canInvokeActionGateway).toBe(false);
     expect(PERSISTENT_AUTO_REFRESH_PUBLISHER.canExecuteAgent).toBe(false);
-    // Run report type always pins approvalActionRequired: false at the contract layer.
     const approvalActionRequired = false as const;
     expect(approvalActionRequired).toBe(false);
   });
 
-  it("rejects a push-triggered workflow YAML in DISABLED-MODE inspection", () => {
+  it("rejects cron-enabled workflow YAML in ENABLED inspection", () => {
     const bad = [
       "on:",
       "  push:",
-      "    branches: [main]",
+      "    branches:",
+      "      - main",
       "  workflow_dispatch:",
+      "  schedule:",
+      "    - cron: '0 * * * *'",
       "concurrency:",
       `  group: ${PERSISTENT_CONCURRENCY_GROUP_EXPRESSION}`,
       "  cancel-in-progress: true",
@@ -280,7 +285,25 @@ describe("PERSISTENT-AUTO-REFRESH-V1 DISABLED-MODE", () => {
       "  pull-requests: write",
     ].join("\n");
     const inspection = inspectPersistentWorkflowYaml(bad);
-    expect(inspection.hasPushTrigger).toBe(true);
-    expect(() => assertDisabledModeWorkflow(inspection)).toThrow(/must not include push/);
+    expect(inspection.hasScheduleCron).toBe(true);
+    expect(() => assertEnabledModeWorkflow(inspection)).toThrow(/cron/);
+  });
+
+  it("dispatch-only YAML is not ENABLED shape", () => {
+    const disabled = [
+      "on:",
+      "  workflow_dispatch:",
+      "concurrency:",
+      `  group: ${PERSISTENT_CONCURRENCY_GROUP_EXPRESSION}`,
+      "  cancel-in-progress: true",
+      "permissions:",
+      "  contents: write",
+      "  pull-requests: write",
+    ].join("\n");
+    const inspection = inspectPersistentWorkflowYaml(disabled);
+    expect(inspection.hasPushTrigger).toBe(false);
+    // Contract constant is ENABLED=true on this branch, so DISABLED assert fails closed on enabled flag.
+    expect(() => assertDisabledModeWorkflow(inspection)).toThrow(/PERSISTENT_AUTO_REFRESH_ENABLED=false/);
+    expect(() => assertEnabledModeWorkflow(inspection)).toThrow(/push trigger/);
   });
 });

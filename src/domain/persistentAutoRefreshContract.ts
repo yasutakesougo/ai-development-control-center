@@ -1,10 +1,10 @@
 /**
  * PERSISTENT-AUTO-REFRESH-V1 contract helpers.
  *
- * DISABLED-MODE IMPLEMENTATION · NOT ENABLED (no push-to-main automatic execution)
+ * ENABLED · push to main + workflow_dispatch · Draft-only publication
  *
  * Concurrency, failure, Draft disposition, workflow static inspection, and
- * publication decision logic. Does not enable cron or push triggers.
+ * publication decision logic. Cron/schedule remains not selected for V1.
  */
 
 import {
@@ -20,10 +20,10 @@ import {
 import type { MainRecheckResult } from "./autoRefreshPilot";
 
 export const PERSISTENT_AUTO_REFRESH_DESIGN = "PERSISTENT-AUTO-REFRESH-DESIGN-V1" as const;
-export const PERSISTENT_AUTO_REFRESH_MODE = "DISABLED_MODE" as const;
+export const PERSISTENT_AUTO_REFRESH_MODE = "ENABLED" as const;
 
-/** Push-to-main / scheduled persistent automation remains off. */
-export const PERSISTENT_AUTO_REFRESH_ENABLED = false as const;
+/** Push-to-main persistent automation is enabled (cron still absent). */
+export const PERSISTENT_AUTO_REFRESH_ENABLED = true as const;
 
 export const PERSISTENT_CONCURRENCY_GROUP = "architecture-auto-refresh-main" as const;
 export const PERSISTENT_CONCURRENCY_GROUP_EXPRESSION =
@@ -33,8 +33,8 @@ export const PERSISTENT_CANCEL_IN_PROGRESS = true as const;
 export const PERSISTENT_WORKFLOW_PATH =
   ".github/workflows/architecture-auto-refresh.yml" as const;
 
-/** Active triggers in DISABLED-MODE (push/cron must remain absent). */
-export const PERSISTENT_ACTIVE_TRIGGERS = ["workflow_dispatch"] as const;
+/** Active triggers when ENABLED (cron/schedule must remain absent). */
+export const PERSISTENT_ACTIVE_TRIGGERS = ["push_main", "workflow_dispatch"] as const;
 
 /**
  * Designed preference for a future enablement slice.
@@ -106,6 +106,9 @@ export interface PersistentWorkflowInspection {
   path: typeof PERSISTENT_WORKFLOW_PATH;
   hasWorkflowDispatch: boolean;
   hasPushTrigger: boolean;
+  hasPushMainOnly: boolean;
+  hasPullRequestTrigger: boolean;
+  hasRepositoryDispatch: boolean;
   hasScheduleCron: boolean;
   concurrencyGroupExpression: string | null;
   cancelInProgress: boolean | null;
@@ -124,7 +127,7 @@ export interface PersistentWorkflowInspection {
 export interface PersistentAutoRefreshRunReport {
   schemaVersion: "1.0";
   mode: typeof PERSISTENT_AUTO_REFRESH_MODE;
-  trigger: "workflow_dispatch" | "manual_cli" | "unknown";
+  trigger: "workflow_dispatch" | "push_main" | "manual_cli" | "unknown";
   repository: string;
   runId: string | null;
   observedMain: string | null;
@@ -156,14 +159,14 @@ export interface PersistentAutoRefreshRunReport {
   };
   failureClass: PersistentFailureClass | null;
   approvalActionRequired: false;
-  persistentAutoRefreshEnabled: false;
+  persistentAutoRefreshEnabled: typeof PERSISTENT_AUTO_REFRESH_ENABLED;
   evaluatedAt: string;
 }
 
-export function assertPersistentAutoRefreshNotEnabled(): void {
-  if (PERSISTENT_AUTO_REFRESH_ENABLED) {
+export function assertPersistentAutoRefreshEnabled(): void {
+  if (!PERSISTENT_AUTO_REFRESH_ENABLED) {
     throw new Error(
-      "PERSISTENT-AUTO-REFRESH-V1 must remain NOT ENABLED (no push-to-main automatic execution)",
+      "PERSISTENT-AUTO-REFRESH-V1 must be ENABLED (push-to-main + workflow_dispatch)",
     );
   }
 }
@@ -407,7 +410,7 @@ export function persistentConcurrencyPolicy(): {
 }
 
 /**
- * Static inspection of the DISABLED-MODE workflow YAML text.
+ * Static inspection of the persistent workflow YAML text.
  * Uses conservative string checks (no YAML dependency).
  */
 export function inspectPersistentWorkflowYaml(yaml: string): PersistentWorkflowInspection {
@@ -419,8 +422,22 @@ export function inspectPersistentWorkflowYaml(yaml: string): PersistentWorkflowI
   const hasWorkflowDispatch = /^\s*workflow_dispatch\s*:/m.test(withoutComments);
   // Active push trigger only if an uncommented `push:` appears under `on:`.
   const hasPushTrigger = /^\s*push\s*:/m.test(withoutComments);
+  const hasPullRequestTrigger = /^\s*pull_request\s*:/m.test(withoutComments);
+  const hasRepositoryDispatch = /^\s*repository_dispatch\s*:/m.test(withoutComments);
   const hasScheduleCron =
     /^\s*schedule\s*:/m.test(withoutComments) || /^\s*-\s*cron\s*:/m.test(withoutComments);
+
+  const pushMainInline = /push:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+branches:\s*\[\s*main\s*\]/.test(
+    withoutComments,
+  );
+  const pushMainList = /push:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+branches:\s*\n[ \t]+-\s*main\b/.test(
+    withoutComments,
+  );
+  const pushOtherBranchList =
+    /push:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+branches:\s*\n(?:[ \t]+-\s*(?!main\b)\S+\s*\n)+/.test(
+      withoutComments,
+    );
+  const hasPushMainOnly = hasPushTrigger && (pushMainInline || pushMainList) && !pushOtherBranchList;
 
   const concurrencyMatch = withoutComments.match(
     /concurrency:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+group:\s*([^\n]+)/,
@@ -448,6 +465,9 @@ export function inspectPersistentWorkflowYaml(yaml: string): PersistentWorkflowI
     path: PERSISTENT_WORKFLOW_PATH,
     hasWorkflowDispatch,
     hasPushTrigger,
+    hasPushMainOnly,
+    hasPullRequestTrigger,
+    hasRepositoryDispatch,
     hasScheduleCron,
     concurrencyGroupExpression,
     cancelInProgress,
@@ -464,6 +484,53 @@ export function inspectPersistentWorkflowYaml(yaml: string): PersistentWorkflowI
   };
 }
 
+/** Assert ENABLED workflow shape: push(main) + workflow_dispatch, no cron/extra scopes. */
+export function assertEnabledModeWorkflow(inspection: PersistentWorkflowInspection): void {
+  if (!inspection.hasWorkflowDispatch) {
+    throw new Error("ENABLED workflow must include workflow_dispatch");
+  }
+  if (!inspection.hasPushTrigger || !inspection.hasPushMainOnly) {
+    throw new Error("ENABLED workflow must include push trigger for main only");
+  }
+  if (inspection.hasPullRequestTrigger) {
+    throw new Error("ENABLED workflow must not include pull_request trigger");
+  }
+  if (inspection.hasRepositoryDispatch) {
+    throw new Error("ENABLED workflow must not include repository_dispatch");
+  }
+  if (inspection.hasScheduleCron) {
+    throw new Error("ENABLED workflow must not include cron/schedule");
+  }
+  if (!inspection.persistentEnabled) {
+    throw new Error("ENABLED mode requires PERSISTENT_AUTO_REFRESH_ENABLED=true");
+  }
+  if (inspection.concurrencyGroupExpression !== PERSISTENT_CONCURRENCY_GROUP_EXPRESSION) {
+    throw new Error("ENABLED workflow concurrency group mismatch");
+  }
+  if (inspection.cancelInProgress !== true) {
+    throw new Error("ENABLED workflow must set cancel-in-progress: true");
+  }
+  if (inspection.permissionsContents !== "write") {
+    throw new Error("ENABLED workflow contents permission must be write");
+  }
+  if (inspection.permissionsPullRequests !== "write") {
+    throw new Error("ENABLED workflow pull-requests permission must be write");
+  }
+  if (
+    inspection.grantsIssuesWrite ||
+    inspection.grantsActionsWrite ||
+    inspection.grantsDeploymentsWrite ||
+    inspection.grantsIdTokenWrite ||
+    inspection.grantsPackagesWrite
+  ) {
+    throw new Error("ENABLED workflow grants excess permissions");
+  }
+  if (inspection.invokesReadyOrMerge) {
+    throw new Error("ENABLED workflow must not Ready/Merge/auto-merge");
+  }
+}
+
+/** @deprecated Retained for negative-path tests of pre-enablement YAML. */
 export function assertDisabledModeWorkflow(inspection: PersistentWorkflowInspection): void {
   if (!inspection.hasWorkflowDispatch) {
     throw new Error("DISABLED-MODE workflow must include workflow_dispatch");

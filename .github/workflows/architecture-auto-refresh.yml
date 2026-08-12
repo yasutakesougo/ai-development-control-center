@@ -1,17 +1,13 @@
-# PERSISTENT-AUTO-REFRESH-V1 — DISABLED-MODE
+# PERSISTENT-AUTO-REFRESH-V1 — ENABLED (push to main + workflow_dispatch)
 #
-# Persistent AUTO-REFRESH is NOT ENABLED.
-# This workflow validates the executable structure without push-to-main automation.
+# Persistent AUTO-REFRESH becomes ENABLED when this workflow is on the default
+# branch with the push trigger below. Draft-only publication boundary is
+# unchanged (Ready/Merge/close remain unauthorized in repository-native guards).
 #
-# Active trigger: workflow_dispatch only
-# Not present: push to main, cron/schedule, webhook, external scheduler
-#
-# Future enablement slice may add (without redesigning jobs/steps):
-#   push:
-#     branches: [main]
-#     paths-ignore:
-#       - "docs/architecture/architecture.json"
-#       - "docs/architecture/architecture.html"
+# Active triggers:
+#   - push to main (primary)
+#   - workflow_dispatch (manual fallback)
+# Not present: cron/schedule, pull_request, repository_dispatch, webhook
 #
 # Platform permissions (contents/pull-requests write) are broader than the
 # intended Draft-only capability enforced in repository-native publisher guards
@@ -20,6 +16,12 @@
 name: architecture-auto-refresh
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/architecture/architecture.json"
+      - "docs/architecture/architecture.html"
   workflow_dispatch:
 
 concurrency:
@@ -50,7 +52,7 @@ jobs:
       - name: Evaluate + regenerate + verify + Draft-only publish capability
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PERSISTENT_AUTO_REFRESH_TRIGGER: workflow_dispatch
+          PERSISTENT_AUTO_REFRESH_TRIGGER: ${{ github.event_name }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: npm run auto-refresh:persistent -- --publish
 
