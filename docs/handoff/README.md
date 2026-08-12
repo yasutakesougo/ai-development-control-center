@@ -76,9 +76,11 @@ implemented** — see [`../history/history-v1.md`](../history/history-v1.md).
 Historical events must not change HANDOFF decision semantics or manufacture
 `ACTION_REQUIRED`.
 
-STATUS-OVERLAY-V1 (current-state projection) is **designed** and **not
-implemented** — see [`../status/status-overlay-v1.md`](../status/status-overlay-v1.md).
+STATUS-OVERLAY-V1 (current-state projection) is **designed**; pure Runtime
+Generator is **implemented** — see
+[`../status/status-overlay-v1.md`](../status/status-overlay-v1.md).
 Overlay consumes HANDOFF output and must not redefine HANDOFF rules.
+UI / observer remain not implemented.
 
 ## Next action
 

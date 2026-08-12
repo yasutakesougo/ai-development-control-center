@@ -1,19 +1,20 @@
 /**
  * STATUS-OVERLAY-V1 design contract helpers.
  *
- * DESIGNED · runtime generator NOT IMPLEMENTED · UI NOT IMPLEMENTED
+ * DESIGNED · runtime generator IMPLEMENTED · UI NOT IMPLEMENTED
  *
  * Pure live-state precedence, Human-gate classification, and deterministic
  * next-action selection. Does not observe GitHub, write files, or authorize
- * mutation.
+ * mutation. Projection assembly lives in `statusOverlayGenerator.ts`.
  */
 
 export const STATUS_OVERLAY_SCHEMA_VERSION = "STATUS-OVERLAY-V1" as const;
 export const STATUS_OVERLAY_DESIGN = "STATUS-OVERLAY-DESIGN-V1" as const;
 
-/** Runtime projection generator remains unimplemented in this design-only slice. */
-export const STATUS_OVERLAY_GENERATOR_IMPLEMENTED = false as const;
+/** Pure runtime projection generator is implemented (no observer/UI/writer). */
+export const STATUS_OVERLAY_GENERATOR_IMPLEMENTED = true as const;
 export const STATUS_OVERLAY_UI_IMPLEMENTED = false as const;
+/** Full product (observer + UI + emit) remains incomplete. */
 export const STATUS_OVERLAY_IMPLEMENTED = false as const;
 
 /** Stable status vocabulary — no synonyms. */
@@ -139,14 +140,19 @@ export interface SelectNextActionInput {
   historicalDraftOpen?: boolean;
 }
 
+/** UI / observer / writer / Gateway binding remain forbidden in this slice. */
+export function assertStatusOverlayUiNotImplemented(): void {
+  if (STATUS_OVERLAY_UI_IMPLEMENTED) {
+    throw new Error("STATUS-OVERLAY-V1 UI must remain NOT IMPLEMENTED");
+  }
+}
+
+/** @deprecated Use assertStatusOverlayUiNotImplemented — generator is now implemented. */
 export function assertStatusOverlayNotImplemented(): void {
-  if (
-    STATUS_OVERLAY_IMPLEMENTED ||
-    STATUS_OVERLAY_GENERATOR_IMPLEMENTED ||
-    STATUS_OVERLAY_UI_IMPLEMENTED
-  ) {
+  assertStatusOverlayUiNotImplemented();
+  if (STATUS_OVERLAY_IMPLEMENTED) {
     throw new Error(
-      "STATUS-OVERLAY-V1 runtime generator/UI must remain NOT IMPLEMENTED in design-only state",
+      "STATUS-OVERLAY-V1 full product (observer/UI/writer) must remain NOT IMPLEMENTED",
     );
   }
 }
