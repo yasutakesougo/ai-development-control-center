@@ -397,20 +397,36 @@ describe("ROADMAP-CONTRACT-V1 contract", () => {
 
   it("P1: dependency change → different fingerprint", async () => {
     const a = validRoadmap();
-    const firstId = a.nodes[0]!.nodeId;
     const second = a.nodes[1]!;
-    expect(second.dependsOn).not.toContain(firstId);
-    const b: RoadmapContractV1 = {
+    expect(second.dependsOn).toEqual(["node-project-contract"]);
+    const withoutDep: RoadmapContractV1 = {
       ...a,
       nodes: [
         a.nodes[0]!,
-        cloneNode(second, { dependsOn: [...second.dependsOn, firstId] }),
+        cloneNode(second, { dependsOn: [] }),
         ...a.nodes.slice(2),
       ],
     };
+    const withExtraDep: RoadmapContractV1 = {
+      ...a,
+      nodes: [
+        a.nodes[0]!,
+        a.nodes[1]!,
+        cloneNode(a.nodes[2]!, {
+          dependsOn: [
+            ...a.nodes[2]!.dependsOn,
+            "node-project-contract",
+          ],
+        }),
+      ],
+    };
     const fpA = await computeRoadmapContractAuthorityFingerprint(a);
-    const fpB = await computeRoadmapContractAuthorityFingerprint(b);
-    expect(fpA).not.toBe(fpB);
+    const fpWithout =
+      await computeRoadmapContractAuthorityFingerprint(withoutDep);
+    const fpExtra =
+      await computeRoadmapContractAuthorityFingerprint(withExtraDep);
+    expect(fpA).not.toBe(fpWithout);
+    expect(fpA).not.toBe(fpExtra);
   });
 
   it("P1: completionCriteria change → different fingerprint", async () => {
@@ -434,25 +450,36 @@ describe("ROADMAP-CONTRACT-V1 contract", () => {
 
   it("P1: repository binding change → different fingerprint", async () => {
     const a = validRoadmap();
-    const project = validProject();
-    const repos = project.repositories.map((ref) => ref.repository);
-    expect(repos.length).toBeGreaterThanOrEqual(1);
-    const current = a.nodes[0]!.repository;
-    const alternate =
-      repos.find((repo) => repo !== current) ?? `${repos[0]!}-alt-binding`;
-    // Prefer a second in-project repo when available; otherwise use a distinct
-    // string so fingerprint input changes (validation is not required here).
-    const b: RoadmapContractV1 = {
+    expect(a.nodes[0]!.repository).toBe(
+      "yasutakesougo/ai-development-control-center",
+    );
+    const withDifferentRepo: RoadmapContractV1 = {
       ...a,
       nodes: [
-        cloneNode(a.nodes[0]!, { repository: alternate }),
+        cloneNode(a.nodes[0]!, {
+          repository: "yasutakesougo/other-bound-repository",
+        }),
         ...a.nodes.slice(1),
       ],
     };
-    expect(b.nodes[0]!.repository).not.toBe(current);
+    const withoutRepo: RoadmapContractV1 = {
+      ...a,
+      nodes: [
+        (() => {
+          const { repository: _omit, ...rest } = a.nodes[0]!;
+          return rest;
+        })(),
+        ...a.nodes.slice(1),
+      ],
+    };
     const fpA = await computeRoadmapContractAuthorityFingerprint(a);
-    const fpB = await computeRoadmapContractAuthorityFingerprint(b);
-    expect(fpA).not.toBe(fpB);
+    const fpDifferent =
+      await computeRoadmapContractAuthorityFingerprint(withDifferentRepo);
+    const fpAbsent =
+      await computeRoadmapContractAuthorityFingerprint(withoutRepo);
+    expect(fpA).not.toBe(fpDifferent);
+    expect(fpA).not.toBe(fpAbsent);
+    expect(fpDifferent).not.toBe(fpAbsent);
   });
 
   it("authority fingerprint changes when node objective changes", async () => {
