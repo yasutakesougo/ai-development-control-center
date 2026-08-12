@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "PROJECT-CONTRACT-V1",
+  "projectId": "project-contract-60-v1-2026-08-12",
+  "name": "AI Development Control Center — CHECKPOINT-2 foundation",
+  "objective": "Define PROJECT-CONTRACT-V1 as the machine-readable project source of truth before roadmap or Issue generation.",
+  "problemStatement": "Without a versioned project contract, roadmap and Issue generation would rely on prompt prose and could silently rewrite governance boundaries such as scope, risk, and Human gates.",
+  "users": [
+    "Control Center operator",
+    "Human reviewer"
+  ],
+  "successCriteria": [
+    "ProjectContractV1 can be parsed with fail-closed structural validation",
+    "Semantic validation rejects scope conflicts and weakened Human gates",
+    "Authority fingerprint is deterministic and excludes metadata.observedAt",
+    "npm run verify passes without Planner, Roadmap, IssueProposal, GitHub Issue mutation, or Agent execution"
+  ],
+  "inScope": [
+    "ProjectContractV1 schema and TypeScript contract",
+    "Deterministic parse / validate / fingerprint",
+    "Contract tests and documentation"
+  ],
+  "outOfScope": [
+    "Planner implementation",
+    "Roadmap generation",
+    "IssueProposal generation",
+    "GitHub Issue publication or mutation",
+    "Agent execution"
+  ],
+  "constraints": {
+    "maxRiskClass": "R1",
+    "prohibitedCapabilities": [
+      "github.issue.create.v1",
+      "github.draft-pr.publish.v1"
+    ],
+    "maxRepositories": 2,
+    "requireIndependentVerify": true,
+    "notes": [
+      "Contract-only slice for #60",
+      "Human gates remain mandatory in V1"
+    ]
+  },
+  "repositories": [
+    {
+      "repository": "yasutakesougo/ai-development-control-center",
+      "role": "PRIMARY",
+      "defaultBranch": "main"
+    }
+  ],
+  "humanGatePolicy": {
+    "readyRequiresHuman": true,
+    "mergeRequiresHuman": true,
+    "issueCloseRequiresHuman": true,
+    "deployRequiresHuman": true
+  },
+  "metadata": {
+    "createdAt": "2026-08-12T15:20:00.000Z",
+    "createdBy": "control-center-contract-v0",
+    "observedAt": "2026-08-12T15:20:00.000Z",
+    "sourceIssueUrl": "https://github.com/yasutakesougo/ai-development-control-center/issues/60",
+    "notes": [
+      "Slice: PROJECT-CONTRACT-V1 only",
+      "Planner / Roadmap / IssueProposal / GitHub Issue mutation / Agent execution = NOT IMPLEMENTED"
+    ]
+  }
+}
