@@ -10,6 +10,10 @@ HISTORY-V1 is **audit/history only**. It is **not** an authorization mechanism.
 Companion pure helpers (design contract only):
 `src/domain/historyContract.ts`
 
+Current-state projection is designed separately as STATUS-OVERLAY-V1
+(`docs/status/status-overlay-v1.md`). HISTORY must not override live state used
+by the overlay.
+
 ---
 
 ## Objective
