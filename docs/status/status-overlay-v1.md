@@ -1,6 +1,6 @@
 # STATUS-OVERLAY-V1
 
-**Status: DESIGNED · runtime generator NOT IMPLEMENTED · UI NOT IMPLEMENTED**
+**Status: DESIGNED · runtime generator IMPLEMENTED · UI NOT IMPLEMENTED**
 
 This document designs **STATUS-OVERLAY-V1**: a replaceable **current-state
 projection** that answers:
@@ -11,11 +11,16 @@ projection** that answers:
 - What is waiting on Human?
 - What is safe to do next?
 
-Companion pure helpers (design contract only):
-`src/domain/statusOverlayContract.ts`
+Companion modules:
+
+- Contract helpers: `src/domain/statusOverlayContract.ts`
+- Runtime generator (pure): `src/domain/statusOverlayGenerator.ts`
 
 STATUS-OVERLAY is **decision-support only**. It does **not** authorize
 mutation, Ready, Merge, Action Gateway, Agent execution, or Ledger writes.
+
+Observation remains separate: callers supply explicit observed inputs. No
+GitHub observer, repository-file writer, or UI is implemented in this slice.
 
 ---
 
@@ -298,9 +303,16 @@ the decision depends on that evidence.
 }
 ```
 
-Runtime generation of this document is **NOT IMPLEMENTED** in this slice.
-Pure contract helpers exist for precedence, gate classification, and
-next-action selection only.
+Runtime generation is implemented as a pure function:
+
+```ts
+generateStatusOverlay(input) → StatusOverlayDocument
+```
+
+The generator accepts already-observed inputs, preserves caller-supplied
+`observedAt` exactly, and reuses contract helpers for coverage / gates /
+next-action selection. It does **not** observe GitHub, write files, or
+create timestamps.
 
 ---
 
@@ -350,8 +362,9 @@ No decorative metric strips. Markdown/HTML renderer is **NOT IMPLEMENTED**.
 
 ## Storage / runtime
 
+- Pure in-memory generator: `generateStatusOverlay`.
 - No new Cloudflare / SharePoint persistence.
-- No production writer for overlay artifacts in this slice.
+- No production repository-file writer for overlay artifacts in this slice.
 - Future optional emit path (not implemented): e.g. `docs/status/status-overlay.json`
   generated on demand (replaceable), never treated as authorization.
 
@@ -371,6 +384,9 @@ No decorative metric strips. Markdown/HTML renderer is **NOT IMPLEMENTED**.
 | Item | Status |
 |---|---|
 | STATUS-OVERLAY-V1 | **DESIGNED** |
-| Runtime generator | **NOT IMPLEMENTED** |
+| Runtime generator | **IMPLEMENTED** (`statusOverlayGenerator.ts`) |
+| GitHub / workflow observer | **NOT IMPLEMENTED** |
+| Repository-file writer | **NOT IMPLEMENTED** |
 | UI | **NOT IMPLEMENTED** |
 | Action Gateway binding | **NOT IMPLEMENTED** |
+| Approval Ledger / Agent execution | **NOT IMPLEMENTED** |
