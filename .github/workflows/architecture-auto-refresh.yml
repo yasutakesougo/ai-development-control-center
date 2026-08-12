@@ -1,20 +1,25 @@
-# PERSISTENT-AUTO-REFRESH-V1 — EXAMPLE ONLY (HISTORICAL)
+# PERSISTENT-AUTO-REFRESH-V1 — DISABLED-MODE
 #
-# Prefer the real DISABLED-MODE workflow:
-#   .github/workflows/architecture-auto-refresh.yml
-# which uses workflow_dispatch only (Persistent AUTO-REFRESH = NOT ENABLED).
+# Persistent AUTO-REFRESH is NOT ENABLED.
+# This workflow validates the executable structure without push-to-main automation.
 #
-# This docs/ copy retains the eventual push+dispatch shape for enablement review.
-# GitHub Actions will NOT load files under docs/.
+# Active trigger: workflow_dispatch only
+# Not present: push to main, cron/schedule, webhook, external scheduler
+#
+# Future enablement slice may add (without redesigning jobs/steps):
+#   push:
+#     branches: [main]
+#     paths-ignore:
+#       - "docs/architecture/architecture.json"
+#       - "docs/architecture/architecture.html"
+#
+# Platform permissions (contents/pull-requests write) are broader than the
+# intended Draft-only capability enforced in repository-native publisher guards
+# (canMarkReady=false, canMerge=false, canClosePullRequest=false, …).
 
 name: architecture-auto-refresh
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "docs/architecture/architecture.json"
-      - "docs/architecture/architecture.html"
   workflow_dispatch:
 
 concurrency:
@@ -27,7 +32,6 @@ permissions:
 
 jobs:
   refresh:
-    if: false # EXAMPLE ONLY: never run even if misplaced under .github/workflows
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,10 +47,11 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Evaluate + regenerate + verify + Draft-only publish
+      - name: Evaluate + regenerate + verify + Draft-only publish capability
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PERSISTENT_AUTO_REFRESH_TRIGGER: workflow_dispatch
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: npm run auto-refresh:persistent -- --publish
 
       # Explicit non-goals (must never appear):
