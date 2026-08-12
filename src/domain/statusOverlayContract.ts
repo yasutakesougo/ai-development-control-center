@@ -126,6 +126,11 @@ export interface StatusOverlayDocument {
 export interface SelectNextActionInput {
   /** Live evidence incomplete for a required decision. */
   liveObservationFailed?: boolean;
+  /**
+   * Workflow/Actions observation could not be read.
+   * This is observation UNKNOWN — not automation OUTCOME_UNKNOWN.
+   */
+  workflowObservationFailed?: boolean;
   outcomeUnknown?: boolean;
   safetyHold?: boolean;
   holdReason?: string | null;
@@ -245,6 +250,7 @@ export function isUncoveredArchitectureStale(input: SelectNextActionInput): bool
  */
 export function classifyOverlayGateKind(input: SelectNextActionInput): StatusOverlayGateKind {
   if (input.liveObservationFailed) return "Unknown";
+  if (input.workflowObservationFailed) return "Unknown";
   if (input.outcomeUnknown || input.safetyHold) return "HumanActionRequired";
   if (input.handoffActionRequired) return "HumanActionRequired";
   if (input.automationFailed) return "HumanActionRequired";
@@ -288,6 +294,18 @@ export function selectRecommendedNextAction(
       status: "UNKNOWN",
       gateKind: "Unknown",
       summary: "Live observation failed; cannot recommend a safe next action",
+      ...denyAuth,
+    };
+  }
+
+  // Workflow API/read failure is observation UNKNOWN, not automation OUTCOME_UNKNOWN.
+  if (input.workflowObservationFailed) {
+    return {
+      code: "UNKNOWN",
+      status: "UNKNOWN",
+      gateKind: "Unknown",
+      summary:
+        "Workflow observation unavailable; cannot recommend a safe next action from missing automation evidence",
       ...denyAuth,
     };
   }

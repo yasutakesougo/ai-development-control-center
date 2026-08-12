@@ -200,6 +200,7 @@ export async function observeStatusOverlayGithub(
     holds,
     unknowns,
     liveObservationFailed: false,
+    workflowObservationFailed: false,
     historicalDraftOpen: params.local.historicalDraftOpen === true,
     historyWriter: { writerImplemented: false },
   };
@@ -207,6 +208,7 @@ export async function observeStatusOverlayGithub(
   let currentMain: string | null = null;
   let openPullRequests: StatusOverlayPullRequest[] = [];
   let workflowRuns: StatusOverlayObservedWorkflowRun[] = [];
+  let workflowObservationFailed = false;
 
   try {
     const tip = await params.client.getDefaultBranchTip(params.repository);
@@ -222,8 +224,11 @@ export async function observeStatusOverlayGithub(
         workflowFileName,
       );
     } catch {
-      unknowns.push("workflow_state_UNKNOWN");
-      base.outcomeUnknown = true;
+      // Observation UNKNOWN — not automation OUTCOME_UNKNOWN.
+      workflowObservationFailed = true;
+      if (!unknowns.includes("workflow_state_UNKNOWN")) {
+        unknowns.push("workflow_state_UNKNOWN");
+      }
     }
   } catch {
     return {
@@ -248,10 +253,15 @@ export async function observeStatusOverlayGithub(
   let lastRunConclusion: string | null = null;
   let lastEvaluation: string | null = null;
   let lastPublicationOutcome: string | null = null;
-  let outcomeUnknown = base.outcomeUnknown === true;
+  let outcomeUnknown = false;
   let automationFailed = false;
 
-  if (!latestRun) {
+  if (workflowObservationFailed) {
+    // Workflow API unreadable: observation UNKNOWN fields only.
+    lastRunConclusion = "UNKNOWN";
+    lastEvaluation = "UNKNOWN";
+    lastPublicationOutcome = "UNKNOWN";
+  } else if (!latestRun) {
     if (!unknowns.includes("workflow_state_UNKNOWN")) {
       unknowns.push("workflow_state_UNKNOWN");
     }
@@ -262,11 +272,10 @@ export async function observeStatusOverlayGithub(
     lastRunId = latestRun.id;
     lastRunConclusion = latestRun.conclusion ?? "UNKNOWN";
     if (latestRun.conclusion == null || latestRun.conclusion === "") {
+      lastRunConclusion = "UNKNOWN";
+      // Completed run with missing conclusion → automation OUTCOME_UNKNOWN.
       if (latestRun.status === "completed") {
         outcomeUnknown = true;
-        lastRunConclusion = "UNKNOWN";
-      } else {
-        lastRunConclusion = "UNKNOWN";
       }
     }
     if (latestRun.conclusion === "failure" || latestRun.conclusion === "timed_out") {
@@ -321,6 +330,7 @@ export async function observeStatusOverlayGithub(
     openPullRequests,
     unknowns,
     holds,
+    workflowObservationFailed,
     outcomeUnknown,
     automationFailed,
     autoRefresh: {

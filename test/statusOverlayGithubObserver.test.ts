@@ -162,16 +162,63 @@ describe("STATUS-OVERLAY-V1 GitHub / workflow observer", () => {
     expect(projected.reviewState).toBe("UNKNOWN");
   });
 
-  it("workflow state unavailable → UNKNOWN fields", async () => {
+  it("workflow API read failure → observation UNKNOWN, not OUTCOME_UNKNOWN", async () => {
     const input = await observeStatusOverlayGithub({
       repository: repo,
-      client: fakeClient({ failRuns: true }),
+      client: fakeClient({
+        failRuns: true,
+        pulls: [
+          {
+            number: 30,
+            title: "docs(status): design STATUS-OVERLAY-V1",
+            draft: true,
+            headRef: "cursor/status-overlay-v1-design-2c83",
+          },
+        ],
+      }),
       local: local(),
       now: () => observedAt,
     });
     expect(input.unknowns).toContain("workflow_state_UNKNOWN");
+    expect(input.workflowObservationFailed).toBe(true);
+    expect(input.outcomeUnknown).toBeFalsy();
     expect(input.autoRefresh.lastRunConclusion).toBe("UNKNOWN");
+
+    const doc = generateStatusOverlay(input);
+    expect(doc.recommendedNextAction.code).toBe("UNKNOWN");
+    expect(doc.recommendedNextAction.code).not.toBe("RESOLVE_OUTCOME_UNKNOWN");
+    expect(doc.recommendedNextAction.status).toBe("UNKNOWN");
+    expect(doc.recommendedNextAction.gateKind).toBe("Unknown");
+    // Must not upgrade to Draft review / NO_ACTION while workflow evidence is unavailable.
+    expect(doc.recommendedNextAction.code).not.toBe("REVIEW_DRAFT_PR");
+    expect(doc.recommendedNextAction.code).not.toBe("NO_ACTION");
+  });
+
+  it("completed run with missing conclusion → OUTCOME_UNKNOWN", async () => {
+    const input = await observeStatusOverlayGithub({
+      repository: repo,
+      client: fakeClient({
+        mainSha: main,
+        runs: [
+          {
+            id: "31569999999",
+            status: "completed",
+            conclusion: null,
+            headSha: main,
+          },
+        ],
+      }),
+      local: local(),
+      now: () => observedAt,
+    });
+    expect(input.workflowObservationFailed).toBeFalsy();
     expect(input.outcomeUnknown).toBe(true);
+    expect(input.autoRefresh.lastRunId).toBe("31569999999");
+    expect(input.autoRefresh.lastRunConclusion).toBe("UNKNOWN");
+
+    const doc = generateStatusOverlay(input);
+    expect(doc.recommendedNextAction.code).toBe("RESOLVE_OUTCOME_UNKNOWN");
+    expect(doc.recommendedNextAction.status).toBe("OUTCOME_UNKNOWN");
   });
 
   it("old successful workflow run does not prove freshness after main moves", async () => {
