@@ -91,6 +91,19 @@ export const NO_PROMPT_PILOT_INPUT_ROOT_KEYS = [
   "selectedIssue",
   "observedMainSha",
   "observedAt",
+  "executionAccounting",
+] as const;
+
+export const NO_PROMPT_PILOT_EXECUTION_ACCOUNTING_KEYS = [
+  "manualAgentPromptCount",
+  "humanActions",
+  "humanTaskRepairs",
+  "humanCapabilityChanges",
+  "humanRiskChanges",
+  "humanStopAtChanges",
+  "humanRunnerEvidenceInjection",
+  "humanVerifierEvidenceInjection",
+  "humanPublisherEvidenceInjection",
 ] as const;
 
 export const NO_PROMPT_PILOT_SELECTED_ISSUE_KEYS = [
@@ -146,6 +159,19 @@ export type NoPromptPilotReasonCode =
   | "REJECT_EXTERNAL_MUTATION"
   | "UNKNOWN_PILOT_STATE";
 
+export interface NoPromptPilotExecutionAccountingV1 {
+  /** Explicit observed count — missing/undefined/wrong-type fail closed. */
+  manualAgentPromptCount: number;
+  humanActions: string[];
+  humanTaskRepairs: boolean;
+  humanCapabilityChanges: boolean;
+  humanRiskChanges: boolean;
+  humanStopAtChanges: boolean;
+  humanRunnerEvidenceInjection: boolean;
+  humanVerifierEvidenceInjection: boolean;
+  humanPublisherEvidenceInjection: boolean;
+}
+
 export interface NoPromptPilotSelectedIssueV1 {
   repository: string;
   issueNumber: number;
@@ -168,6 +194,8 @@ export interface NoPromptPilotInputV1 {
   selectedIssue: NoPromptPilotSelectedIssueV1;
   observedMainSha: string;
   observedAt: string;
+  /** Required KPI accounting — never inferred from absence. */
+  executionAccounting: NoPromptPilotExecutionAccountingV1;
 }
 
 export interface NoPromptPilotAuthorityFingerprintV1 {
@@ -233,23 +261,309 @@ export interface RunNoPromptPilotV1Options {
   publishAttemptRegistry?: Map<string, DraftPublishAttemptRecordV1>;
   /** Deterministic changed paths reported by the fake runner collect. */
   runnerChangedPaths?: string[];
-  /**
-   * Explicit KPI counter. Default 0.
-   * Do not infer 0 merely because the field was absent from input — options
-   * always materialize an explicit number.
-   */
-  manualAgentPromptCount?: number;
-  humanActions?: string[];
-  /** Explicit intervention flags — any true fails KPI. */
-  humanTaskRepairs?: boolean;
-  humanCapabilityChanges?: boolean;
-  humanRiskChanges?: boolean;
-  humanStopAtChanges?: boolean;
-  humanRunnerEvidenceInjection?: boolean;
-  humanVerifierEvidenceInjection?: boolean;
-  humanPublisherEvidenceInjection?: boolean;
   /** When true, reset fake draft PR counter for deterministic suites. */
   resetFakePublishCounter?: boolean;
+}
+
+/**
+ * Pure stage-status → pilot-result mapper.
+ * Used so HOLD/REJECT/FAILED/UNKNOWN propagation is testable even when a
+ * stage is unreachable under current contract authority.
+ */
+export type NoPromptPilotUpstreamStage =
+  | "builder"
+  | "orchestrator"
+  | "runner"
+  | "verifier"
+  | "publisher";
+
+export type NoPromptPilotUpstreamStatus =
+  | "HOLD"
+  | "REJECT"
+  | "FAILED"
+  | "UNKNOWN"
+  | "INVALID";
+
+export function mapUpstreamStageToPilotResult(
+  stage: NoPromptPilotUpstreamStage,
+  status: NoPromptPilotUpstreamStatus,
+  reasonMessage: string,
+): {
+  finalStatus: NoPromptPilotFinalStatus;
+  reasonCode: NoPromptPilotReasonCode;
+  reasonMessage: string;
+} {
+  if (stage === "builder") {
+    if (status === "HOLD") {
+      return {
+        finalStatus: "HOLD",
+        reasonCode: "HOLD_BUILDER",
+        reasonMessage: `Builder HOLD: ${reasonMessage}`,
+      };
+    }
+    if (status === "INVALID" || status === "REJECT") {
+      return {
+        finalStatus: "REJECT",
+        reasonCode: "REJECT_BUILDER",
+        reasonMessage: `Builder INVALID: ${reasonMessage}`,
+      };
+    }
+    if (status === "UNKNOWN") {
+      return {
+        finalStatus: "UNKNOWN",
+        reasonCode: "UNKNOWN_BUILDER",
+        reasonMessage: `Builder UNKNOWN: ${reasonMessage}`,
+      };
+    }
+  }
+  if (stage === "orchestrator") {
+    if (status === "HOLD") {
+      return {
+        finalStatus: "HOLD",
+        reasonCode: "HOLD_ORCHESTRATOR",
+        reasonMessage: `Orchestrator HOLD: ${reasonMessage}`,
+      };
+    }
+    if (status === "REJECT" || status === "INVALID") {
+      return {
+        finalStatus: "REJECT",
+        reasonCode: "REJECT_ORCHESTRATOR",
+        reasonMessage: `Orchestrator REJECT: ${reasonMessage}`,
+      };
+    }
+    if (status === "UNKNOWN") {
+      return {
+        finalStatus: "UNKNOWN",
+        reasonCode: "UNKNOWN_ORCHESTRATOR",
+        reasonMessage: `Orchestrator UNKNOWN: ${reasonMessage}`,
+      };
+    }
+    if (status === "FAILED") {
+      return {
+        finalStatus: "FAILED",
+        reasonCode: "REJECT_ORCHESTRATOR",
+        reasonMessage: `Orchestrator FAILED mapped fail-closed: ${reasonMessage}`,
+      };
+    }
+  }
+  if (stage === "runner") {
+    if (status === "HOLD") {
+      return {
+        finalStatus: "HOLD",
+        reasonCode: "HOLD_RUNNER",
+        reasonMessage: `Runner HOLD: ${reasonMessage}`,
+      };
+    }
+    if (status === "REJECT" || status === "INVALID") {
+      return {
+        finalStatus: "REJECT",
+        reasonCode: "REJECT_RUNNER",
+        reasonMessage: `Runner REJECT: ${reasonMessage}`,
+      };
+    }
+    if (status === "FAILED") {
+      return {
+        finalStatus: "FAILED",
+        reasonCode: "FAILED_RUNNER",
+        reasonMessage: `Runner FAILED: ${reasonMessage}`,
+      };
+    }
+    if (status === "UNKNOWN") {
+      return {
+        finalStatus: "UNKNOWN",
+        reasonCode: "UNKNOWN_RUNNER",
+        reasonMessage: `Runner UNKNOWN: ${reasonMessage}`,
+      };
+    }
+  }
+  if (stage === "verifier") {
+    if (status === "HOLD") {
+      return {
+        finalStatus: "HOLD",
+        reasonCode: "HOLD_VERIFIER",
+        reasonMessage: `Verifier HOLD: ${reasonMessage}`,
+      };
+    }
+    if (status === "REJECT" || status === "INVALID") {
+      return {
+        finalStatus: "REJECT",
+        reasonCode: "REJECT_VERIFIER",
+        reasonMessage: `Verifier REJECT: ${reasonMessage}`,
+      };
+    }
+    if (status === "FAILED") {
+      return {
+        finalStatus: "FAILED",
+        reasonCode: "FAILED_VERIFIER",
+        reasonMessage: `Verifier FAILED: ${reasonMessage}`,
+      };
+    }
+    if (status === "UNKNOWN") {
+      return {
+        finalStatus: "UNKNOWN",
+        reasonCode: "UNKNOWN_VERIFIER",
+        reasonMessage: `Verifier UNKNOWN: ${reasonMessage}`,
+      };
+    }
+  }
+  if (stage === "publisher") {
+    if (status === "HOLD") {
+      return {
+        finalStatus: "HOLD",
+        reasonCode: "HOLD_PUBLISHER",
+        reasonMessage: `Publisher HOLD: ${reasonMessage}`,
+      };
+    }
+    if (status === "REJECT" || status === "INVALID") {
+      return {
+        finalStatus: "REJECT",
+        reasonCode: "REJECT_PUBLISHER",
+        reasonMessage: `Publisher REJECT: ${reasonMessage}`,
+      };
+    }
+    if (status === "FAILED") {
+      return {
+        finalStatus: "FAILED",
+        reasonCode: "FAILED_PUBLISHER",
+        reasonMessage: `Publisher FAILED: ${reasonMessage}`,
+      };
+    }
+    if (status === "UNKNOWN") {
+      return {
+        finalStatus: "UNKNOWN",
+        reasonCode: "UNKNOWN_PUBLISHER",
+        reasonMessage: `Publisher UNKNOWN: ${reasonMessage}`,
+      };
+    }
+  }
+  return {
+    finalStatus: "UNKNOWN",
+    reasonCode: "UNKNOWN_PILOT_STATE",
+    reasonMessage: `Unrecognized stage/status mapping (${stage}/${status}): ${reasonMessage}`,
+  };
+}
+
+/**
+ * Explicit zero-intervention accounting for positive pilot tests.
+ * Callers MUST supply this — the harness never invents zeros from absence.
+ */
+export function createExplicitZeroInterventionAccounting(
+  humanActions: string[] = ["SELECT_PILOT_ISSUE", "IMPLEMENTATION_START_GO"],
+): NoPromptPilotExecutionAccountingV1 {
+  return {
+    manualAgentPromptCount: 0,
+    humanActions: [...humanActions],
+    humanTaskRepairs: false,
+    humanCapabilityChanges: false,
+    humanRiskChanges: false,
+    humanStopAtChanges: false,
+    humanRunnerEvidenceInjection: false,
+    humanVerifierEvidenceInjection: false,
+    humanPublisherEvidenceInjection: false,
+  };
+}
+
+function isExactBoolean(value: unknown): value is boolean {
+  return value === true || value === false;
+}
+
+/**
+ * Fail-closed parse of executionAccounting.
+ * missing / undefined / wrong type → REJECT_INPUT (never infer 0/false).
+ */
+export function parseExecutionAccounting(
+  value: unknown,
+):
+  | { ok: true; accounting: NoPromptPilotExecutionAccountingV1 }
+  | { ok: false; reasonMessage: string } {
+  if (value === undefined || value === null) {
+    return {
+      ok: false,
+      reasonMessage:
+        "executionAccounting is required; do not infer KPI zeros from absence.",
+    };
+  }
+  if (!isPlainObject(value)) {
+    return {
+      ok: false,
+      reasonMessage: "executionAccounting must be an object.",
+    };
+  }
+  if (!hasOnlyKeys(value, NO_PROMPT_PILOT_EXECUTION_ACCOUNTING_KEYS)) {
+    return {
+      ok: false,
+      reasonMessage: "executionAccounting contains unknown properties.",
+    };
+  }
+  for (const key of NO_PROMPT_PILOT_EXECUTION_ACCOUNTING_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) {
+      return {
+        ok: false,
+        reasonMessage: `executionAccounting.${key} is required; missing fails closed.`,
+      };
+    }
+    if (value[key] === undefined) {
+      return {
+        ok: false,
+        reasonMessage: `executionAccounting.${key} must not be undefined; fail closed.`,
+      };
+    }
+  }
+  if (
+    typeof value.manualAgentPromptCount !== "number" ||
+    !Number.isInteger(value.manualAgentPromptCount) ||
+    value.manualAgentPromptCount < 0
+  ) {
+    return {
+      ok: false,
+      reasonMessage:
+        "executionAccounting.manualAgentPromptCount must be a non-negative integer.",
+    };
+  }
+  if (
+    !Array.isArray(value.humanActions) ||
+    !value.humanActions.every((a) => typeof a === "string" && a.length > 0)
+  ) {
+    return {
+      ok: false,
+      reasonMessage:
+        "executionAccounting.humanActions must be an array of non-empty strings.",
+    };
+  }
+  const boolKeys = [
+    "humanTaskRepairs",
+    "humanCapabilityChanges",
+    "humanRiskChanges",
+    "humanStopAtChanges",
+    "humanRunnerEvidenceInjection",
+    "humanVerifierEvidenceInjection",
+    "humanPublisherEvidenceInjection",
+  ] as const;
+  for (const key of boolKeys) {
+    if (!isExactBoolean(value[key])) {
+      return {
+        ok: false,
+        reasonMessage: `executionAccounting.${key} must be exactly true or false.`,
+      };
+    }
+  }
+  return {
+    ok: true,
+    accounting: {
+      manualAgentPromptCount: value.manualAgentPromptCount,
+      humanActions: value.humanActions as string[],
+      humanTaskRepairs: value.humanTaskRepairs as boolean,
+      humanCapabilityChanges: value.humanCapabilityChanges as boolean,
+      humanRiskChanges: value.humanRiskChanges as boolean,
+      humanStopAtChanges: value.humanStopAtChanges as boolean,
+      humanRunnerEvidenceInjection:
+        value.humanRunnerEvidenceInjection as boolean,
+      humanVerifierEvidenceInjection:
+        value.humanVerifierEvidenceInjection as boolean,
+      humanPublisherEvidenceInjection:
+        value.humanPublisherEvidenceInjection as boolean,
+    },
+  };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -557,18 +871,17 @@ export function runNoPromptPilotV1(
   options: RunNoPromptPilotV1Options = {},
 ): NoPromptPilotEvidenceV1 {
   const validatedAt = options.validatedAt ?? new Date(0).toISOString();
-  const manualAgentPromptCount =
-    typeof options.manualAgentPromptCount === "number"
-      ? options.manualAgentPromptCount
-      : 0;
-  const humanActions = options.humanActions ?? [
-    "SELECT_PILOT_ISSUE",
-    "IMPLEMENTATION_START_GO",
-  ];
 
   if (options.resetFakePublishCounter !== false) {
     resetFakeDraftPublishCounterForTests(2000);
   }
+
+  // Placeholder accounting until input is parsed — fail-closed paths that
+  // cannot yet read accounting still must not invent KPI success zeros in
+  // evidence when accounting was missing (use -1 sentinel only for pre-parse
+  // REJECT_INPUT shells; never for PASS).
+  let manualAgentPromptCount = -1;
+  let humanActions: string[] = [];
 
   const failEarly = (
     partial: Omit<
@@ -663,6 +976,25 @@ export function runNoPromptPilotV1(
   const observedMainSha = rawInput.observedMainSha;
   const observedAt = rawInput.observedAt;
 
+  const accountingParsed = parseExecutionAccounting(
+    rawInput.executionAccounting,
+  );
+  if (!accountingParsed.ok) {
+    return failEarly({
+      pilotId,
+      selectedIssue: createCanonicalNoPromptPilotIssue(observedMainSha),
+      observedMainSha,
+      observedAt,
+      finalStatus: "REJECT",
+      reasonCode: "REJECT_INPUT",
+      reasonMessage: accountingParsed.reasonMessage,
+      stoppedAtStage: "input",
+    });
+  }
+  const accounting = accountingParsed.accounting;
+  manualAgentPromptCount = accounting.manualAgentPromptCount;
+  humanActions = accounting.humanActions;
+
   const issueParsed = parseSelectedIssue(rawInput.selectedIssue);
   if (!issueParsed.ok) {
     return failEarly({
@@ -678,7 +1010,7 @@ export function runNoPromptPilotV1(
   }
   const selectedIssue = issueParsed.issue;
 
-  // KPI / intervention gates before any stage work.
+  // KPI / intervention gates — values are explicitly observed, never inferred.
   if (manualAgentPromptCount > 0) {
     return failEarly({
       pilotId,
@@ -692,13 +1024,13 @@ export function runNoPromptPilotV1(
     });
   }
   if (
-    options.humanTaskRepairs === true ||
-    options.humanCapabilityChanges === true ||
-    options.humanRiskChanges === true ||
-    options.humanStopAtChanges === true ||
-    options.humanRunnerEvidenceInjection === true ||
-    options.humanVerifierEvidenceInjection === true ||
-    options.humanPublisherEvidenceInjection === true
+    accounting.humanTaskRepairs === true ||
+    accounting.humanCapabilityChanges === true ||
+    accounting.humanRiskChanges === true ||
+    accounting.humanStopAtChanges === true ||
+    accounting.humanRunnerEvidenceInjection === true ||
+    accounting.humanVerifierEvidenceInjection === true ||
+    accounting.humanPublisherEvidenceInjection === true
   ) {
     return failEarly({
       pilotId,
@@ -740,43 +1072,58 @@ export function runNoPromptPilotV1(
   );
 
   if (builderResult.status === "HOLD") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "builder",
+      "HOLD",
+      builderResult.reasonMessage,
+    );
     return failEarly({
       pilotId,
       selectedIssue,
       observedMainSha,
       observedAt,
       builderResult,
-      finalStatus: "HOLD",
-      reasonCode: "HOLD_BUILDER",
-      reasonMessage: `Builder HOLD: ${builderResult.reasonMessage}`,
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "builder",
     });
   }
   if (builderResult.status === "INVALID") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "builder",
+      "INVALID",
+      builderResult.reasonMessage,
+    );
     return failEarly({
       pilotId,
       selectedIssue,
       observedMainSha,
       observedAt,
       builderResult,
-      finalStatus: "REJECT",
-      reasonCode: "REJECT_BUILDER",
-      reasonMessage: `Builder INVALID: ${builderResult.reasonMessage}`,
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "builder",
     });
   }
   if (builderResult.status === "UNKNOWN") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "builder",
+      "UNKNOWN",
+      builderResult.reasonMessage,
+    );
     return failEarly({
       pilotId,
       selectedIssue,
       observedMainSha,
       observedAt,
       builderResult,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_BUILDER",
-      reasonMessage: `Builder UNKNOWN: ${builderResult.reasonMessage}`,
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "builder",
     });
@@ -854,7 +1201,16 @@ export function runNoPromptPilotV1(
     { revalidatedAt: validatedAt },
   );
 
-  if (orchestratorResult.decision === "HOLD") {
+  if (
+    orchestratorResult.decision === "HOLD" ||
+    orchestratorResult.decision === "REJECT" ||
+    orchestratorResult.decision === "UNKNOWN"
+  ) {
+    const mapped = mapUpstreamStageToPilotResult(
+      "orchestrator",
+      orchestratorResult.decision,
+      orchestratorResult.reasonMessage,
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -864,48 +1220,19 @@ export function runNoPromptPilotV1(
       agentTask,
       orchestratorResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "HOLD",
-      reasonCode: "HOLD_ORCHESTRATOR",
-      reasonMessage: `Orchestrator HOLD: ${orchestratorResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "orchestrator",
-    });
-  }
-  if (orchestratorResult.decision === "REJECT") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "REJECT",
-      reasonCode: "REJECT_ORCHESTRATOR",
-      reasonMessage: `Orchestrator REJECT: ${orchestratorResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "orchestrator",
-    });
-  }
-  if (orchestratorResult.decision === "UNKNOWN") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_ORCHESTRATOR",
-      reasonMessage: `Orchestrator UNKNOWN: ${orchestratorResult.reasonMessage}`,
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "orchestrator",
     });
   }
   if (orchestratorResult.decision !== "DISPATCH_ELIGIBLE") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "orchestrator",
+      "UNKNOWN",
+      "Unrecognized orchestrator decision; fail closed.",
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -915,9 +1242,9 @@ export function runNoPromptPilotV1(
       agentTask,
       orchestratorResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_ORCHESTRATOR",
-      reasonMessage: "Unrecognized orchestrator decision; fail closed.",
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "orchestrator",
     });
@@ -984,7 +1311,17 @@ export function runNoPromptPilotV1(
     { adapter: runnerAdapter, validatedAt },
   );
 
-  if (runnerResult.status === "HOLD") {
+  if (
+    runnerResult.status === "HOLD" ||
+    runnerResult.status === "REJECT" ||
+    runnerResult.status === "FAILED" ||
+    runnerResult.status === "UNKNOWN"
+  ) {
+    const mapped = mapUpstreamStageToPilotResult(
+      "runner",
+      runnerResult.status,
+      runnerResult.reasonMessage,
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -995,68 +1332,19 @@ export function runNoPromptPilotV1(
       orchestratorResult,
       runnerResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "HOLD",
-      reasonCode: "HOLD_RUNNER",
-      reasonMessage: `Runner HOLD: ${runnerResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "runner",
-    });
-  }
-  if (runnerResult.status === "REJECT") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "REJECT",
-      reasonCode: "REJECT_RUNNER",
-      reasonMessage: `Runner REJECT: ${runnerResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "runner",
-    });
-  }
-  if (runnerResult.status === "FAILED") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "FAILED",
-      reasonCode: "FAILED_RUNNER",
-      reasonMessage: `Runner FAILED: ${runnerResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "runner",
-    });
-  }
-  if (runnerResult.status === "UNKNOWN") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_RUNNER",
-      reasonMessage: `Runner UNKNOWN: ${runnerResult.reasonMessage}`,
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "runner",
     });
   }
   if (runnerResult.status !== "COMPLETED") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "runner",
+      "UNKNOWN",
+      "Unrecognized runner status; fail closed.",
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -1067,9 +1355,9 @@ export function runNoPromptPilotV1(
       orchestratorResult,
       runnerResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_RUNNER",
-      reasonMessage: "Unrecognized runner status; fail closed.",
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "runner",
     });
@@ -1115,7 +1403,17 @@ export function runNoPromptPilotV1(
     { adapter: verifyAdapter, validatedAt },
   );
 
-  if (independentVerifyResult.status === "HOLD") {
+  if (
+    independentVerifyResult.status === "HOLD" ||
+    independentVerifyResult.status === "REJECT" ||
+    independentVerifyResult.status === "FAILED" ||
+    independentVerifyResult.status === "UNKNOWN"
+  ) {
+    const mapped = mapUpstreamStageToPilotResult(
+      "verifier",
+      independentVerifyResult.status,
+      independentVerifyResult.reasonMessage,
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -1127,71 +1425,19 @@ export function runNoPromptPilotV1(
       runnerResult,
       independentVerifyResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "HOLD",
-      reasonCode: "HOLD_VERIFIER",
-      reasonMessage: `Verifier HOLD: ${independentVerifyResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "verifier",
-    });
-  }
-  if (independentVerifyResult.status === "REJECT") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      independentVerifyResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "REJECT",
-      reasonCode: "REJECT_VERIFIER",
-      reasonMessage: `Verifier REJECT: ${independentVerifyResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "verifier",
-    });
-  }
-  if (independentVerifyResult.status === "FAILED") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      independentVerifyResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "FAILED",
-      reasonCode: "FAILED_VERIFIER",
-      reasonMessage: `Verifier FAILED: ${independentVerifyResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "verifier",
-    });
-  }
-  if (independentVerifyResult.status === "UNKNOWN") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      independentVerifyResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_VERIFIER",
-      reasonMessage: `Verifier UNKNOWN: ${independentVerifyResult.reasonMessage}`,
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "verifier",
     });
   }
   if (independentVerifyResult.status !== "VERIFIED") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "verifier",
+      "UNKNOWN",
+      "Unrecognized verifier status; fail closed.",
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -1203,9 +1449,9 @@ export function runNoPromptPilotV1(
       runnerResult,
       independentVerifyResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_VERIFIER",
-      reasonMessage: "Unrecognized verifier status; fail closed.",
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "verifier",
     });
@@ -1280,6 +1526,11 @@ export function runNoPromptPilotV1(
   );
 
   if (draftPublishResult.status === "HOLD") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "publisher",
+      "HOLD",
+      draftPublishResult.reasonMessage,
+    );
     const contractHold =
       !dualCompatible &&
       (draftPublishResult.reasonCode === "HOLD_MISSING_CAPABILITY" ||
@@ -1298,18 +1549,27 @@ export function runNoPromptPilotV1(
       independentVerifyResult,
       draftPublishResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "HOLD",
+      finalStatus: mapped.finalStatus,
       reasonCode: contractHold
         ? "HOLD_CONTRACT_INCOMPATIBILITY"
-        : "HOLD_PUBLISHER",
+        : mapped.reasonCode,
       reasonMessage: contractHold
         ? `Publisher HOLD due to existing runner↔publisher authority incompatibility (${NO_PROMPT_PILOT_POSITIVE_PATH_BLOCKER.blockerCode}): ${draftPublishResult.reasonMessage}. Positive path = ${NO_PROMPT_PILOT_POSITIVE_PATH_STATUS}.`
-        : `Publisher HOLD: ${draftPublishResult.reasonMessage}`,
+        : mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "publisher",
     });
   }
-  if (draftPublishResult.status === "REJECT") {
+  if (
+    draftPublishResult.status === "REJECT" ||
+    draftPublishResult.status === "FAILED" ||
+    draftPublishResult.status === "UNKNOWN"
+  ) {
+    const mapped = mapUpstreamStageToPilotResult(
+      "publisher",
+      draftPublishResult.status,
+      draftPublishResult.reasonMessage,
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -1322,54 +1582,19 @@ export function runNoPromptPilotV1(
       independentVerifyResult,
       draftPublishResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "REJECT",
-      reasonCode: "REJECT_PUBLISHER",
-      reasonMessage: `Publisher REJECT: ${draftPublishResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "publisher",
-    });
-  }
-  if (draftPublishResult.status === "FAILED") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      independentVerifyResult,
-      draftPublishResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "FAILED",
-      reasonCode: "FAILED_PUBLISHER",
-      reasonMessage: `Publisher FAILED: ${draftPublishResult.reasonMessage}`,
-      stagesCompleted,
-      stoppedAtStage: "publisher",
-    });
-  }
-  if (draftPublishResult.status === "UNKNOWN") {
-    return failEarly({
-      pilotId,
-      selectedIssue,
-      observedMainSha,
-      observedAt,
-      builderResult,
-      agentTask,
-      orchestratorResult,
-      runnerResult,
-      independentVerifyResult,
-      draftPublishResult,
-      authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_PUBLISHER",
-      reasonMessage: `Publisher UNKNOWN: ${draftPublishResult.reasonMessage}`,
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "publisher",
     });
   }
   if (draftPublishResult.status !== "PUBLISHED_DRAFT") {
+    const mapped = mapUpstreamStageToPilotResult(
+      "publisher",
+      "UNKNOWN",
+      "Unrecognized publisher status; fail closed.",
+    );
     return failEarly({
       pilotId,
       selectedIssue,
@@ -1382,9 +1607,9 @@ export function runNoPromptPilotV1(
       independentVerifyResult,
       draftPublishResult,
       authorityFingerprint: fingerprint,
-      finalStatus: "UNKNOWN",
-      reasonCode: "UNKNOWN_PUBLISHER",
-      reasonMessage: "Unrecognized publisher status; fail closed.",
+      finalStatus: mapped.finalStatus,
+      reasonCode: mapped.reasonCode,
+      reasonMessage: mapped.reasonMessage,
       stagesCompleted,
       stoppedAtStage: "publisher",
     });

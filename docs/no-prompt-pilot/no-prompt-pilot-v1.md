@@ -74,18 +74,34 @@ reasonCode = HOLD_CONTRACT_INCOMPATIBILITY
 
 ---
 
-## 3. KPI
+## 3. KPI / executionAccounting
+
+KPI zeros and intervention flags are **never inferred from absence**.
+
+Pilot input **must** include explicit machine-readable `executionAccounting`:
 
 ```text
-manualAgentPromptCount = 0
+executionAccounting: {
+  manualAgentPromptCount: 0,
+  humanActions: ["SELECT_PILOT_ISSUE", "IMPLEMENTATION_START_GO"],
+  humanTaskRepairs: false,
+  humanCapabilityChanges: false,
+  humanRiskChanges: false,
+  humanStopAtChanges: false,
+  humanRunnerEvidenceInjection: false,
+  humanVerifierEvidenceInjection: false,
+  humanPublisherEvidenceInjection: false
+}
 ```
-
-Human actions recorded explicitly, e.g.:
 
 ```text
-SELECT_PILOT_ISSUE
-IMPLEMENTATION_START_GO
+missing / undefined / null / wrong type → REJECT_INPUT (fail closed)
+Do not invent manualAgentPromptCount = 0 merely because the field was absent
 ```
+
+Use `createExplicitZeroInterventionAccounting()` in tests/harness callers to
+supply observed zeros — that helper is an explicit observation, not a default
+inside the parser.
 
 Implementation PR Fresh Review / Ready / Merge gates are not Agent execution
 prompts.
@@ -161,6 +177,11 @@ replacing changedPaths with a preferred set
 Authority fingerprint (taskId, repository, baseRevision, sourceIssue,
 paths, capabilities, riskClass, stopAt, constraints) is captured after
 build and checked for drift.
+
+Stage outcome → pilot result mapping is centralized in
+`mapUpstreamStageToPilotResult` so HOLD / REJECT / FAILED / UNKNOWN
+propagation is unit-tested even when a status is unreachable under current
+runner↔publisher authority (without widening domain contracts).
 
 ---
 

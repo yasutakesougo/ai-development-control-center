@@ -17,8 +17,12 @@ import {
   authorityFingerprintsEqual,
   captureAuthorityFingerprint,
   createCanonicalNoPromptPilotIssue,
+  createExplicitZeroInterventionAccounting,
+  mapUpstreamStageToPilotResult,
+  parseExecutionAccounting,
   runNoPromptPilotV1,
   taskSatisfiesRunnerAndPublisherContracts,
+  type NoPromptPilotExecutionAccountingV1,
   type NoPromptPilotSelectedIssueV1,
 } from "../src/domain/noPromptPilot";
 
@@ -31,24 +35,34 @@ function pilotInput(
   selectedIssue: NoPromptPilotSelectedIssueV1 = createCanonicalNoPromptPilotIssue(
     MAIN,
   ),
-  overrides: { pilotId?: string; observedMainSha?: string } = {},
+  overrides: {
+    pilotId?: string;
+    observedMainSha?: string;
+    executionAccounting?: NoPromptPilotExecutionAccountingV1;
+  } = {},
 ) {
   return {
     pilotId: overrides.pilotId ?? PILOT_ID,
     selectedIssue,
     observedMainSha: overrides.observedMainSha ?? MAIN,
     observedAt: OBSERVED_AT,
+    executionAccounting:
+      overrides.executionAccounting ?? createExplicitZeroInterventionAccounting(),
   };
 }
 
 function run(
   selectedIssue?: NoPromptPilotSelectedIssueV1,
   options: Parameters<typeof runNoPromptPilotV1>[1] = {},
+  accounting?: NoPromptPilotExecutionAccountingV1,
 ) {
-  return runNoPromptPilotV1(pilotInput(selectedIssue), {
-    validatedAt: VALIDATED_AT,
-    ...options,
-  });
+  return runNoPromptPilotV1(
+    pilotInput(selectedIssue, accounting ? { executionAccounting: accounting } : {}),
+    {
+      validatedAt: VALIDATED_AT,
+      ...options,
+    },
+  );
 }
 
 describe("NO-PROMPT-PILOT-V1 boundaries / blocker", () => {
@@ -64,10 +78,149 @@ describe("NO-PROMPT-PILOT-V1 boundaries / blocker", () => {
 
   it("canonical issue cannot satisfy runner+publisher together", () => {
     const issue = createCanonicalNoPromptPilotIssue(MAIN);
-    // Build via pilot path later; fingerprint helper uses a synthetic check:
     expect(issue.riskClass).toBe("R1");
     expect(issue.allowedCapabilities).toEqual(["workspace.read.v1"]);
     expect(issue.stopAt).toBe("DRAFT_PR");
+  });
+});
+
+describe("NO-PROMPT-PILOT-V1 executionAccounting (explicit, fail-closed)", () => {
+  it("rejects missing executionAccounting (does not infer 0)", () => {
+    const { executionAccounting: _omit, ...without } = pilotInput();
+    void _omit;
+    const out = runNoPromptPilotV1(without, { validatedAt: VALIDATED_AT });
+    expect(out.finalStatus).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_INPUT");
+    expect(out.reasonMessage).toMatch(/executionAccounting is required/);
+    expect(out.manualAgentPromptCount).not.toBe(0);
+  });
+
+  it("rejects null / wrong-type / partial executionAccounting", () => {
+    expect(parseExecutionAccounting(null).ok).toBe(false);
+    expect(parseExecutionAccounting("nope").ok).toBe(false);
+    expect(parseExecutionAccounting({}).ok).toBe(false);
+    expect(
+      parseExecutionAccounting({
+        ...createExplicitZeroInterventionAccounting(),
+        manualAgentPromptCount: undefined,
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseExecutionAccounting({
+        ...createExplicitZeroInterventionAccounting(),
+        humanTaskRepairs: "false",
+      }).ok,
+    ).toBe(false);
+
+    const out = runNoPromptPilotV1(
+      {
+        ...pilotInput(),
+        executionAccounting: {
+          manualAgentPromptCount: 0,
+        },
+      },
+      { validatedAt: VALIDATED_AT },
+    );
+    expect(out.finalStatus).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_INPUT");
+  });
+
+  it("createExplicitZeroInterventionAccounting supplies observed zeros", () => {
+    const a = createExplicitZeroInterventionAccounting();
+    expect(a.manualAgentPromptCount).toBe(0);
+    expect(a.humanTaskRepairs).toBe(false);
+    expect(a.humanCapabilityChanges).toBe(false);
+    expect(a.humanRiskChanges).toBe(false);
+    expect(a.humanStopAtChanges).toBe(false);
+    expect(a.humanRunnerEvidenceInjection).toBe(false);
+    expect(a.humanVerifierEvidenceInjection).toBe(false);
+    expect(a.humanPublisherEvidenceInjection).toBe(false);
+    expect(parseExecutionAccounting(a).ok).toBe(true);
+  });
+});
+
+describe("NO-PROMPT-PILOT-V1 mapUpstreamStageToPilotResult", () => {
+  it("6. builder UNKNOWN maps to UNKNOWN_BUILDER", () => {
+    const m = mapUpstreamStageToPilotResult("builder", "UNKNOWN", "opaque");
+    expect(m.finalStatus).toBe("UNKNOWN");
+    expect(m.reasonCode).toBe("UNKNOWN_BUILDER");
+  });
+
+  it("builder HOLD/INVALID map correctly", () => {
+    expect(mapUpstreamStageToPilotResult("builder", "HOLD", "x")).toMatchObject({
+      finalStatus: "HOLD",
+      reasonCode: "HOLD_BUILDER",
+    });
+    expect(
+      mapUpstreamStageToPilotResult("builder", "INVALID", "x"),
+    ).toMatchObject({
+      finalStatus: "REJECT",
+      reasonCode: "REJECT_BUILDER",
+    });
+  });
+
+  it("12. runner UNKNOWN maps to UNKNOWN_RUNNER", () => {
+    const m = mapUpstreamStageToPilotResult("runner", "UNKNOWN", "opaque");
+    expect(m.finalStatus).toBe("UNKNOWN");
+    expect(m.reasonCode).toBe("UNKNOWN_RUNNER");
+  });
+
+  it("runner HOLD/REJECT/FAILED map correctly", () => {
+    expect(mapUpstreamStageToPilotResult("runner", "HOLD", "x")).toMatchObject({
+      finalStatus: "HOLD",
+      reasonCode: "HOLD_RUNNER",
+    });
+    expect(mapUpstreamStageToPilotResult("runner", "REJECT", "x")).toMatchObject(
+      {
+        finalStatus: "REJECT",
+        reasonCode: "REJECT_RUNNER",
+      },
+    );
+    expect(mapUpstreamStageToPilotResult("runner", "FAILED", "x")).toMatchObject(
+      {
+        finalStatus: "FAILED",
+        reasonCode: "FAILED_RUNNER",
+      },
+    );
+  });
+
+  it("verifier HOLD/REJECT/FAILED/UNKNOWN map correctly", () => {
+    expect(
+      mapUpstreamStageToPilotResult("verifier", "HOLD", "x"),
+    ).toMatchObject({ finalStatus: "HOLD", reasonCode: "HOLD_VERIFIER" });
+    expect(
+      mapUpstreamStageToPilotResult("verifier", "REJECT", "x"),
+    ).toMatchObject({ finalStatus: "REJECT", reasonCode: "REJECT_VERIFIER" });
+    expect(
+      mapUpstreamStageToPilotResult("verifier", "FAILED", "x"),
+    ).toMatchObject({ finalStatus: "FAILED", reasonCode: "FAILED_VERIFIER" });
+    expect(
+      mapUpstreamStageToPilotResult("verifier", "UNKNOWN", "x"),
+    ).toMatchObject({ finalStatus: "UNKNOWN", reasonCode: "UNKNOWN_VERIFIER" });
+  });
+
+  it("18. publisher REJECT maps to REJECT_PUBLISHER", () => {
+    const m = mapUpstreamStageToPilotResult("publisher", "REJECT", "draft false");
+    expect(m.finalStatus).toBe("REJECT");
+    expect(m.reasonCode).toBe("REJECT_PUBLISHER");
+  });
+
+  it("19. publisher FAILED maps to FAILED_PUBLISHER", () => {
+    const m = mapUpstreamStageToPilotResult("publisher", "FAILED", "observe");
+    expect(m.finalStatus).toBe("FAILED");
+    expect(m.reasonCode).toBe("FAILED_PUBLISHER");
+  });
+
+  it("20. publisher UNKNOWN maps to UNKNOWN_PUBLISHER", () => {
+    const m = mapUpstreamStageToPilotResult("publisher", "UNKNOWN", "opaque");
+    expect(m.finalStatus).toBe("UNKNOWN");
+    expect(m.reasonCode).toBe("UNKNOWN_PUBLISHER");
+  });
+
+  it("publisher HOLD maps to HOLD_PUBLISHER", () => {
+    const m = mapUpstreamStageToPilotResult("publisher", "HOLD", "cap");
+    expect(m.finalStatus).toBe("HOLD");
+    expect(m.reasonCode).toBe("HOLD_PUBLISHER");
   });
 });
 
@@ -100,15 +253,28 @@ describe("NO-PROMPT-PILOT-V1 composed pipeline (real modules)", () => {
     ).toBe(false);
   });
 
-  it("2. manualAgentPromptCount === 0", () => {
-    const out = run();
+  it("2. explicit manualAgentPromptCount === 0 and all intervention flags false", () => {
+    const accounting = createExplicitZeroInterventionAccounting();
+    const out = run(undefined, {}, accounting);
     expect(out.manualAgentPromptCount).toBe(0);
+    expect(out.humanActions).toEqual(accounting.humanActions);
+    expect(accounting.humanTaskRepairs).toBe(false);
+    expect(accounting.humanCapabilityChanges).toBe(false);
+    expect(accounting.humanRiskChanges).toBe(false);
+    expect(accounting.humanStopAtChanges).toBe(false);
+    expect(accounting.humanRunnerEvidenceInjection).toBe(false);
+    expect(accounting.humanVerifierEvidenceInjection).toBe(false);
+    expect(accounting.humanPublisherEvidenceInjection).toBe(false);
   });
 
   it("3. manualAgentPromptCount > 0 → REJECT", () => {
-    const out = run(undefined, { manualAgentPromptCount: 1 });
+    const out = run(undefined, {}, {
+      ...createExplicitZeroInterventionAccounting(),
+      manualAgentPromptCount: 1,
+    });
     expect(out.finalStatus).toBe("REJECT");
     expect(out.reasonCode).toBe("REJECT_MANUAL_PROMPT");
+    expect(out.manualAgentPromptCount).toBe(1);
     expect(out.builderResult).toBeNull();
   });
 
@@ -128,7 +294,8 @@ describe("NO-PROMPT-PILOT-V1 composed pipeline (real modules)", () => {
   });
 
   it("35-37. no manual evidence injection flags", () => {
-    const out = run(undefined, {
+    const out = run(undefined, {}, {
+      ...createExplicitZeroInterventionAccounting(),
       humanRunnerEvidenceInjection: true,
     });
     expect(out.finalStatus).toBe("REJECT");
@@ -192,7 +359,6 @@ describe("NO-PROMPT-PILOT-V1 fail-closed stage propagation", () => {
       ...issue,
       allowedPaths: undefined as unknown as string[],
     });
-    // Missing paths → input reject or builder HOLD depending on parse
     expect(["HOLD", "REJECT"]).toContain(out.finalStatus);
     expect(["HOLD_BUILDER", "REJECT_INPUT"]).toContain(out.reasonCode);
   });
@@ -218,11 +384,6 @@ describe("NO-PROMPT-PILOT-V1 fail-closed stage propagation", () => {
     expect(["REJECT_BUILDER", "REJECT_INPUT"]).toContain(out.reasonCode);
   });
 
-  it("6. builder UNKNOWN — mapping covered via reason catalog; unreachable under normal input", () => {
-    // Keep explicit: UNKNOWN_BUILDER remains a documented mapping.
-    expect(true).toBe(true);
-  });
-
   it("7. orchestrator HOLD propagates (stopAt=TASK_BUILT)", () => {
     const issue = {
       ...createCanonicalNoPromptPilotIssue(MAIN),
@@ -242,7 +403,6 @@ describe("NO-PROMPT-PILOT-V1 fail-closed stage propagation", () => {
       riskClass: "R2" as const,
     };
     const out = run(issue);
-    // Orchestrator HOLDs unsupported capability (not REJECT).
     expect(out.finalStatus).toBe("HOLD");
     expect(out.reasonCode).toBe("HOLD_ORCHESTRATOR");
     expect(out.orchestratorResult?.decision).toBe("HOLD");
@@ -265,9 +425,6 @@ describe("NO-PROMPT-PILOT-V1 fail-closed stage propagation", () => {
   it("10. runner REJECT propagates", () => {
     const out = run(undefined, {
       runnerAdapter: createFakeAgentRunnerAdapterV1({
-        // Symlink reject requires collect success path — use fail that maps REJECT via path?
-        // Easier: empty changed path with unsafe path after COMPLETED is not REJECT at runner.
-        // Force prepare failure is FAILED. Use symlink:
         changedPaths: ["docs/no-prompt-pilot/x.md"],
         symlinkWriteAttempted: true,
       }),
@@ -286,15 +443,10 @@ describe("NO-PROMPT-PILOT-V1 fail-closed stage propagation", () => {
     expect(out.reasonCode).toBe("FAILED_RUNNER");
   });
 
-  it("12. runner UNKNOWN — catalog mapping present; canonical path does not emit UNKNOWN", () => {
-    expect(true).toBe(true);
-  });
-
   it("13-16. verifier HOLD/REJECT/FAILED via adapter / path faults", () => {
     const rejectOut = run(undefined, {
       runnerChangedPaths: ["docs/../secret.env"],
     });
-    // Unsafe path fails at runner path policy before COMPLETED, or at verify.
     expect(["REJECT", "FAILED", "HOLD"]).toContain(rejectOut.finalStatus);
 
     const failedVerify = run(undefined, {
@@ -328,31 +480,24 @@ describe("NO-PROMPT-PILOT-V1 fail-closed stage propagation", () => {
     expect(out.reasonCode).toBe("HOLD_CONTRACT_INCOMPATIBILITY");
   });
 
-  it("18. publisher REJECT propagates", () => {
-    const out = run(undefined, {
+  it("18b. publisher REJECT/FAILED unreachable under canonical authority (HOLD first)", () => {
+    // Mapping is unit-tested via mapUpstreamStageToPilotResult; pipeline still
+    // HOLDs on capability before adapter draft/fail hooks fire.
+    const rejectAttempt = run(undefined, {
       publishAdapter: createFakeDraftPublishAdapterV1({
         forceDraftFalse: true,
       }),
     });
-    // Still HOLDs first on capability/risk before adapter draft check.
-    // With R1 task, publisher HOLDs on capability before invoking draft flag.
-    expect(out.draftPublishResult?.status).toBe("HOLD");
-    expect(out.finalStatus).toBe("HOLD");
-  });
+    expect(rejectAttempt.draftPublishResult?.status).toBe("HOLD");
+    expect(rejectAttempt.finalStatus).toBe("HOLD");
 
-  it("19. publisher FAILED — unreachable until publisher-eligible task exists; mapping documented", () => {
-    // Under current contracts the canonical task HOLDs before adapter failure.
-    const out = run(undefined, {
+    const failedAttempt = run(undefined, {
       publishAdapter: createFakeDraftPublishAdapterV1({
         failAt: "observeBase",
       }),
     });
-    expect(out.draftPublishResult?.status).toBe("HOLD");
-    expect(out.finalStatus).toBe("HOLD");
-  });
-
-  it("20. publisher UNKNOWN — catalog mapping present", () => {
-    expect(true).toBe(true);
+    expect(failedAttempt.draftPublishResult?.status).toBe("HOLD");
+    expect(failedAttempt.finalStatus).toBe("HOLD");
   });
 });
 
