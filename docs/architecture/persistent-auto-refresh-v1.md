@@ -1,17 +1,22 @@
 # PERSISTENT-AUTO-REFRESH-V1
 
-**Status: DESIGNED · NOT ENABLED · NO ACTIVE TRIGGER · NO SCHEDULER**
+**Status: DISABLED-MODE IMPLEMENTED · NOT ENABLED · NO PUSH TRIGGER · NO SCHEDULER**
 
-This document designs the minimum safe **persistent** Architecture Snapshot
+This document designs and tracks the **persistent** Architecture Snapshot
 refresh mechanism. It builds on:
 
 - `docs/architecture/auto-refresh-v1.md` (eligibility / anti-loop / identity)
 - AUTO-REFRESH-PILOT-V1 (`npm run auto-refresh:pilot`) — manual proof path
+- DISABLED-MODE runner: `npm run auto-refresh:persistent`
+- DISABLED-MODE workflow: `.github/workflows/architecture-auto-refresh.yml`
+  (`workflow_dispatch` only)
 
-This design-only slice does **not** enable any always-on mutation path.
+**Persistent AUTO-REFRESH is NOT ENABLED.** Push-to-main automatic publication
+is absent. A later Human-authorized enablement slice may add the `push:`
+trigger without redesigning jobs/steps.
 
 Companion pure helpers: `src/domain/persistentAutoRefreshContract.ts`  
-Example (non-active) workflow sketch:
+Example (historical) workflow sketch:
 `docs/architecture/persistent-auto-refresh-workflow.example.yml`
 
 ---
@@ -58,11 +63,13 @@ Human **Ready** and Human **Merge** remain unchanged.
 
 ### Explicit non-enablement
 
-Until an accepted **implementation** slice lands:
+Until an accepted **enablement** slice lands:
 
-- no file under `.github/workflows/` may actively trigger AUTO-REFRESH
-- the example YAML in `docs/architecture/` is documentation only
-- Persistent AUTO-REFRESH remains **NOT ENABLED**
+- `.github/workflows/architecture-auto-refresh.yml` may exist only in
+  **DISABLED-MODE** (`workflow_dispatch` only; no `push`, no cron)
+- Persistent AUTO-REFRESH remains **NOT ENABLED** (no automatic push-to-main)
+- platform `pull-requests: write` is broader than intended Draft-only
+  capability; publisher guards keep Ready/Merge/close unauthorized
 
 ---
 
@@ -307,16 +314,18 @@ above.
 
 | Artifact | Role |
 |---|---|
-| `.github/workflows/architecture-auto-refresh.yml` | **Future** active wiring (not in this design-only PR) |
-| `docs/architecture/persistent-auto-refresh-workflow.example.yml` | Non-active example |
-| `scripts/run-auto-refresh-pilot.ts` | Reuse as runner core |
+| `.github/workflows/architecture-auto-refresh.yml` | DISABLED-MODE workflow (`workflow_dispatch` only); enablement adds `push` |
+| `docs/architecture/persistent-auto-refresh-workflow.example.yml` | Historical example with commented push shape |
+| `scripts/run-persistent-auto-refresh.ts` | DISABLED-MODE runner (`npm run auto-refresh:persistent`) |
+| `scripts/run-auto-refresh-pilot.ts` | Manual pilot runner |
 | `src/domain/autoRefreshContract.ts` | Eligibility / anti-loop / identity |
 | `src/domain/autoRefreshPilot.ts` | Publication decision helpers |
 | `src/domain/autoRefreshPublisher.ts` | Draft-only publisher caps |
-| `src/domain/persistentAutoRefreshContract.ts` | Concurrency / failure / draft disposition |
+| `src/domain/persistentAutoRefreshContract.ts` | Concurrency / failure / draft disposition / workflow inspection |
 
-Enablement requires a **separate Human-authorized** PR that moves the example
-into `.github/workflows/` with the designed filters and permissions.
+Enablement requires a **separate Human-authorized** PR that adds `push:` to
+the DISABLED-MODE workflow (with designed filters) while keeping Draft-only
+publisher guards.
 
 ---
 
@@ -326,8 +335,10 @@ into `.github/workflows/` with the designed filters and permissions.
 |---|---|
 | Persistent design | this document |
 | Pure contract helpers + tests | present |
-| Example workflow YAML | docs only (non-triggering) |
-| Active `.github/workflows` AUTO-REFRESH | **NOT ENABLED** |
+| DISABLED-MODE workflow | `.github/workflows/architecture-auto-refresh.yml` (`workflow_dispatch` only) |
+| DISABLED-MODE runner | `npm run auto-refresh:persistent` |
+| Example workflow YAML | docs only (non-triggering historical sketch) |
+| Active push-to-main AUTO-REFRESH | **NOT ENABLED** |
 | cron / webhook mutation | **NOT ENABLED** |
 | Ready / Merge automation | **NOT ENABLED** |
 | Action Gateway / Agent execution | **NOT IMPLEMENTED** |
