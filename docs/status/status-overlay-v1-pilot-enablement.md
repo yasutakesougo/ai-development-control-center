@@ -1,14 +1,19 @@
 # STATUS-OVERLAY-V1 Read-only Pilot Enablement / Smoke Validation
 
 **Issue:** [#39](https://github.com/yasutakesougo/ai-development-control-center/issues/39)  
-**Verdict: HOLD**  
+**PR:** [#40](https://github.com/yasutakesougo/ai-development-control-center/pull/40) (Draft)  
+**Verdict: HOLD / Human deploy required**  
 **Stop:** pilot safely attempted + smoke evidence recorded + PASS/HOLD (no Ready / no Merge)
 
 ```text
 Pilot enablement in the real deployed production Worker = BLOCKED
 Local tip path smoke (wrangler --local) = PASS (supplemental only; not production)
 Write mutations performed = 0
+Human deploy gate (exact steps) = DOCUMENTED — awaiting Human execution
 ```
+
+Human deploy instructions source:
+[Issue #39 comment 5262856051](https://github.com/yasutakesougo/ai-development-control-center/issues/39#issuecomment-5262856051)
 
 ---
 
@@ -66,7 +71,64 @@ wrangler secret list / deploy list = Authentication error
 wrangler login (interactive)       = STOP per README (Human operation required)
 ```
 
-**Conclusion:** authorized tip cannot be published to the pilot Worker from this environment. Production remains on a pre-STATUS-OVERLAY revision. Overlay was **not** enabled in the real deployed environment.
+**Conclusion:** authorized tip cannot be published to the pilot Worker from this agent environment. Production remains on a pre-STATUS-OVERLAY revision. Overlay was **not** enabled in the real deployed environment.
+
+### Re-check after Human deploy comment (2026-08-12)
+
+| Check | Result |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` verify | still `active` |
+| Workers Scripts API | still **403** Authentication error |
+| Production `GET /api/status-overlay` | still **404** |
+
+Agent cannot complete `npm run deploy` until Workers Scripts Edit is granted or Human deploys interactively.
+
+---
+
+## Human deploy gate — exact execution
+
+Authorized revision:
+
+`6a055e1a63a42c1f8a58208be9223390c76dbfa0`
+
+From that exact revision, use the repository's established deploy script:
+
+```bash
+git checkout 6a055e1a63a42c1f8a58208be9223390c76dbfa0
+npm ci
+npm run verify
+npm run deploy
+```
+
+`npm run deploy` is defined in `package.json` as `npm run build && wrangler deploy`.
+
+Before deploy, either:
+
+- grant the existing `CLOUDFLARE_API_TOKEN` permission sufficient for Workers Scripts edit/deploy, or
+- perform the deploy interactively as Human with authorized Cloudflare credentials.
+
+Do **not**:
+
+- set `STATUS_OVERLAY_REPOSITORY` away from `yasutakesougo/ai-development-control-center`
+- add GitHub mutation / repository writer / HISTORY writer / Action Gateway / Ledger / Agent / SharePoint capabilities
+
+### After deploy — production smoke (all required for PASS)
+
+1. deployed revision / asset revision corresponds to the authorized tip  
+2. `GET /api/status-overlay` = 200  
+3. `schemaVersion = STATUS-OVERLAY-V1`  
+4. `repository = yasutakesougo/ai-development-control-center`  
+5. `recommendedNextAction.authorizesMutation = false`  
+6. no token/secret material in response  
+7. `observedAt` present  
+8. UI renders CURRENT / GATE / NEXT / AUTOMATION / HOLDS / UNKNOWNS / PRS  
+9. UNKNOWN/HOLD/FAILED/OUTCOME_UNKNOWN remain visibly distinct when present  
+10. existing app still loads  
+11. alternate-repository fail-closed remains preserved  
+12. write mutations = 0  
+
+If any production gate fails → keep Issue #39 / PR #40 at **HOLD** and stop.  
+If all pass → update this evidence + PR #40, keep **Draft**, stop for **Fresh Review**.
 
 ---
 
@@ -142,12 +204,13 @@ Not re-probed against production (endpoint absent; no env mutation). Covered by 
 ## Verdict
 
 ```text
-VERDICT = HOLD
+VERDICT = HOLD / Human deploy required
 REASON  = Cloudflare Workers deploy credentials lack Workers Scripts permission;
           production Worker still serves pre-overlay revision (/api/status-overlay = 404).
-NEXT HUMAN GATE = grant Workers Scripts Edit on CLOUDFLARE_API_TOKEN
-                   OR Human `npm run deploy` of main 6a055e1…,
-                   then re-run Issue #39 production smoke.
+NEXT HUMAN GATE = execute Human deploy gate above on revision
+                   6a055e1a63a42c1f8a58208be9223390c76dbfa0
+                   (grant Workers Scripts Edit OR interactive Human deploy),
+                   then re-run Issue #39 production smoke 1–12.
 ```
 
 Do not Ready. Do not Merge. Do not expand write capabilities. Do not set `STATUS_OVERLAY_REPOSITORY` away from the canonical public repository.
