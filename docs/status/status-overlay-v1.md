@@ -17,6 +17,8 @@ Companion modules:
 - Runtime generator (pure): `src/domain/statusOverlayGenerator.ts`
 - Read-only observer: `src/observer/statusOverlayGithubObserver.ts`
 - Read-only UI: `src/ui/statusOverlayViewModel.ts`, `src/ui/StatusOverlayPanel.tsx`
+- Read-only runtime wiring: `src/runtime/statusOverlayRuntime.ts`,
+  `src/ui/StatusOverlayRuntimeContainer.tsx`, `GET /api/status-overlay`
 
 STATUS-OVERLAY is **decision-support only**. It does **not** authorize
 mutation, Ready, Merge, Action Gateway, Agent execution, or Ledger writes.
@@ -31,8 +33,8 @@ read-only GitHub/workflow observer
   → UI projection (read-only)
 ```
 
-No repository-file writer / HISTORY writer in this slice. UI never observes
-GitHub itself and never exposes mutation controls.
+Runtime wiring orchestrates the same flow into `App(statusOverlay)` without
+adding writers or mutation controls.
 
 ---
 
@@ -407,5 +409,6 @@ false and is shown explicitly.
 | Repository-file writer | **NOT IMPLEMENTED** |
 | HISTORY writer | **NOT IMPLEMENTED** |
 | UI | **IMPLEMENTED** (read-only view-model + panel) |
+| Runtime wiring | **IMPLEMENTED** (`statusOverlayRuntime.ts` + `/api/status-overlay`) |
 | Action Gateway binding | **NOT IMPLEMENTED** |
 | Approval Ledger / Agent execution | **NOT IMPLEMENTED** |

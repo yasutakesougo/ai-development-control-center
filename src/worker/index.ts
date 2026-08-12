@@ -3,6 +3,7 @@ import { handleAuthStatus } from "./auth/authStatus";
 import { observeRepository } from "./github/readOnlyAdapter";
 import { handleLedgerRecordPost, handleLedgerRecordsGet, type LedgerApiEnv } from "./ledger/recordsApi";
 import { buildStatusPayload } from "./statusApi";
+import { handleStatusOverlayGet } from "./statusOverlayApi";
 
 interface Env extends LedgerApiEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
@@ -11,6 +12,8 @@ interface Env extends LedgerApiEnv {
   ACCESS_TEAM_DOMAIN?: string;
   /** Cloudflare Access application audience tag. Optional until Access is configured. */
   ACCESS_AUD?: string;
+  STATUS_OVERLAY_REPOSITORY?: string;
+  STATUS_OVERLAY_RUNTIME_ENABLED?: string;
 }
 
 const TARGET_REPOSITORY = "yasutakesougo/severe-behavior-support-spfx";
@@ -28,6 +31,10 @@ export default {
       const action = resolveHumanAction(facts);
       const payload = await buildStatusPayload(facts, action);
       return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/status-overlay") {
+      return handleStatusOverlayGet(env);
     }
 
     if (url.pathname === "/api/ledger/records") {
