@@ -58,6 +58,8 @@ export interface StatusOverlayGeneratorInput {
   holds?: string[];
   unknowns?: string[];
   liveObservationFailed?: boolean;
+  /** Workflow/Actions read failed — observation UNKNOWN, not OUTCOME_UNKNOWN. */
+  workflowObservationFailed?: boolean;
   outcomeUnknown?: boolean;
   safetyHold?: boolean;
   holdReason?: string | null;
@@ -209,6 +211,7 @@ export function generateStatusOverlay(
 
   const architectureAffectingStale = isArchitectureAffectingStale(input);
   const liveObservationFailed = input.liveObservationFailed === true;
+  const workflowObservationFailed = input.workflowObservationFailed === true;
   const { activeRefreshPr, overrideRejected } = resolveActiveRefreshPr({
     openPullRequests,
     override: input.autoRefresh.activeRefreshPr,
@@ -217,13 +220,14 @@ export function generateStatusOverlay(
     architectureAffectingStale,
     autoRefreshEnabled: input.autoRefresh.enabled,
     activeRefreshPr,
-    liveObservationFailed,
+    liveObservationFailed: liveObservationFailed || workflowObservationFailed,
     openPullRequests,
   });
 
   const handoffActionRequired = input.handoff.nextActionStatus === "ACTION_REQUIRED";
   const decisionInput = {
     liveObservationFailed,
+    workflowObservationFailed,
     outcomeUnknown: input.outcomeUnknown === true,
     safetyHold: input.safetyHold === true,
     holdReason: input.holdReason ?? null,
@@ -248,6 +252,9 @@ export function generateStatusOverlay(
   const unknowns = [...(input.unknowns ?? [])];
   if (liveObservationFailed && !unknowns.includes("live_observation_failed")) {
     unknowns.push("live_observation_failed");
+  }
+  if (workflowObservationFailed && !unknowns.includes("workflow_state_UNKNOWN")) {
+    unknowns.push("workflow_state_UNKNOWN");
   }
   if (overrideRejected && !unknowns.includes("activeRefreshPr_override_rejected")) {
     unknowns.push("activeRefreshPr_override_rejected");

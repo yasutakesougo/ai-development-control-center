@@ -1,6 +1,6 @@
 # STATUS-OVERLAY-V1
 
-**Status: DESIGNED · runtime generator IMPLEMENTED · UI NOT IMPLEMENTED**
+**Status: DESIGNED · runtime generator IMPLEMENTED · GitHub/workflow observer IMPLEMENTED · UI NOT IMPLEMENTED**
 
 This document designs **STATUS-OVERLAY-V1**: a replaceable **current-state
 projection** that answers:
@@ -15,12 +15,21 @@ Companion modules:
 
 - Contract helpers: `src/domain/statusOverlayContract.ts`
 - Runtime generator (pure): `src/domain/statusOverlayGenerator.ts`
+- Read-only observer: `src/observer/statusOverlayGithubObserver.ts`
 
 STATUS-OVERLAY is **decision-support only**. It does **not** authorize
 mutation, Ready, Merge, Action Gateway, Agent execution, or Ledger writes.
 
-Observation remains separate: callers supply explicit observed inputs. No
-GitHub observer, repository-file writer, or UI is implemented in this slice.
+Observation flow:
+
+```
+read-only GitHub/workflow observer
+  → explicit StatusOverlayGeneratorInput
+  → generateStatusOverlay()
+  → StatusOverlayDocument
+```
+
+No repository-file writer / HISTORY writer / UI in this slice.
 
 ---
 
@@ -385,8 +394,9 @@ No decorative metric strips. Markdown/HTML renderer is **NOT IMPLEMENTED**.
 |---|---|
 | STATUS-OVERLAY-V1 | **DESIGNED** |
 | Runtime generator | **IMPLEMENTED** (`statusOverlayGenerator.ts`) |
-| GitHub / workflow observer | **NOT IMPLEMENTED** |
+| GitHub / workflow observer | **IMPLEMENTED** (`statusOverlayGithubObserver.ts`, read-only) |
 | Repository-file writer | **NOT IMPLEMENTED** |
+| HISTORY writer | **NOT IMPLEMENTED** |
 | UI | **NOT IMPLEMENTED** |
 | Action Gateway binding | **NOT IMPLEMENTED** |
 | Approval Ledger / Agent execution | **NOT IMPLEMENTED** |
