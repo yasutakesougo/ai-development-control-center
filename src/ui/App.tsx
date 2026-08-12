@@ -16,6 +16,7 @@ import {
   type LedgerSubmissionState,
 } from "../domain/ledgerSubmission";
 import type { StatusOverlayDocument } from "../domain/statusOverlayContract";
+import type { StatusOverlayRuntimePhase } from "../runtime/statusOverlayRuntime";
 import { ApprovalIntentPanel } from "./ApprovalIntentPanel";
 import { fetchLedgerHistory, postLedgerRecord, type LedgerHistoryResult } from "./ledgerApi";
 import { LedgerHistoryPanel } from "./LedgerHistoryPanel";
@@ -61,9 +62,16 @@ export interface AppProps {
    * The UI never observes GitHub/workflow itself — callers supply the document.
    */
   statusOverlay?: StatusOverlayDocument | null;
+  /** Runtime wiring phase; defaults to disabled when omitted. */
+  statusOverlayPhase?: StatusOverlayRuntimePhase;
+  statusOverlayUnavailableReason?: string | null;
 }
 
-export function App({ statusOverlay = null }: AppProps = {}) {
+export function App({
+  statusOverlay = null,
+  statusOverlayPhase = "disabled",
+  statusOverlayUnavailableReason = null,
+}: AppProps = {}) {
   const [data, setData] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [intentDraft, setIntentDraft] = useState<ApprovalIntentDraft | null>(null);
@@ -167,7 +175,31 @@ export function App({ statusOverlay = null }: AppProps = {}) {
         </dl>
       </section>
 
-      {statusOverlay && <StatusOverlayPanel document={statusOverlay} />}
+      {statusOverlayPhase === "loading" && (
+        <section className="status-overlay-card" data-testid="status-overlay-loading">
+          <p className="eyebrow">STATUS-OVERLAY-V1</p>
+          <h2>Loading repository status</h2>
+          <p className="status-overlay-note">Read-only observation in progress.</p>
+        </section>
+      )}
+
+      {statusOverlayPhase === "unavailable" && (
+        <section
+          className="status-overlay-card tone-unknown"
+          data-testid="status-overlay-unavailable"
+        >
+          <p className="eyebrow">STATUS-OVERLAY-V1</p>
+          <h2>Status overlay unavailable</h2>
+          <p className="status-overlay-note">
+            {statusOverlayUnavailableReason ??
+              "STATUS-OVERLAY could not be loaded. This is not NO_ACTION."}
+          </p>
+        </section>
+      )}
+
+      {statusOverlay && statusOverlayPhase !== "loading" && (
+        <StatusOverlayPanel document={statusOverlay} />
+      )}
 
       {!loading && approvalAllowed && data && (
         <ApprovalIntentPanel
