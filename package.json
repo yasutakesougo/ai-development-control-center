@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "architecture:snapshot": "node scripts/generate-architecture-snapshot.mjs",
+    "handoff": "vite-node scripts/run-handoff.ts",
     "dev": "vite",
     "build": "vite build",
     "preview": "npm run build && vite preview",
