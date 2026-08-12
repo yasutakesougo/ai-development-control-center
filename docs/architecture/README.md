@@ -18,3 +18,7 @@ V1 intentionally has no watcher or scheduled refresh. Check the
 `staleIndicators` in `architecture.json` before relying on an older Snapshot.
 Unknowns and assumptions are retained explicitly; they must not be upgraded to
 confirmed facts without repository evidence.
+
+AUTO-REFRESH-V1 is **designed but not implemented**. See
+[`auto-refresh-v1.md`](./auto-refresh-v1.md) for the eligibility, anti-loop,
+and Draft-only mutation boundary. There is no execution path today.
