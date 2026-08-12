@@ -638,6 +638,35 @@ const IDEMPOTENCY_RECORD_KEYS = [
   "result",
 ] as const;
 
+const ACTION_GATEWAY_RESULT_ROOT_KEYS = [
+  "schemaVersion",
+  "capabilityId",
+  "status",
+  "repository",
+  "target",
+  "requestFingerprint",
+  "idempotencyKey",
+  "authorization",
+  "timestamps",
+  "reasonCode",
+  "reasonMessage",
+  "comment",
+] as const;
+
+const ACTION_GATEWAY_RESULT_AUTHORIZATION_KEYS = [
+  "matched",
+  "evidenceRefs",
+  "artifactId",
+] as const;
+
+const ACTION_GATEWAY_RESULT_TIMESTAMP_KEYS = [
+  "acceptedAt",
+  "attemptedAt",
+  "completedAt",
+] as const;
+
+const ACTION_GATEWAY_RESULT_COMMENT_KEYS = ["id", "url"] as const;
+
 /**
  * Structural fail-closed parse for trusted authorization lookup options.
  * Malformed nested objects never throw; callers get REJECTED_SCHEMA.
@@ -716,7 +745,31 @@ export function parseTrustedAuthorizationLookup(
 }
 
 /**
+ * Structural fail-closed parse for ActionGatewayCommentResultV1.
+ * Mirrors docs/action-gateway/schemas/action-gateway-comment-result-v1.schema.json
+ * plus result invariants (status discrimination, no-secret-ish reasonMessage).
+ * Never throws.
+ */
+export function parseActionGatewayCommentResult(
+  value: unknown,
+):
+  | { ok: true; result: ActionGatewayCommentResultV1 }
+  | { ok: false; reasonCode: "REJECTED_SCHEMA"; reasonMessage: string } {
+  const errors = assertCommentResultInvariants(value);
+  if (errors.length > 0) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: `ActionGatewayCommentResultV1 is malformed: ${errors.join(",")}.`,
+    };
+  }
+  return { ok: true, result: value as unknown as ActionGatewayCommentResultV1 };
+}
+
+/**
  * Structural fail-closed parse for an existing idempotency-store record.
+ * Nested result must fully match the result contract AND the record identity
+ * (repository/target/requestFingerprint/idempotencyKey) before any REPLAY.
  */
 export function parseActionGatewayIdempotencyRecord(
   value: unknown,
@@ -753,12 +806,26 @@ export function parseActionGatewayIdempotencyRecord(
       reasonMessage: "existingIdempotencyRecord identity fields are malformed.",
     };
   }
-  const resultErrors = assertCommentResultInvariants(value.result);
-  if (resultErrors.length > 0) {
+  const resultParsed = parseActionGatewayCommentResult(value.result);
+  if (!resultParsed.ok) {
     return {
       ok: false,
       reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: `existingIdempotencyRecord.result is malformed: ${resultErrors.join(",")}.`,
+      reasonMessage: `existingIdempotencyRecord.result is malformed: ${resultParsed.reasonMessage}`,
+    };
+  }
+  const result = resultParsed.result;
+  if (
+    value.repository !== result.repository ||
+    !targetsEqual(value.target, result.target) ||
+    value.requestFingerprint !== result.requestFingerprint ||
+    value.idempotencyKey !== result.idempotencyKey
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage:
+        "existingIdempotencyRecord identity does not match nested result (repository/target/requestFingerprint/idempotencyKey).",
     };
   }
   return { ok: true, record: value as unknown as ActionGatewayIdempotencyRecord };
@@ -1259,6 +1326,9 @@ export function reconcileUnknownCommentOutcome(input: {
 export function assertCommentResultInvariants(result: unknown): string[] {
   const errors: string[] = [];
   if (!isPlainObject(result)) return ["result_not_object"];
+  if (!hasOnlyKeys(result, ACTION_GATEWAY_RESULT_ROOT_KEYS)) {
+    errors.push("additional_properties");
+  }
   if (result.schemaVersion !== ACTION_GATEWAY_COMMENT_RESULT_SCHEMA) {
     errors.push("schemaVersion");
   }
@@ -1266,12 +1336,97 @@ export function assertCommentResultInvariants(result: unknown): string[] {
     errors.push("capabilityId");
   }
   const status = result.status;
+  if (
+    status !== "SUCCEEDED" &&
+    status !== "REJECTED" &&
+    status !== "FAILED" &&
+    status !== "UNKNOWN"
+  ) {
+    errors.push("status");
+  }
+  if (typeof result.repository !== "string" || result.repository.length < 1) {
+    errors.push("repository");
+  }
+  if (!isTarget(result.target)) {
+    errors.push("target");
+  }
+  if (
+    typeof result.requestFingerprint !== "string" ||
+    !/^[a-f0-9]{64}$/.test(result.requestFingerprint)
+  ) {
+    errors.push("requestFingerprint");
+  }
+  if (!validIdempotencyKey(result.idempotencyKey)) {
+    errors.push("idempotencyKey");
+  }
+
+  const authorization = result.authorization;
+  if (!isPlainObject(authorization)) {
+    errors.push("authorization");
+  } else {
+    if (!hasOnlyKeys(authorization, ACTION_GATEWAY_RESULT_AUTHORIZATION_KEYS)) {
+      errors.push("authorization_additional_properties");
+    }
+    if (typeof authorization.matched !== "boolean") {
+      errors.push("authorization_matched");
+    }
+    if (
+      !Array.isArray(authorization.evidenceRefs) ||
+      !authorization.evidenceRefs.every((ref) => typeof ref === "string")
+    ) {
+      errors.push("authorization_evidenceRefs");
+    }
+    if (
+      authorization.artifactId !== undefined &&
+      (typeof authorization.artifactId !== "string" ||
+        authorization.artifactId.length < 1 ||
+        authorization.artifactId.length > ACTION_GATEWAY_ARTIFACT_ID_MAX)
+    ) {
+      errors.push("authorization_artifactId");
+    }
+  }
+
+  const timestamps = result.timestamps;
+  if (!isPlainObject(timestamps)) {
+    errors.push("timestamps");
+  } else {
+    if (!hasOnlyKeys(timestamps, ACTION_GATEWAY_RESULT_TIMESTAMP_KEYS)) {
+      errors.push("timestamps_additional_properties");
+    }
+    if (typeof timestamps.completedAt !== "string" || timestamps.completedAt.length < 1) {
+      errors.push("timestamps_completedAt");
+    }
+    if (
+      timestamps.acceptedAt !== undefined &&
+      (typeof timestamps.acceptedAt !== "string" || timestamps.acceptedAt.length < 1)
+    ) {
+      errors.push("timestamps_acceptedAt");
+    }
+    if (
+      timestamps.attemptedAt !== undefined &&
+      (typeof timestamps.attemptedAt !== "string" || timestamps.attemptedAt.length < 1)
+    ) {
+      errors.push("timestamps_attemptedAt");
+    }
+  }
+
+  if (typeof result.reasonCode !== "string" || result.reasonCode.length < 1) {
+    errors.push("reasonCode");
+  }
+  if (typeof result.reasonMessage !== "string" || result.reasonMessage.length < 1) {
+    errors.push("reasonMessage");
+  }
+
   const comment = result.comment;
   if (status === "SUCCEEDED") {
     if (
       !isPlainObject(comment) ||
+      !hasOnlyKeys(comment, ACTION_GATEWAY_RESULT_COMMENT_KEYS) ||
       typeof comment.id !== "number" ||
-      typeof comment.url !== "string"
+      !Number.isInteger(comment.id) ||
+      comment.id < 1 ||
+      typeof comment.url !== "string" ||
+      comment.url.length < 1
     ) {
       errors.push("SUCCEEDED_requires_comment");
     }
@@ -1283,7 +1438,6 @@ export function assertCommentResultInvariants(result: unknown): string[] {
     if (comment !== undefined) errors.push(`${status}_forbids_comment`);
   }
   if (status === "REJECTED") {
-    const timestamps = result.timestamps;
     if (isPlainObject(timestamps) && timestamps.attemptedAt !== undefined) {
       errors.push("REJECTED_forbids_attemptedAt");
     }

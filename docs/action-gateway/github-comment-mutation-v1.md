@@ -308,9 +308,12 @@ type ActionGatewayCommentResultV1 =
 5. Repository allowlist (V1) is exactly
    `yasutakesougo/ai-development-control-center`.
 6. Target must already exist and be **live re-observed** with matching
-   `repository / kind / number` before write (`observedTargetExists === true`
-   alone is insufficient). If `expectedObservations` includes `targetNodeId` /
-   `targetTitle`, matching live observations are required.
+   `repository / kind / number` before any **new** write eligibility
+   (`observedTargetExists === true` alone is insufficient). Same-identity
+   idempotency REPLAY does not require fresh live observation because it cannot
+   invoke the adapter. If `expectedObservations` includes `targetNodeId` /
+   `targetTitle`, matching live observations are required on the `NO_EXISTING`
+   path only.
 7. Authorization for number N cannot be replayed against number M.
 8. Authorization for `github.comment.create.v1` cannot authorize Ready / Merge /
    Close / workflow dispatch / repository-file writes / other capabilities.
@@ -339,16 +342,21 @@ authorizationArtifact   → trustedAuthorizationLookup.status == VERIFIED
 nowIso provided independently of authorizedAt
 authorizedAt <= nowIso <= effectiveExpiry
 evidenceRefs            = supplemental audit only (still schema-limited)
-live re-observation:
-  observedTargetExists === true
-  observedRepository/kind/number == request target
-  + if expected targetNodeId/title set → live observed values required and equal
 idempotency existing record (if any):
+  malformed nested result OR record/result identity mismatch
+    (repository / target / requestFingerprint / idempotencyKey)
+    → REJECTED_SCHEMA (no replay; no adapter)
   same repository + target + fingerprint + requestedBy + key
     → terminal REPLAY_EXISTING_RESULT (adapterInvocationAllowed=false)
     → reuse prior store result; never ELIGIBLE_FOR_ADAPTER / no second POST
     → if prior is UNKNOWN → reconciliation only (§6); remain UNKNOWN unless positive proof
   else → REJECTED_IDEMPOTENCY_CONFLICT
+no existing record:
+  live re-observation:
+    observedTargetExists === true
+    observedRepository/kind/number == request target
+    + if expected targetNodeId/title set → live observed values required and equal
+  → ELIGIBLE_FOR_ADAPTER (adapter NOT IMPLEMENTED in this slice)
 ```
 
 Any failure ⇒ `REJECTED` / no adapter call. Same-identity REPLAY is also non-adapter
@@ -499,11 +507,11 @@ detail; design requires a deny-on-secret-scan hook before write).
 | Human authorization binder | Before observation finalize / before adapter |
 | Capability allowlist | Capability validator (`github.comment.create.v1` only) |
 | Repository allowlist | Capability validator |
-| Exact target binding | Auth binder + **required** live target re-observation |
+| Exact target binding | Auth binder; **required** live target re-observation only on `NO_EXISTING` path |
 | Request fingerprint | Computed from semantic facts; compared to `authorizedRequestFingerprint` |
 | Attempt key binding | `authorizedIdempotencyKey == request.idempotencyKey` |
 | Auth lifetime | Independent `nowIso` vs `expiresAt` or `authorizedAt+DEFAULT_TTL` |
-| Idempotency store | After auth+observation pass; before adapter |
+| Idempotency store | After authorization binder; before live observation / adapter |
 | Payload limits / secret scan | Request validation (pre-adapter) |
 | GitHub outcome reconciliation | Adapter result handler |
 | UNKNOWN vs FAILED | Outcome reconciler (no auto-retry write) |

@@ -69,12 +69,22 @@ authenticated caller
   → request schema + payload limits
   → request fingerprint + authorized idempotency key
   → exact authorization binder (incl. independent nowIso / default TTL)
-  → required live target re-observation
-  → idempotency reconciliation
-  → capability adapter (e.g. GitHub comment create)
+  → idempotency record reconciliation
+       ├─ same identity → REPLAY_EXISTING_RESULT (adapterInvocationAllowed=false) → STOP
+       ├─ conflicting identity → REJECTED_IDEMPOTENCY_CONFLICT → STOP
+       └─ no existing record
+            ↓
+          required live target re-observation
+            ↓
+          ELIGIBLE_FOR_ADAPTER (design-only; adapter NOT IMPLEMENTED)
+  → capability adapter (e.g. GitHub comment create) — future only
   → outcome reconciliation (SUCCEEDED | FAILED | UNKNOWN)
   → result evidence (no secrets)
 ```
+
+Same-identity terminal REPLAY does **not** require fresh live-target observation because it
+cannot invoke the adapter. Only the `NO_EXISTING` path that may become
+`ELIGIBLE_FOR_ADAPTER` requires live target re-observation.
 
 `REJECTED` must occur **before** any adapter write attempt.
 
@@ -88,11 +98,11 @@ authenticated caller
 | Authorization (Human evidence) | authorization binder | `REJECTED`; no adapter call |
 | Capability allowlist | capability validator | `REJECTED` if not exactly allowlisted |
 | Repository allowlist | capability validator | `REJECTED` if outside allowlist |
-| Exact target binding | authorization binder + **required** live observation | `REJECTED` on mismatch / missing observation |
+| Exact target binding | authorization binder; **required** live observation only on `NO_EXISTING` path | `REJECTED` on mismatch / missing observation |
 | Request fingerprint | binder compares expected vs computed | `REJECTED` on mismatch |
 | Attempt idempotency key | `authorizedIdempotencyKey == request.idempotencyKey` | `REJECTED` on mismatch / reuse |
 | Auth lifetime | independent `nowIso` vs expiresAt or authorizedAt+DEFAULT_TTL | `REJECTED` if clock missing or expired |
-| Idempotency store | before adapter | Same identity → terminal `REPLAY_EXISTING_RESULT` (reuse prior; adapter forbidden); never duplicate |
+| Idempotency store | after authorization binder; before live observation / adapter | Same identity → terminal `REPLAY_EXISTING_RESULT` (reuse prior; adapter forbidden); conflicting identity → `REJECTED_IDEMPOTENCY_CONFLICT`; malformed stored result → `REJECTED_SCHEMA` |
 | Payload size/content limits | request validation | `REJECTED`; no adapter call |
 | GitHub API outcome reconciliation | after adapter | `SUCCEEDED` / `FAILED` / `UNKNOWN` only with proof rules |
 | UNKNOWN vs FAILED | outcome reconciler | No auto-retry write on UNKNOWN |

@@ -15,6 +15,7 @@ import {
   evaluateCommentRequestPreWrite,
   evaluateIdempotencyConflict,
   parseActionGatewayCommentRequest,
+  parseActionGatewayCommentResult,
   parseActionGatewayIdempotencyRecord,
   parseActionGatewayPreWriteOptions,
   parseGatewayJsonBody,
@@ -309,16 +310,26 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
   it("rejects idempotency key reuse across different request fingerprints", async () => {
     const request = await validRequest();
     const fingerprint = await computeCommentRequestFingerprint(request);
+    const foreignTarget = { kind: "ISSUE" as const, number: 99 };
+    const foreignFingerprint = "0".repeat(64);
+    const foreignResult: ActionGatewayCommentResultV1 = {
+      ...loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json"),
+      repository: request.repository,
+      target: foreignTarget,
+      requestFingerprint: foreignFingerprint,
+      idempotencyKey: request.idempotencyKey,
+    };
+    const foreignRecord: ActionGatewayIdempotencyRecord = {
+      capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
+      repository: request.repository,
+      target: foreignTarget,
+      requestFingerprint: foreignFingerprint,
+      idempotencyKey: request.idempotencyKey,
+      requestedBy: request.requestedBy,
+      result: foreignResult,
+    };
     const conflict = evaluateIdempotencyConflict({
-      existing: {
-        capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
-        repository: request.repository,
-        target: { kind: "ISSUE", number: 99 },
-        requestFingerprint: "0".repeat(64),
-        idempotencyKey: request.idempotencyKey,
-        requestedBy: request.requestedBy,
-        result: loadFixture("result-succeeded.json"),
-      },
+      existing: foreignRecord,
       current: {
         capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
         repository: request.repository,
@@ -336,15 +347,7 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     const evaluation = await evaluateCommentRequestPreWrite(
       request,
       await liveOpts(request, {
-        existingIdempotencyRecord: {
-          capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
-          repository: request.repository,
-          target: { kind: "ISSUE", number: 99 },
-          requestFingerprint: "0".repeat(64),
-          idempotencyKey: request.idempotencyKey,
-          requestedBy: request.requestedBy,
-          result: loadFixture("result-succeeded.json"),
-        },
+        existingIdempotencyRecord: foreignRecord,
       }),
     );
     expect(evaluation).toMatchObject({
@@ -659,5 +662,192 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
         comment: { id: 1, url: "https://example.invalid/1" },
       }),
     ).toContain("FAILED_forbids_comment");
+  });
+
+  it("fail-closes stored results missing required fields as REJECTED_SCHEMA", async () => {
+    const request = await validRequest();
+    const record = await sameIdentityRecord(
+      request,
+      loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json"),
+    );
+    expect(parseActionGatewayCommentResult(record.result).ok).toBe(true);
+
+    const { repository: _repository, ...withoutRepository } = record.result;
+    expect(
+      parseActionGatewayIdempotencyRecord({ ...record, result: withoutRepository }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    const { target: _target, ...withoutTarget } = record.result;
+    expect(
+      parseActionGatewayIdempotencyRecord({ ...record, result: withoutTarget }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    const { timestamps: _timestamps, ...withoutTimestamps } = record.result;
+    expect(
+      parseActionGatewayIdempotencyRecord({ ...record, result: withoutTimestamps }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    const { completedAt: _completedAt, ...timestampsWithoutCompletedAt } =
+      record.result.timestamps;
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: { ...record.result, timestamps: timestampsWithoutCompletedAt },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+  });
+
+  it("fail-closes stored results with unknown properties as REJECTED_SCHEMA", async () => {
+    const request = await validRequest();
+    const record = await sameIdentityRecord(
+      request,
+      loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json"),
+    );
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: { ...record.result, extraField: true },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+  });
+
+  it("fail-closes stored results with malformed nested authorization as REJECTED_SCHEMA", async () => {
+    const request = await validRequest();
+    const record = await sameIdentityRecord(
+      request,
+      loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json"),
+    );
+    const { authorization: _authorization, ...withoutAuthorization } = record.result;
+    expect(
+      parseActionGatewayIdempotencyRecord({ ...record, result: withoutAuthorization }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: {
+          ...record.result,
+          authorization: { ...record.result.authorization, matched: "yes" },
+        },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: {
+          ...record.result,
+          authorization: { ...record.result.authorization, extra: true },
+        },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+  });
+
+  it("fail-closes stored results with malformed timestamps as REJECTED_SCHEMA", async () => {
+    const request = await validRequest();
+    const record = await sameIdentityRecord(
+      request,
+      loadFixture<ActionGatewayCommentResultV1>("result-rejected-auth-mismatch.json"),
+    );
+    const { timestamps: _timestamps, ...withoutTimestamps } = record.result;
+    expect(
+      parseActionGatewayIdempotencyRecord({ ...record, result: withoutTimestamps }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    const { completedAt: _completedAt, ...withoutCompletedAt } = record.result.timestamps;
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: { ...record.result, timestamps: withoutCompletedAt },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: {
+          ...record.result,
+          timestamps: { ...record.result.timestamps, extra: true },
+        },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+  });
+
+  it("fail-closes record/result identity mismatches as REJECTED_SCHEMA", async () => {
+    const request = await validRequest();
+    const record = await sameIdentityRecord(
+      request,
+      loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json"),
+    );
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: { ...record.result, repository: "other/repo" },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: { ...record.result, target: { kind: "ISSUE", number: 99 } },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: { ...record.result, requestFingerprint: "b".repeat(64) },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        ...record,
+        result: { ...record.result, idempotencyKey: "different-stored-key" },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+  });
+
+  it("pre-write evaluation fail-closes malformed/mismatched stored records without replay", async () => {
+    const request = await validRequest();
+    const record = await sameIdentityRecord(
+      request,
+      loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json"),
+    );
+
+    const malformed = await evaluateCommentRequestPreWrite(
+      request,
+      await liveOpts(request, {
+        existingIdempotencyRecord: {
+          ...record,
+          result: { ...record.result, extraField: true },
+        } as unknown as ActionGatewayIdempotencyRecord,
+      }),
+    );
+    expect(malformed).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_SCHEMA",
+      writeAttempted: false,
+    });
+    expect(malformed.status).not.toBe("REPLAY_EXISTING_RESULT");
+    expect(malformed.status).not.toBe("ELIGIBLE_FOR_ADAPTER");
+
+    const mismatched = await evaluateCommentRequestPreWrite(
+      request,
+      await liveOpts(request, {
+        existingIdempotencyRecord: {
+          ...record,
+          result: { ...record.result, repository: "other/repo" },
+        } as unknown as ActionGatewayIdempotencyRecord,
+      }),
+    );
+    expect(mismatched).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_SCHEMA",
+      writeAttempted: false,
+    });
+    expect(mismatched.status).not.toBe("REPLAY_EXISTING_RESULT");
+    expect(mismatched.status).not.toBe("ELIGIBLE_FOR_ADAPTER");
   });
 });
