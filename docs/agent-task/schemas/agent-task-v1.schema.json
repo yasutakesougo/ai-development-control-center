@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-development-control-center.local/schemas/agent-task-v1.json",
+  "title": "AgentTaskV1",
+  "description": "Machine-readable Agent task contract. Runtime parser must mirror this schema (additionalProperties:false) and apply documented semantic uniqueness rules for paths and verification command ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "repository",
+    "baseRevision",
+    "sourceIssue",
+    "objective",
+    "allowedPaths",
+    "forbiddenPaths",
+    "acceptanceCriteria",
+    "verificationCommands",
+    "allowedCapabilities",
+    "riskClass",
+    "stopAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "AGENT-TASK-V1" },
+    "taskId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7E]+$"
+    },
+    "repository": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+    },
+    "baseRevision": {
+      "type": "string",
+      "minLength": 40,
+      "maxLength": 40,
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "sourceIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "number"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256,
+          "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+        },
+        "number": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "objective": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "allowedPaths": {
+      "type": "array",
+      "description": "Repository-relative path boundaries. Entries must be unique after trailing-slash normalization (runtime rejects docs/foo vs docs/foo/). Absolute paths, backslash separators, empty segments, and . / .. segments are forbidden.",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
+      },
+      "uniqueItems": true
+    },
+    "forbiddenPaths": {
+      "type": "array",
+      "description": "Explicit deny boundaries. Same path grammar and trailing-slash uniqueness rules as allowedPaths.",
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
+      },
+      "uniqueItems": true
+    },
+    "acceptanceCriteria": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "type": "string", "minLength": 1, "maxLength": 2048 }
+    },
+    "verificationCommands": {
+      "type": "array",
+      "description": "Explicit verification command data only — not execution authority. Each command id MUST be unique within the array; runtime rejects duplicate ids as REJECTED_SCHEMA.",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "command"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique within verificationCommands. Duplicate ids fail closed.",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "command": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "workingDirectory": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
+          },
+          "description": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "allowedCapabilities": {
+      "type": "array",
+      "description": "Default-deny capability allowlist. Empty array authorizes no capabilities.",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9]+)+\\.v[0-9]+$"
+      },
+      "uniqueItems": true
+    },
+    "riskClass": { "enum": ["R0", "R1", "R2", "R3", "R4", "R5"] },
+    "stopAt": {
+      "enum": ["TASK_BUILT", "AGENT_COMPLETE", "VERIFY_COMPLETE", "DRAFT_PR"]
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxChangedFiles": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "maxAddedLines": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "requireIndependentVerify": { "type": "boolean" }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createdAt"],
+      "properties": {
+        "createdAt": { "type": "string", "minLength": 1 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "sourceIssueUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "builderVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "notes": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-development-control-center.local/schemas/agent-task-validation-result-v1.json",
+  "title": "AgentTaskValidationResultV1",
+  "description": "Deterministic validation outcome for AgentTaskV1. Runtime parser must mirror this schema including additionalProperties:false and field bounds.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "status",
+    "reasonCode",
+    "reasonMessage",
+    "validatedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "AGENT-TASK-VALIDATION-RESULT-V1" },
+    "taskId": {
+      "description": "Always present. Use null when the source taskId is unknown (e.g. structural parse failed before taskId was available).",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7E]+$"
+    },
+    "status": { "enum": ["VALID", "INVALID", "HOLD", "UNKNOWN"] },
+    "reasonCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "reasonMessage": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "findings": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "code", "message", "severity"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 2048 },
+          "severity": { "enum": ["ERROR", "WARNING"] }
+        }
+      }
+    },
+    "validatedAt": { "type": "string", "minLength": 1 }
+  }
+}
