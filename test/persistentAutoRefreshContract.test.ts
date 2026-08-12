@@ -4,7 +4,7 @@ import {
   filterSourceArchitectureRelevantPaths,
 } from "../src/domain/autoRefreshContract";
 import {
-  assertPersistentAutoRefreshNotEnabled,
+  assertPersistentAutoRefreshEnabled,
   assertPersistentPublisherCannotReadyOrMerge,
   classifyPersistentDraftDisposition,
   classifyPersistentFailure,
@@ -26,9 +26,9 @@ const mainA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const mainB = "cccccccccccccccccccccccccccccccccccccccc";
 
 describe("PERSISTENT-AUTO-REFRESH-V1 design contract", () => {
-  it("remains NOT ENABLED and prefers push_main then workflow_dispatch", () => {
-    expect(PERSISTENT_AUTO_REFRESH_ENABLED).toBe(false);
-    expect(() => assertPersistentAutoRefreshNotEnabled()).not.toThrow();
+  it("is ENABLED and prefers push_main then workflow_dispatch", () => {
+    expect(PERSISTENT_AUTO_REFRESH_ENABLED).toBe(true);
+    expect(() => assertPersistentAutoRefreshEnabled()).not.toThrow();
     expect(PERSISTENT_TRIGGER_PREFERENCE).toEqual(["push_main", "workflow_dispatch"]);
     expect(PERSISTENT_TRIGGER_PREFERENCE).not.toContain("schedule");
   });
