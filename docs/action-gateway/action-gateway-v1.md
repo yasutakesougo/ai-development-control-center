@@ -92,7 +92,7 @@ authenticated caller
 | Request fingerprint | binder compares expected vs computed | `REJECTED` on mismatch |
 | Attempt idempotency key | `authorizedIdempotencyKey == request.idempotencyKey` | `REJECTED` on mismatch / reuse |
 | Auth lifetime | independent `nowIso` vs expiresAt or authorizedAt+DEFAULT_TTL | `REJECTED` if clock missing or expired |
-| Idempotency store | before adapter | Return prior result; never duplicate on same key |
+| Idempotency store | before adapter | Same identity → terminal `REPLAY_EXISTING_RESULT` (reuse prior; adapter forbidden); never duplicate |
 | Payload size/content limits | request validation | `REJECTED`; no adapter call |
 | GitHub API outcome reconciliation | after adapter | `SUCCEEDED` / `FAILED` / `UNKNOWN` only with proof rules |
 | UNKNOWN vs FAILED | outcome reconciler | No auto-retry write on UNKNOWN |

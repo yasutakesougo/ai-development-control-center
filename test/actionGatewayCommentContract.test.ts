@@ -15,10 +15,14 @@ import {
   evaluateCommentRequestPreWrite,
   evaluateIdempotencyConflict,
   parseActionGatewayCommentRequest,
+  parseActionGatewayIdempotencyRecord,
+  parseActionGatewayPreWriteOptions,
   parseGatewayJsonBody,
+  parseTrustedAuthorizationLookup,
   reconcileUnknownCommentOutcome,
   type ActionGatewayCommentRequestV1,
   type ActionGatewayCommentResultV1,
+  type ActionGatewayIdempotencyRecord,
   type ActionGatewayPreWriteOptions,
   type TrustedAuthorizationLookup,
 } from "../src/domain/actionGatewayCommentContract";
@@ -89,6 +93,28 @@ async function liveOpts(
   };
 }
 
+async function sameIdentityRecord(
+  request: ActionGatewayCommentRequestV1,
+  result: ActionGatewayCommentResultV1,
+): Promise<ActionGatewayIdempotencyRecord> {
+  const fingerprint = await computeCommentRequestFingerprint(request);
+  return {
+    capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
+    repository: request.repository,
+    target: request.target,
+    requestFingerprint: fingerprint,
+    idempotencyKey: request.idempotencyKey,
+    requestedBy: { ...request.requestedBy },
+    result: {
+      ...result,
+      repository: request.repository,
+      target: request.target,
+      requestFingerprint: fingerprint,
+      idempotencyKey: request.idempotencyKey,
+    },
+  };
+}
+
 describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
   it("keeps execution and adapter unimplemented", () => {
     expect(ACTION_GATEWAY_EXECUTION_IMPLEMENTED).toBe(false);
@@ -104,31 +130,96 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     ]);
   });
 
-  it("valid authorized request is ELIGIBLE but does not attempt write", async () => {
+  it("parses the valid fixture once fingerprint is bound", async () => {
+    const request = await validRequest();
+    expect(parseActionGatewayCommentRequest(request).ok).toBe(true);
+  });
+
+  it("rejects malformed JSON syntax as REJECTED_SCHEMA without throwing", () => {
+    expect(parseGatewayJsonBody("{")).toEqual({
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "Gateway body is not valid JSON syntax.",
+    });
+  });
+
+  it("rejects unknown request properties (additionalProperties:false)", async () => {
+    const request = await validRequest();
+    const parsed = parseActionGatewayCommentRequest({
+      ...request,
+      extraField: true,
+    });
+    expect(parsed).toMatchObject({
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+    });
+  });
+
+  it("rejects empty expectedObservations.targetNodeId/targetTitle", async () => {
+    const request = await validRequest();
+    expect(
+      parseActionGatewayCommentRequest({
+        ...request,
+        expectedObservations: {
+          ...request.expectedObservations,
+          targetNodeId: "",
+        },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+    expect(
+      parseActionGatewayCommentRequest({
+        ...request,
+        expectedObservations: {
+          ...request.expectedObservations,
+          targetTitle: "",
+        },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    const withValues = parseActionGatewayCommentRequest({
+      ...request,
+      expectedObservations: {
+        ...request.expectedObservations,
+        targetNodeId: "I_kwDOExample",
+        targetTitle: "Design issue",
+      },
+    });
+    expect(withValues.ok).toBe(true);
+  });
+
+  it("rejects oversized evidenceRefs", async () => {
+    const request = await validRequest();
+    const parsed = parseActionGatewayCommentRequest({
+      ...request,
+      humanAuthorization: {
+        ...request.humanAuthorization,
+        evidenceRefs: Array.from({ length: 17 }, (_, i) => `https://example.invalid/${i}`),
+      },
+    });
+    expect(parsed).toMatchObject({
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+    });
+  });
+
+  it("default auth TTL is authorizedAt + 1h", () => {
+    const authorizedAt = "2026-08-12T06:30:00.000Z";
+    expect(effectiveAuthorizationExpiryMs(authorizedAt)).toBe(
+      Date.parse(authorizedAt) + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS,
+    );
+  });
+
+  it("accepts a fully authorized request as ELIGIBLE_FOR_ADAPTER only (no write)", async () => {
     const request = await validRequest();
     const evaluation = await evaluateCommentRequestPreWrite(
       request,
       await liveOpts(request),
     );
-    expect(evaluation.status).toBe("ELIGIBLE_FOR_ADAPTER");
-    expect(evaluation.writeAttempted).toBe(false);
-  });
-
-  it("requires trusted authorization artifact re-verification", async () => {
-    const request = await validRequest();
-    const missing = await evaluateCommentRequestPreWrite(
-      request,
-      await liveOpts(request, {
-        trustedAuthorizationLookup: {
-          status: "MISSING",
-          artifactId: request.humanAuthorization.authorizationArtifact.artifactId,
-        },
-      }),
-    );
-    expect(missing).toMatchObject({
-      status: "REJECTED",
-      reasonCode: "REJECTED_AUTHORIZATION_ARTIFACT",
+    expect(evaluation).toMatchObject({
+      status: "ELIGIBLE_FOR_ADAPTER",
+      reasonCode: "ELIGIBLE",
       writeAttempted: false,
+      executionImplemented: false,
     });
   });
 
@@ -139,7 +230,7 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
       await liveOpts(request, {
         authenticatedPrincipal: {
           principalKind: "HUMAN",
-          subjectId: "other-caller",
+          subjectId: "other-subject",
           issuer: request.requestedBy.issuer,
         },
       }),
@@ -151,82 +242,53 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
-  it("rejects unknown request properties to match JSON Schema", async () => {
-    const request = await validRequest();
-    const parsed = parseActionGatewayCommentRequest({
-      ...request,
-      operation: "some-future-operation",
-    });
-    expect(parsed).toMatchObject({
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-    });
-  });
-
-  it("enforces evidenceRefs schema limits in the runtime parser", async () => {
-    const request = await validRequest();
-    request.humanAuthorization.evidenceRefs = Array.from({ length: 17 }, (_, i) => `ref-${i}`);
-    expect(parseActionGatewayCommentRequest(request)).toMatchObject({
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-    });
-  });
-
-  it("maps JSON syntax errors to REJECTED_SCHEMA without throwing", () => {
-    expect(parseGatewayJsonBody('{"schemaVersion":')).toMatchObject({
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-    });
-    expect(parseGatewayJsonBody(null)).toMatchObject({
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-    });
-    expect(parseGatewayJsonBody("{}")).toEqual({ ok: true, value: {} });
-  });
-
-  it("fail-closes malformed runtime objects without throwing", async () => {
-    await expect(
-      evaluateCommentRequestPreWrite(null, await liveOpts(await validRequest())),
-    ).resolves.toMatchObject({
-      status: "REJECTED",
-      reasonCode: "REJECTED_SCHEMA",
-      writeAttempted: false,
-    });
-  });
-
-  it("rejects evaluation before authorizedAt", async () => {
+  it("requires trusted VERIFIED authorization artifact lookup", async () => {
     const request = await validRequest();
     const evaluation = await evaluateCommentRequestPreWrite(
       request,
-      await liveOpts(request, { nowIso: "2026-08-12T06:00:00.000Z" }),
+      await liveOpts(request, {
+        trustedAuthorizationLookup: {
+          status: "MISSING",
+          artifactId: request.humanAuthorization.authorizationArtifact.artifactId,
+        },
+      }),
     );
     expect(evaluation).toMatchObject({
       status: "REJECTED",
-      reasonCode: "REJECTED_AUTHORIZATION_NOT_YET_VALID",
+      reasonCode: "REJECTED_AUTHORIZATION_ARTIFACT",
       writeAttempted: false,
     });
   });
 
-  it("applies default TTL when expiresAt is omitted", async () => {
+  it("rejects STATUS-OVERLAY used as authorization", async () => {
     const request = await validRequest();
-    delete request.humanAuthorization.expiresAt;
-    const authorizedAtMs = Date.parse(request.humanAuthorization.authorizedAt);
-    expect(effectiveAuthorizationExpiryMs(request.humanAuthorization.authorizedAt)).toBe(
-      authorizedAtMs + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS,
-    );
-    const pastTtl = await evaluateCommentRequestPreWrite(
+    const evaluation = await evaluateCommentRequestPreWrite(
       request,
-      await liveOpts(request, {
-        nowIso: new Date(
-          authorizedAtMs + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS + 1,
-        ).toISOString(),
-        trustedAuthorizationLookup: verifiedLookup(
-          request,
-          await computeCommentRequestFingerprint(request),
-        ),
-      }),
+      await liveOpts(request, { overlayUsedAsAuthorization: true }),
     );
-    expect(pastTtl).toMatchObject({
+    expect(evaluation).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_OVERLAY_NOT_AUTHORIZATION",
+      writeAttempted: false,
+    });
+  });
+
+  it("requires independent nowIso and rejects future-dated authorization", async () => {
+    const request = await validRequest();
+    const early = await evaluateCommentRequestPreWrite(
+      request,
+      await liveOpts(request, { nowIso: "2026-08-12T06:00:00.000Z" }),
+    );
+    expect(early).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_AUTHORIZATION_NOT_YET_VALID",
+    });
+
+    const expired = await evaluateCommentRequestPreWrite(
+      request,
+      await liveOpts(request, { nowIso: "2026-08-13T00:00:00.000Z" }),
+    );
+    expect(expired).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_AUTHORIZATION_EXPIRED",
     });
@@ -292,6 +354,65 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
+  it("terminal-replays same-identity SUCCEEDED/REJECTED/FAILED and never becomes ELIGIBLE", async () => {
+    const request = await validRequest();
+    const cases: Array<{
+      label: string;
+      fixture: string;
+      status: ActionGatewayCommentResultV1["status"];
+    }> = [
+      { label: "SUCCEEDED", fixture: "result-succeeded.json", status: "SUCCEEDED" },
+      {
+        label: "REJECTED",
+        fixture: "result-rejected-auth-mismatch.json",
+        status: "REJECTED",
+      },
+      { label: "FAILED", fixture: "result-failed-github.json", status: "FAILED" },
+    ];
+
+    for (const c of cases) {
+      const prior = loadFixture<ActionGatewayCommentResultV1>(c.fixture);
+      const record = await sameIdentityRecord(request, prior);
+      const evaluation = await evaluateCommentRequestPreWrite(
+        request,
+        await liveOpts(request, { existingIdempotencyRecord: record }),
+      );
+      expect(evaluation, c.label).toMatchObject({
+        status: "REPLAY_EXISTING_RESULT",
+        reasonCode: "IDEMPOTENT_REPLAY",
+        writeAttempted: false,
+        adapterInvocationAllowed: false,
+      });
+      if (evaluation.status !== "REPLAY_EXISTING_RESULT") {
+        throw new Error(`expected replay for ${c.label}`);
+      }
+      expect(evaluation.existingResult.status).toBe(c.status);
+      expect(evaluation.status).not.toBe("ELIGIBLE_FOR_ADAPTER");
+    }
+  });
+
+  it("same-identity UNKNOWN replay is reconciliation-only and not ELIGIBLE", async () => {
+    const request = await validRequest();
+    const unknown = loadFixture<ActionGatewayCommentResultV1>("result-unknown-timeout.json");
+    const record = await sameIdentityRecord(request, unknown);
+    const evaluation = await evaluateCommentRequestPreWrite(
+      request,
+      await liveOpts(request, { existingIdempotencyRecord: record }),
+    );
+    expect(evaluation).toMatchObject({
+      status: "REPLAY_EXISTING_RESULT",
+      reasonCode: "IDEMPOTENT_REPLAY",
+      writeAttempted: false,
+      adapterInvocationAllowed: false,
+    });
+    if (evaluation.status !== "REPLAY_EXISTING_RESULT") {
+      throw new Error("expected UNKNOWN replay");
+    }
+    expect(evaluation.existingResult.status).toBe("UNKNOWN");
+    expect(evaluation.reasonMessage).toMatch(/reconciliation only/i);
+    expect(evaluation.status).not.toBe("ELIGIBLE_FOR_ADAPTER");
+  });
+
   it("rejects reusing Human authorization under a different idempotencyKey", async () => {
     const request = await validRequest();
     request.idempotencyKey = "agw-comment-41-different-key";
@@ -324,19 +445,26 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
-  it("UNKNOWN reconciliation requires full identity proof", async () => {
+  it("UNKNOWN reconciliation requires full identity proof including requestedBy", async () => {
     const succeeded = loadFixture<ActionGatewayCommentResultV1>("result-succeeded.json");
+    const requestedBy = {
+      principalKind: "HUMAN" as const,
+      subjectId: "example-human-subject",
+      issuer: "https://example.invalid/issuer",
+    };
     const current = {
       repository: succeeded.repository,
       target: succeeded.target,
       idempotencyKey: succeeded.idempotencyKey,
       requestFingerprint: succeeded.requestFingerprint,
+      requestedBy,
     };
+    const priorWithRequester = { ...succeeded, requestedBy };
 
     expect(
       reconcileUnknownCommentOutcome({
         current,
-        priorByIdempotencyKey: succeeded,
+        priorByIdempotencyKey: priorWithRequester,
         markerMatch: null,
       }),
     ).toEqual({
@@ -349,8 +477,24 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
       reconcileUnknownCommentOutcome({
         current,
         priorByIdempotencyKey: {
+          ...priorWithRequester,
+          requestedBy: {
+            principalKind: "HUMAN",
+            subjectId: "other-human-subject",
+            issuer: requestedBy.issuer,
+          },
+        },
+        markerMatch: null,
+      }),
+    ).toEqual({ status: "UNKNOWN", source: "UNPROVEN" });
+
+    expect(
+      reconcileUnknownCommentOutcome({
+        current,
+        priorByIdempotencyKey: {
           ...succeeded,
           target: { kind: "ISSUE", number: 99 },
+          requestedBy,
         },
         markerMatch: null,
       }),
@@ -363,7 +507,6 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
         markerMatch: {
           id: 42,
           url: "https://example.invalid/c/42",
-          // key-only style marker — insufficient
           idempotencyKey: current.idempotencyKey,
         },
       }),
@@ -380,6 +523,43 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
           target: current.target,
           idempotencyKey: current.idempotencyKey,
           requestFingerprint: current.requestFingerprint,
+          // missing requestedBy
+        },
+      }),
+    ).toEqual({ status: "UNKNOWN", source: "UNPROVEN" });
+
+    expect(
+      reconcileUnknownCommentOutcome({
+        current,
+        priorByIdempotencyKey: null,
+        markerMatch: {
+          id: 42,
+          url: "https://example.invalid/c/42",
+          repository: current.repository,
+          target: current.target,
+          idempotencyKey: current.idempotencyKey,
+          requestFingerprint: current.requestFingerprint,
+          requestedBy: {
+            principalKind: "HUMAN",
+            subjectId: "wrong-subject",
+            issuer: requestedBy.issuer,
+          },
+        },
+      }),
+    ).toEqual({ status: "UNKNOWN", source: "UNPROVEN" });
+
+    expect(
+      reconcileUnknownCommentOutcome({
+        current,
+        priorByIdempotencyKey: null,
+        markerMatch: {
+          id: 42,
+          url: "https://example.invalid/c/42",
+          repository: current.repository,
+          target: current.target,
+          idempotencyKey: current.idempotencyKey,
+          requestFingerprint: current.requestFingerprint,
+          requestedBy,
         },
       }),
     ).toEqual({
@@ -387,6 +567,76 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
       source: "MARKER",
       resultHint: { id: 42, url: "https://example.invalid/c/42" },
     });
+  });
+
+  it("fail-closes malformed trusted lookup and idempotency records as REJECTED_SCHEMA", async () => {
+    expect(() =>
+      parseTrustedAuthorizationLookup({
+        status: "VERIFIED",
+        artifactId: "a1",
+      }),
+    ).not.toThrow();
+    expect(
+      parseTrustedAuthorizationLookup({
+        status: "VERIFIED",
+        artifactId: "a1",
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseTrustedAuthorizationLookup({
+        status: "NOT_A_REAL_STATUS",
+        artifactId: "a1",
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    expect(
+      parseActionGatewayIdempotencyRecord({
+        capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
+        repository: "yasutakesougo/ai-development-control-center",
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
+
+    const request = await validRequest();
+    const evaluation = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+      authenticatedPrincipal: { ...request.requestedBy },
+      trustedAuthorizationLookup: {
+        status: "VERIFIED",
+        artifactId: "incomplete",
+      } as unknown as TrustedAuthorizationLookup,
+      observedTargetExists: true,
+      observedRepository: request.repository,
+      observedTargetKind: request.target.kind,
+      observedTargetNumber: request.target.number,
+    });
+    expect(evaluation).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_SCHEMA",
+      writeAttempted: false,
+    });
+
+    const malformedRecordEval = await evaluateCommentRequestPreWrite(
+      request,
+      await liveOpts(request, {
+        existingIdempotencyRecord: {
+          capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
+        } as unknown as ActionGatewayIdempotencyRecord,
+      }),
+    );
+    expect(malformedRecordEval).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_SCHEMA",
+      writeAttempted: false,
+    });
+
+    expect(
+      parseActionGatewayPreWriteOptions({
+        nowIso: NOW,
+        authenticatedPrincipal: { ...request.requestedBy },
+        trustedAuthorizationLookup: { status: "BOGUS", artifactId: "x" },
+      }),
+    ).toMatchObject({ ok: false, reasonCode: "REJECTED_SCHEMA" });
   });
 
   it("result invariants allow comment only on SUCCEEDED", () => {

@@ -344,11 +344,15 @@ live re-observation:
   observedRepository/kind/number == request target
   + if expected targetNodeId/title set → live observed values required and equal
 idempotency existing record (if any):
-  same repository + target + fingerprint + requestedBy + key → REPLAY
+  same repository + target + fingerprint + requestedBy + key
+    → terminal REPLAY_EXISTING_RESULT (adapterInvocationAllowed=false)
+    → reuse prior store result; never ELIGIBLE_FOR_ADAPTER / no second POST
+    → if prior is UNKNOWN → reconciliation only (§6); remain UNKNOWN unless positive proof
   else → REJECTED_IDEMPOTENCY_CONFLICT
 ```
 
-Any failure ⇒ `REJECTED` / no adapter call.
+Any failure ⇒ `REJECTED` / no adapter call. Same-identity REPLAY is also non-adapter
+(terminal reuse / reconciliation), never a write eligibility path.
 
 ---
 
@@ -369,17 +373,27 @@ idempotency scope =
 | Situation | Required behavior |
 |---|---|
 | First attempt, all checks pass, write confirmed | Store terminal `SUCCEEDED` under key **with** repository/target/fingerprint/requestedBy; return comment id/url |
-| Retry with **same** key after `SUCCEEDED` and **same** identity | Return prior `SUCCEEDED` (**no** second GitHub POST) |
+| Retry with **same** key after `SUCCEEDED` and **same** identity | Pre-write returns `REPLAY_EXISTING_RESULT` / `IDEMPOTENT_REPLAY` with prior `SUCCEEDED`; **`adapterInvocationAllowed=false`**; **no** second GitHub POST |
 | Same key, **different** fingerprint/target/repository/requestedBy | `REJECTED_IDEMPOTENCY_CONFLICT` (do not replay foreign result) |
-| Retry with **same** key after `REJECTED` (same identity) | Return prior `REJECTED` (deterministic); do not invent success |
-| Retry with **same** key after `FAILED` (same identity) | Return prior `FAILED` unless a later Human-authorized recovery design says otherwise (V1: no auto-retry write) |
-| Retry with **same** key while prior is `UNKNOWN` (same identity) | Run **reconciliation only** (§6); do not blindly POST again |
+| Retry with **same** key after `REJECTED` (same identity) | Terminal replay of prior `REJECTED`; adapter forbidden; do not invent success |
+| Retry with **same** key after `FAILED` (same identity) | Terminal replay of prior `FAILED`; adapter forbidden (V1: no auto-retry write) |
+| Retry with **same** key while prior is `UNKNOWN` (same identity) | Terminal replay arm with prior `UNKNOWN`; **reconciliation only** (§6); **never** `ELIGIBLE_FOR_ADAPTER`; do not blindly POST again |
 | Different key, same content fingerprint | **Forbidden** with the prior Human auth/artifact. Requires a **new** authorization + artifact whose `authorizedIdempotencyKey` equals the new key |
 | Missing / empty idempotencyKey | `REJECTED` |
 | Auth `authorizedIdempotencyKey` ≠ request key | `REJECTED_IDEMPOTENCY_KEY_MISMATCH` |
 
 Duplicate publication for the same `idempotencyKey` is **forbidden**.
 One Human authorization + trusted artifact authorizes **exactly one** idempotencyKey.
+
+Pre-write evaluation is a discriminated union:
+
+```text
+REJECTED
+REPLAY_EXISTING_RESULT   // same-identity prior result reused; adapterInvocationAllowed=false
+ELIGIBLE_FOR_ADAPTER     // only when no existing same-identity record
+```
+
+`REPLAY_EXISTING_RESULT` must never become `ELIGIBLE_FOR_ADAPTER`.
 
 ---
 
@@ -395,17 +409,28 @@ One Human authorization + trusted artifact authorizes **exactly one** idempotenc
 ### UNKNOWN reconciliation (mandatory)
 
 On `UNKNOWN` or UNKNOWN retry, promotion to `SUCCEEDED` requires **positive proof
-stronger than ordinary validation**:
+stronger than ordinary validation**. Same-identity UNKNOWN replay from pre-write is
+**reconciliation-only**: adapter invocation remains forbidden; the outcome stays
+`UNKNOWN` unless proof below succeeds (never silently collapse UNKNOWN → SUCCEEDED).
 
 ```text
+Proof identity (ALL required):
+  repository
+  + target.kind + target.number
+  + idempotencyKey
+  + requestFingerprint
+  + requestedBy (requester scope; fingerprint intentionally excludes this)
+
 1. Look up idempotency store for a prior terminal SUCCEEDED under the same scope
-   where ALL of the following match the current request:
-     repository, target.kind, target.number, idempotencyKey, requestFingerprint
+   where ALL proof-identity fields match the current request (incl. requestedBy).
+   Prior proof objects must carry requestedBy for exact principal comparison.
    - If found → return that SUCCEEDED (no new write).
 2. Marker search (optional): a candidate comment must embed / carry proof of
-     repository + target + idempotencyKey + requestFingerprint
-   (not merely the raw key string). Exactly one full match → SUCCEEDED.
-3. Partial matches (key-only, wrong target, wrong fingerprint) remain UNKNOWN.
+     repository + target + idempotencyKey + requestFingerprint + requestedBy
+   (not merely the raw key string, and not key+fingerprint alone).
+   Exactly one full match → SUCCEEDED.
+3. Partial matches (key-only, wrong target, wrong fingerprint, wrong/missing
+   requestedBy) remain UNKNOWN.
 4. Do NOT automatically POST again unless reconciliation proves no prior success
    AND a later Human-authorized recovery slice explicitly allows a new attempt
    (NOT AUTHORIZED in this design-only slice).
@@ -496,7 +521,8 @@ detail; design requires a deny-on-secret-scan hook before write).
 | Auth reused under a different requestedBy / scope | `authorizedRequestedBy` + authenticatedPrincipal exact match |
 | Caller forges humanAuthorization JSON | Trusted `authorizationArtifact` + server-side VERIFIED lookup required |
 | Same idempotencyKey, different target/fingerprint | `REJECTED_IDEMPOTENCY_CONFLICT` |
-| UNKNOWN promoted from foreign prior/marker | Require repository+target+key+fingerprint proof |
+| Same-identity REPLAY treated as adapter-eligible | Pre-write `REPLAY_EXISTING_RESULT`; `adapterInvocationAllowed=false` |
+| UNKNOWN promoted from foreign prior/marker | Require repository+target+key+fingerprint+**requestedBy** proof |
 | Clock derived from `authorizedAt` skips expiry | Independent required `nowIso`; default TTL always applied when `expiresAt` omitted |
 | Future-dated authorization used early | `authorizedAt <= nowIso <= expiry` |
 | Skipping live target probe / identity | existence + repository/kind/number required; expected nodeId/title require live values |

@@ -217,6 +217,21 @@ export interface ActionGatewayEvaluationRejected {
   writeAttempted: false;
 }
 
+/**
+ * Same-identity idempotency REPLAY is terminal for pre-write evaluation.
+ * Reuses the prior store result; never allows adapter invocation or a second POST.
+ * When existingResult.status is UNKNOWN, callers must run reconciliation only.
+ */
+export interface ActionGatewayEvaluationReplay {
+  status: "REPLAY_EXISTING_RESULT";
+  reasonCode: "IDEMPOTENT_REPLAY";
+  reasonMessage: string;
+  requestFingerprint: string;
+  writeAttempted: false;
+  adapterInvocationAllowed: false;
+  existingResult: ActionGatewayCommentResultV1;
+}
+
 export interface ActionGatewayEvaluationEligible {
   status: "ELIGIBLE_FOR_ADAPTER";
   reasonCode: "ELIGIBLE";
@@ -228,6 +243,7 @@ export interface ActionGatewayEvaluationEligible {
 
 export type ActionGatewayPreWriteEvaluation =
   | ActionGatewayEvaluationRejected
+  | ActionGatewayEvaluationReplay
   | ActionGatewayEvaluationEligible;
 
 /**
@@ -572,13 +588,17 @@ export function parseActionGatewayCommentRequest(
       "targetTitle",
     ]) ||
     typeof expected.repository !== "string" ||
+    expected.repository.length < 1 ||
     !isTargetKind(expected.targetKind) ||
     typeof expected.targetNumber !== "number" ||
     !Number.isInteger(expected.targetNumber) ||
     expected.targetNumber < 1 ||
     expected.targetExists !== true ||
-    (expected.targetNodeId !== undefined && typeof expected.targetNodeId !== "string") ||
-    (expected.targetTitle !== undefined && typeof expected.targetTitle !== "string")
+    (expected.targetNodeId !== undefined &&
+      (typeof expected.targetNodeId !== "string" ||
+        expected.targetNodeId.length < 1)) ||
+    (expected.targetTitle !== undefined &&
+      (typeof expected.targetTitle !== "string" || expected.targetTitle.length < 1))
   ) {
     return {
       ok: false,
@@ -591,6 +611,157 @@ export function parseActionGatewayCommentRequest(
     ok: true,
     request: value as unknown as ActionGatewayCommentRequestV1,
   };
+}
+
+const TRUSTED_LOOKUP_VERIFIED_KEYS = [
+  "status",
+  "artifactId",
+  "boundCapabilityId",
+  "boundRepository",
+  "boundTarget",
+  "boundRequestFingerprint",
+  "boundIdempotencyKey",
+  "boundRequestedBy",
+  "boundAuthorizedAt",
+  "boundExpiresAt",
+] as const;
+
+const TRUSTED_LOOKUP_NON_VERIFIED_KEYS = ["status", "artifactId"] as const;
+
+const IDEMPOTENCY_RECORD_KEYS = [
+  "capabilityId",
+  "repository",
+  "target",
+  "requestFingerprint",
+  "idempotencyKey",
+  "requestedBy",
+  "result",
+] as const;
+
+/**
+ * Structural fail-closed parse for trusted authorization lookup options.
+ * Malformed nested objects never throw; callers get REJECTED_SCHEMA.
+ */
+export function parseTrustedAuthorizationLookup(
+  value: unknown,
+):
+  | { ok: true; lookup: TrustedAuthorizationLookup }
+  | { ok: false; reasonCode: "REJECTED_SCHEMA"; reasonMessage: string } {
+  if (!isPlainObject(value)) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "trustedAuthorizationLookup must be a JSON object.",
+    };
+  }
+  if (value.status === "VERIFIED") {
+    if (!hasOnlyKeys(value, TRUSTED_LOOKUP_VERIFIED_KEYS)) {
+      return {
+        ok: false,
+        reasonCode: "REJECTED_SCHEMA",
+        reasonMessage: "VERIFIED trustedAuthorizationLookup contains unknown properties.",
+      };
+    }
+    if (
+      typeof value.artifactId !== "string" ||
+      value.artifactId.length < 1 ||
+      value.boundCapabilityId !== GITHUB_COMMENT_CREATE_CAPABILITY_ID ||
+      typeof value.boundRepository !== "string" ||
+      value.boundRepository.length < 1 ||
+      !isTarget(value.boundTarget) ||
+      typeof value.boundRequestFingerprint !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.boundRequestFingerprint) ||
+      !validIdempotencyKey(value.boundIdempotencyKey) ||
+      !isPrincipal(value.boundRequestedBy) ||
+      typeof value.boundAuthorizedAt !== "string" ||
+      value.boundAuthorizedAt.length < 1 ||
+      (value.boundExpiresAt !== undefined &&
+        (typeof value.boundExpiresAt !== "string" || value.boundExpiresAt.length < 1))
+    ) {
+      return {
+        ok: false,
+        reasonCode: "REJECTED_SCHEMA",
+        reasonMessage: "VERIFIED trustedAuthorizationLookup bindings are malformed.",
+      };
+    }
+    return { ok: true, lookup: value as unknown as TrustedAuthorizationLookup };
+  }
+  if (
+    value.status === "MISSING" ||
+    value.status === "MISMATCH" ||
+    value.status === "REVOKED" ||
+    value.status === "EXPIRED"
+  ) {
+    if (!hasOnlyKeys(value, TRUSTED_LOOKUP_NON_VERIFIED_KEYS)) {
+      return {
+        ok: false,
+        reasonCode: "REJECTED_SCHEMA",
+        reasonMessage: "Non-VERIFIED trustedAuthorizationLookup contains unknown properties.",
+      };
+    }
+    if (typeof value.artifactId !== "string" || value.artifactId.length < 1) {
+      return {
+        ok: false,
+        reasonCode: "REJECTED_SCHEMA",
+        reasonMessage: "Non-VERIFIED trustedAuthorizationLookup.artifactId is malformed.",
+      };
+    }
+    return { ok: true, lookup: value as unknown as TrustedAuthorizationLookup };
+  }
+  return {
+    ok: false,
+    reasonCode: "REJECTED_SCHEMA",
+    reasonMessage: "trustedAuthorizationLookup.status is unsupported.",
+  };
+}
+
+/**
+ * Structural fail-closed parse for an existing idempotency-store record.
+ */
+export function parseActionGatewayIdempotencyRecord(
+  value: unknown,
+):
+  | { ok: true; record: ActionGatewayIdempotencyRecord }
+  | { ok: false; reasonCode: "REJECTED_SCHEMA"; reasonMessage: string } {
+  if (!isPlainObject(value)) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "existingIdempotencyRecord must be a JSON object.",
+    };
+  }
+  if (!hasOnlyKeys(value, IDEMPOTENCY_RECORD_KEYS)) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "existingIdempotencyRecord contains unknown properties.",
+    };
+  }
+  if (
+    value.capabilityId !== GITHUB_COMMENT_CREATE_CAPABILITY_ID ||
+    typeof value.repository !== "string" ||
+    value.repository.length < 1 ||
+    !isTarget(value.target) ||
+    typeof value.requestFingerprint !== "string" ||
+    !/^[a-f0-9]{64}$/.test(value.requestFingerprint) ||
+    !validIdempotencyKey(value.idempotencyKey) ||
+    !isPrincipal(value.requestedBy)
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: "existingIdempotencyRecord identity fields are malformed.",
+    };
+  }
+  const resultErrors = assertCommentResultInvariants(value.result);
+  if (resultErrors.length > 0) {
+    return {
+      ok: false,
+      reasonCode: "REJECTED_SCHEMA",
+      reasonMessage: `existingIdempotencyRecord.result is malformed: ${resultErrors.join(",")}.`,
+    };
+  }
+  return { ok: true, record: value as unknown as ActionGatewayIdempotencyRecord };
 }
 
 export function parseActionGatewayPreWriteOptions(
@@ -619,14 +790,30 @@ export function parseActionGatewayPreWriteOptions(
       reasonMessage: "Evaluation options.authenticatedPrincipal is required and malformed.",
     };
   }
-  if (!isPlainObject(value.trustedAuthorizationLookup)) {
-    return {
-      ok: false,
-      reasonCode: "REJECTED_SCHEMA",
-      reasonMessage: "Evaluation options.trustedAuthorizationLookup is required.",
-    };
+  const lookupParsed = parseTrustedAuthorizationLookup(value.trustedAuthorizationLookup);
+  if (!lookupParsed.ok) {
+    return lookupParsed;
   }
-  return { ok: true, options: value as unknown as ActionGatewayPreWriteOptions };
+  let existingIdempotencyRecord: ActionGatewayIdempotencyRecord | null | undefined;
+  if (value.existingIdempotencyRecord !== undefined && value.existingIdempotencyRecord !== null) {
+    const recordParsed = parseActionGatewayIdempotencyRecord(value.existingIdempotencyRecord);
+    if (!recordParsed.ok) {
+      return recordParsed;
+    }
+    existingIdempotencyRecord = recordParsed.record;
+  } else if (value.existingIdempotencyRecord === null) {
+    existingIdempotencyRecord = null;
+  }
+  return {
+    ok: true,
+    options: {
+      ...(value as unknown as ActionGatewayPreWriteOptions),
+      trustedAuthorizationLookup: lookupParsed.lookup,
+      ...(existingIdempotencyRecord !== undefined
+        ? { existingIdempotencyRecord }
+        : {}),
+    },
+  };
 }
 
 export function effectiveAuthorizationExpiryMs(
@@ -863,6 +1050,21 @@ export async function evaluateCommentRequestPreWrite(
       fingerprint,
     );
   }
+  if (idempotency.outcome === "REPLAY") {
+    const existingResult = idempotency.record.result;
+    return {
+      status: "REPLAY_EXISTING_RESULT",
+      reasonCode: "IDEMPOTENT_REPLAY",
+      reasonMessage:
+        existingResult.status === "UNKNOWN"
+          ? "Same-identity prior result is UNKNOWN; reconciliation only — adapter invocation forbidden."
+          : "Same-identity prior terminal result reused; adapter invocation forbidden.",
+      requestFingerprint: fingerprint,
+      writeAttempted: false,
+      adapterInvocationAllowed: false,
+      existingResult,
+    };
+  }
 
   if (
     request.expectedObservations.targetExists !== true ||
@@ -977,6 +1179,8 @@ export interface UnknownReconciliationCurrent {
   target: ActionGatewayCommentTarget;
   idempotencyKey: string;
   requestFingerprint: string;
+  /** Requester scope — required; fingerprint intentionally excludes requestedBy. */
+  requestedBy: ActionGatewayPrincipal;
 }
 
 export interface UnknownReconciliationMarkerProof {
@@ -986,11 +1190,14 @@ export interface UnknownReconciliationMarkerProof {
   target: ActionGatewayCommentTarget;
   idempotencyKey: string;
   requestFingerprint: string;
+  /** Requester scope proof; missing/wrong keeps outcome UNKNOWN. */
+  requestedBy: ActionGatewayPrincipal;
 }
 
 /**
  * UNKNOWN → SUCCEEDED requires positive proof stronger than normal validation:
- * prior/marker must match repository + target + idempotencyKey + requestFingerprint.
+ * prior/marker must match repository + target + idempotencyKey + requestFingerprint
+ * + requestedBy (requester scope). Key-only or key+fingerprint-only is insufficient.
  */
 export function reconcileUnknownCommentOutcome(input: {
   current: UnknownReconciliationCurrent;
@@ -1009,6 +1216,8 @@ export function reconcileUnknownCommentOutcome(input: {
       targetsEqual(priorTarget, input.current.target) &&
       prior.idempotencyKey === input.current.idempotencyKey &&
       prior.requestFingerprint === input.current.requestFingerprint &&
+      isPrincipal(prior.requestedBy) &&
+      requestedByEqual(prior.requestedBy, input.current.requestedBy) &&
       isPlainObject(prior.comment) &&
       typeof prior.comment.id === "number" &&
       typeof prior.comment.url === "string"
@@ -1031,7 +1240,9 @@ export function reconcileUnknownCommentOutcome(input: {
       isTarget(markerTarget) &&
       targetsEqual(markerTarget, input.current.target) &&
       marker.idempotencyKey === input.current.idempotencyKey &&
-      marker.requestFingerprint === input.current.requestFingerprint
+      marker.requestFingerprint === input.current.requestFingerprint &&
+      isPrincipal(marker.requestedBy) &&
+      requestedByEqual(marker.requestedBy, input.current.requestedBy)
     ) {
       return {
         status: "SUCCEEDED",
