@@ -29,7 +29,7 @@ HISTORY-V1 is **designed** (append-only Snapshot/refresh audit) and **not
 implemented** — see [`../history/history-v1.md`](../history/history-v1.md).
 No persistence writer is enabled.
 
-STATUS-OVERLAY-V1 is **designed**; pure Runtime Generator is **implemented**
-(`src/domain/statusOverlayGenerator.ts`) — see
+STATUS-OVERLAY-V1 is **designed**; Runtime Generator and read-only GitHub /
+workflow observer are **implemented** — see
 [`../status/status-overlay-v1.md`](../status/status-overlay-v1.md).
-UI / observer / Action Gateway binding remain not implemented.
+UI / repository writer / Action Gateway binding remain not implemented.
