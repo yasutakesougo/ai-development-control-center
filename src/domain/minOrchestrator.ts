@@ -18,9 +18,10 @@ import {
   type AgentTaskValidationResultV1,
   type AgentTaskValidationStatus,
 } from "./agentTaskContract";
-import type {
-  AgentTaskBuilderResultV1,
-  AgentTaskBuilderStatus,
+import {
+  AGENT_TASK_BUILDER_VERSION,
+  type AgentTaskBuilderResultV1,
+  type AgentTaskBuilderStatus,
 } from "./agentTaskBuilder";
 
 export const MIN_ORCHESTRATOR_VERSION = "MIN-ORCHESTRATOR-V1" as const;
@@ -97,6 +98,9 @@ export type MinOrchestratorReasonCode =
   | "HOLD_UNSUPPORTED_STOP_AT"
   | "REJECT_BUILDER_INVALID"
   | "REJECT_BUILT_NULL_TASK"
+  | "REJECT_FOREIGN_BUILDER_VERSION"
+  | "REJECT_VALIDATION_SCHEMA"
+  | "REJECT_VALIDATION_TASK_BINDING"
   | "REJECT_VALIDATION_INVALID"
   | "REJECT_TASK_MALFORMED"
   | "REJECT_TASK_SEMANTICS"
@@ -520,6 +524,31 @@ export function orchestrateAgentTaskV1(
 
   // --- BUILT path: do not trust status alone ---
 
+  if (builderResult.builderVersion !== AGENT_TASK_BUILDER_VERSION) {
+    return result({
+      decision: "REJECT",
+      reasonCode: "REJECT_FOREIGN_BUILDER_VERSION",
+      reasonMessage: `BUILT result builderVersion must be ${AGENT_TASK_BUILDER_VERSION}; got ${String(builderResult.builderVersion)}.`,
+      task: builderResult.task,
+      validation: builderResult.validation,
+      ...ctx,
+    });
+  }
+
+  if (
+    builderResult.validation.schemaVersion !==
+    AGENT_TASK_VALIDATION_RESULT_SCHEMA
+  ) {
+    return result({
+      decision: "REJECT",
+      reasonCode: "REJECT_VALIDATION_SCHEMA",
+      reasonMessage: `BUILT result validation.schemaVersion must be ${AGENT_TASK_VALIDATION_RESULT_SCHEMA}.`,
+      task: builderResult.task,
+      validation: builderResult.validation,
+      ...ctx,
+    });
+  }
+
   // Inconsistent: BUILT claiming non-VALID validation before revalidation.
   const claimedValidation = builderResult.validation.status;
 
@@ -578,6 +607,18 @@ export function orchestrateAgentTaskV1(
     });
   }
 
+  // Upstream VALID must be bound to THIS task identity (not a foreign taskId).
+  if (builderResult.validation.taskId !== builderResult.task.taskId) {
+    return result({
+      decision: "REJECT",
+      reasonCode: "REJECT_VALIDATION_TASK_BINDING",
+      reasonMessage: `Builder validation.taskId (${String(builderResult.validation.taskId)}) is not bound to task.taskId (${String(builderResult.task.taskId)}); fail closed.`,
+      task: builderResult.task,
+      validation: builderResult.validation,
+      ...ctx,
+    });
+  }
+
   // Revalidate: parse → validate. Do not trust upstream status alone.
   const structural = parseAgentTaskV1(builderResult.task);
   if (!structural.ok) {
@@ -596,17 +637,33 @@ export function orchestrateAgentTaskV1(
     });
   }
 
+  const upstreamTask = builderResult.task;
   const revalidation = validateAgentTaskV1(structural.task, {
     validatedAt: revalidatedAt,
     treatPrefixOverlapAsHold: options.treatPrefixOverlapAsHold,
   });
 
-  if (revalidation.status !== builderResult.validation.status) {
+  // Compare at least task identity + validation status (validatedAt may differ).
+  if (
+    revalidation.status !== builderResult.validation.status ||
+    revalidation.taskId !== builderResult.validation.taskId
+  ) {
     return result({
       decision: "REJECT",
       reasonCode: "REJECT_REVALIDATION_MISMATCH",
-      reasonMessage: `Revalidation status ${revalidation.status} differs from builder validation ${builderResult.validation.status}; fail closed.`,
-      task: builderResult.task,
+      reasonMessage: `Revalidation (status=${revalidation.status}, taskId=${String(revalidation.taskId)}) differs from builder validation (status=${builderResult.validation.status}, taskId=${String(builderResult.validation.taskId)}); fail closed.`,
+      task: upstreamTask,
+      validation: revalidation,
+      ...ctx,
+    });
+  }
+
+  if (revalidation.taskId !== upstreamTask.taskId) {
+    return result({
+      decision: "REJECT",
+      reasonCode: "REJECT_REVALIDATION_MISMATCH",
+      reasonMessage: `Revalidation.taskId (${String(revalidation.taskId)}) is not bound to task.taskId (${upstreamTask.taskId}); fail closed.`,
+      task: upstreamTask,
       validation: revalidation,
       ...ctx,
     });
@@ -617,7 +674,7 @@ export function orchestrateAgentTaskV1(
       decision: "REJECT",
       reasonCode: "REJECT_TASK_SEMANTICS",
       reasonMessage: revalidation.reasonMessage,
-      task: builderResult.task,
+      task: upstreamTask,
       validation: revalidation,
       ...ctx,
     });
@@ -628,7 +685,7 @@ export function orchestrateAgentTaskV1(
       decision: "HOLD",
       reasonCode: "HOLD_VALIDATION",
       reasonMessage: revalidation.reasonMessage,
-      task: builderResult.task,
+      task: upstreamTask,
       validation: revalidation,
       ...ctx,
     });
@@ -639,7 +696,7 @@ export function orchestrateAgentTaskV1(
       decision: "UNKNOWN",
       reasonCode: "UNKNOWN_VALIDATION",
       reasonMessage: revalidation.reasonMessage,
-      task: builderResult.task,
+      task: upstreamTask,
       validation: revalidation,
       ...ctx,
     });
@@ -650,14 +707,14 @@ export function orchestrateAgentTaskV1(
       decision: "UNKNOWN",
       reasonCode: "UNKNOWN_ORCHESTRATOR_STATE",
       reasonMessage: "Unrecognized revalidation status; fail closed.",
-      task: builderResult.task,
+      task: upstreamTask,
       validation: revalidation,
       ...ctx,
     });
   }
 
   // Preserve upstream validated task (no rewrite / widen).
-  return applyStageRules(builderResult.task, revalidation, ctx);
+  return applyStageRules(upstreamTask, revalidation, ctx);
 }
 
 export function assertMinOrchestratorNotExecuting(): void {

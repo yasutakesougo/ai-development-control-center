@@ -128,11 +128,16 @@ dispatchEligible = (decision === DISPATCH_ELIGIBLE)
 
 Do **not** trust `builderResult.status` alone. For purported `BUILT`:
 
-1. Require non-null `task`
-2. Run `parseAgentTaskV1(task)`
-3. Run `validateAgentTaskV1(task)`
-4. Require revalidation status to match `builderResult.validation.status`
-5. Only then evaluate stage rules and possibly emit `DISPATCH_ELIGIBLE`
+1. Require `builderVersion === AGENT-TASK-BUILDER-V1`
+2. Require `validation.schemaVersion === AGENT-TASK-VALIDATION-RESULT-V1`
+3. Require claimed `validation.status` handling (`VALID` to continue; else map / fail closed)
+4. Require non-null `task`
+5. Require `validation.taskId === task.taskId` (VALID must be bound to THIS task)
+6. Run `parseAgentTaskV1(task)`
+7. Run `validateAgentTaskV1(task)`
+8. Require revalidation `status` + `taskId` to match builder validation (ignore `validatedAt`)
+9. Require `revalidation.taskId === task.taskId` and `revalidation.status === VALID`
+10. Only then evaluate stage rules and possibly emit `DISPATCH_ELIGIBLE`
 
 No silent repair of inconsistent upstream state.
 

@@ -295,7 +295,7 @@ describe("MIN-ORCHESTRATOR-V1 revalidation", () => {
     const inconsistent = syntheticBuilderResult({
       status: "BUILT",
       task: malformed,
-      validation: validationStub("VALID", "malformed"),
+      validation: validationStub("VALID", built.task!.taskId),
       reasonCode: "BUILT",
       reasonMessage: "claimed valid malformed",
     });
@@ -350,6 +350,56 @@ describe("MIN-ORCHESTRATOR-V1 revalidation", () => {
     expect(out.decision).toBe("REJECT");
     expect(out.reasonCode).toBe("REJECT_REVALIDATION_MISMATCH");
     expect(out.validation?.status).toBe("HOLD");
+  });
+});
+
+describe("MIN-ORCHESTRATOR-V1 upstream validation binding", () => {
+  it("rejects BUILT + VALID when validation.taskId != task.taskId", () => {
+    const built = builtFromBuilder();
+    const inconsistent = syntheticBuilderResult({
+      status: "BUILT",
+      task: built.task,
+      validation: validationStub("VALID", "foreign-task-id-not-bound"),
+      reasonCode: "BUILT",
+      reasonMessage: "claimed valid with foreign validation taskId",
+    });
+    const out = orchestrate(inconsistent);
+    expect(out.decision).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_VALIDATION_TASK_BINDING");
+    expect(out.metadata.dispatchEligible).toBe(false);
+  });
+
+  it("rejects BUILT with foreign builderVersion", () => {
+    const built = builtFromBuilder();
+    const inconsistent = syntheticBuilderResult({
+      status: "BUILT",
+      builderVersion: "FOREIGN-BUILDER-V0" as AgentTaskBuilderResultV1["builderVersion"],
+      task: built.task,
+      validation: built.validation,
+      reasonCode: "BUILT",
+      reasonMessage: "claimed built by foreign builder",
+    });
+    const out = orchestrate(inconsistent);
+    expect(out.decision).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_FOREIGN_BUILDER_VERSION");
+  });
+
+  it("rejects BUILT with malformed validation schemaVersion", () => {
+    const built = builtFromBuilder();
+    const badValidation: AgentTaskValidationResultV1 = {
+      ...built.validation,
+      schemaVersion: "NOT-A-VALIDATION-RESULT" as AgentTaskValidationResultV1["schemaVersion"],
+    };
+    const inconsistent = syntheticBuilderResult({
+      status: "BUILT",
+      task: built.task,
+      validation: badValidation,
+      reasonCode: "BUILT",
+      reasonMessage: "claimed built with bad validation schema",
+    });
+    const out = orchestrate(inconsistent);
+    expect(out.decision).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_VALIDATION_SCHEMA");
   });
 });
 
