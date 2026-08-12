@@ -18,6 +18,10 @@ Persistent AUTO-REFRESH is designed separately in
 workflow (`.github/workflows/architecture-auto-refresh.yml`) uses `push` to
 `main` plus `workflow_dispatch` and remains Draft-only (no Ready/Merge).
 
+HISTORY-V1 (audit of Snapshot/refresh lifecycle) is **designed** and **not
+implemented** — see [`../history/history-v1.md`](../history/history-v1.md).
+History must not alter refresh eligibility.
+
 ---
 
 ## Objective

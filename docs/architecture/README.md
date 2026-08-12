@@ -24,3 +24,7 @@ AUTO-REFRESH-V1 is **designed**; a **manual** pilot exists
 `.github/workflows/architecture-auto-refresh.yml` (`push` to `main` +
 `workflow_dispatch`) and still stops at Draft PR — see
 [`persistent-auto-refresh-v1.md`](./persistent-auto-refresh-v1.md).
+
+HISTORY-V1 is **designed** (append-only Snapshot/refresh audit) and **not
+implemented** — see [`../history/history-v1.md`](../history/history-v1.md).
+No persistence writer is enabled.

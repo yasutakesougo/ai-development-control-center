@@ -71,6 +71,11 @@ and still stops at Draft PR (no Ready/Merge automation). Snapshot staleness is
 maintenance evidence only and must never be upgraded into HANDOFF / Approval
 Ledger `ACTION_REQUIRED`.
 
+HISTORY-V1 (append-only Snapshot/refresh audit) is **designed** and **not
+implemented** — see [`../history/history-v1.md`](../history/history-v1.md).
+Historical events must not change HANDOFF decision semantics or manufacture
+`ACTION_REQUIRED`.
+
 ## Next action
 
 Fail closed:
