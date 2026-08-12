@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "AGENT-TASK-V1",
+  "taskId": "agent-task-43-contract-v1-2026-08-12",
+  "repository": "yasutakesougo/ai-development-control-center",
+  "baseRevision": "c9c8fd838c3a11fa71f68d256f94b3fc54155ce1",
+  "sourceIssue": {
+    "repository": "yasutakesougo/ai-development-control-center",
+    "number": 43
+  },
+  "objective": "Define AGENT-TASK-V1 machine-readable contract with runtime validation and tests. Contract-only slice — no Agent execution or GitHub publication.",
+  "allowedPaths": [
+    "docs/agent-task/",
+    "src/domain/agentTaskContract.ts",
+    "test/agentTaskContract.test.ts"
+  ],
+  "forbiddenPaths": [
+    ".github/workflows/",
+    "wrangler.jsonc",
+    "migrations/"
+  ],
+  "acceptanceCriteria": [
+    "Canonical JSON Schema exists for AgentTaskV1 and AgentTaskValidationResultV1",
+    "TypeScript contract mirrors schema with fail-closed runtime parsers",
+    "Contract tests cover positive and negative cases",
+    "npm run verify passes",
+    "No Agent execution or GitHub mutation capability is added"
+  ],
+  "verificationCommands": [
+    {
+      "id": "verify.all",
+      "command": "npm run verify",
+      "description": "Typecheck, test, and build"
+    }
+  ],
+  "allowedCapabilities": [],
+  "riskClass": "R1",
+  "stopAt": "DRAFT_PR",
+  "constraints": {
+    "maxChangedFiles": 32,
+    "maxAddedLines": 5000,
+    "requireIndependentVerify": true
+  },
+  "metadata": {
+    "createdAt": "2026-08-12T09:36:30.000Z",
+    "createdBy": "control-center-builder-v0",
+    "sourceIssueUrl": "https://github.com/yasutakesougo/ai-development-control-center/issues/43",
+    "builderVersion": "NOT_IMPLEMENTED",
+    "notes": [
+      "Slice 1 contract foundation only",
+      "Agent execution = NOT IMPLEMENTED"
+    ]
+  }
+}
