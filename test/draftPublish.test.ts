@@ -1057,4 +1057,74 @@ describe("DRAFT-PUBLISH-V1 P1 evidence revalidation + branch binding", () => {
     expect(out.status).toBe("REJECT");
     expect(out.reasonCode).toBe("REJECT_EVIDENCE_PR_URL");
   });
+
+  it("P1. prepare ok=true + branchPrepared=false → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        phaseOverrides: { prepare: { branchPrepared: false } },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_PHASE_BRANCH_NOT_PREPARED");
+  });
+
+  it("P1. write ok=true + wrong written paths → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        phaseOverrides: {
+          write: { verifiedPathsWritten: [ALLOWED_DOC] },
+        },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_PHASE_PATH_MISMATCH");
+  });
+
+  it("P1. commit ok=true + commitCreated=false → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        phaseOverrides: { commit: { commitCreated: false } },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_PHASE_COMMIT_NOT_CREATED");
+  });
+
+  it("P1. commit headRevision mismatch → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        phaseOverrides: { commit: { headRevision: OTHER_HEAD } },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_PHASE_HEAD_MISMATCH");
+  });
+
+  it("P1. publish PR number != collected PR number → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: { draftPrNumber: 9999 },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_PHASE_MISMATCH");
+  });
+
+  it("P1. publish PR URL != collected PR URL → fail closed", () => {
+    const task = eligibleTask();
+    const out = publish(task, {
+      adapter: createFakeDraftPublishAdapterV1({
+        evidenceOverrides: {
+          draftPrUrl: "https://example.invalid/other/pull/1",
+        },
+      }),
+    });
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_EVIDENCE_PHASE_MISMATCH");
+  });
 });

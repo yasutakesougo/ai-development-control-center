@@ -159,6 +159,16 @@ export interface FakeDraftPublishAdapterOptionsV1 {
   forceDraftFalse?: boolean;
   /** Override fields on collected evidence for negative evidence-boundary tests. */
   evidenceOverrides?: Partial<DraftPublishEvidenceV1>;
+  /**
+   * Override fields on phase ok=true results for phase/evidence binding tests.
+   * Applied after the phase succeeds so domain must revalidate phase payloads.
+   */
+  phaseOverrides?: {
+    prepare?: Partial<DraftPublishPrepareBranchResultV1>;
+    write?: Partial<DraftPublishWriteResultV1>;
+    commit?: Partial<DraftPublishCommitResultV1>;
+    publish?: Partial<DraftPublishPublishResultV1>;
+  };
   failureReasonCode?: string;
   failureReasonMessage?: string;
   /**
@@ -206,6 +216,7 @@ export function createFakeDraftPublishAdapterV1(
   const failAt = options.failAt;
   const forceDraftFalse = options.forceDraftFalse === true;
   const evidenceOverrides = options.evidenceOverrides ?? {};
+  const phaseOverrides = options.phaseOverrides ?? {};
   const failureReasonCode = options.failureReasonCode ?? "ADAPTER_FAILURE";
   const failureReasonMessage =
     options.failureReasonMessage ?? "Fake draft-publish adapter forced failure.";
@@ -250,7 +261,11 @@ export function createFakeDraftPublishAdapterV1(
         };
       }
       branchPrepared = true;
-      return { ok: true, branchPrepared: true };
+      return {
+        ok: true,
+        branchPrepared: true,
+        ...phaseOverrides.prepare,
+      };
     },
 
     writeVerifiedChanges(ctx) {
@@ -264,7 +279,15 @@ export function createFakeDraftPublishAdapterV1(
       }
       // Write only the verified source paths — never invent additional paths.
       verifiedPathsWritten = [...ctx.sourceArtifact.changedPaths];
-      return { ok: true, verifiedPathsWritten: [...verifiedPathsWritten] };
+      const result = {
+        ok: true as const,
+        verifiedPathsWritten: [...verifiedPathsWritten],
+        ...phaseOverrides.write,
+      };
+      if (Array.isArray(result.verifiedPathsWritten)) {
+        verifiedPathsWritten = [...result.verifiedPathsWritten];
+      }
+      return result;
     },
 
     createCommit(ctx) {
@@ -279,7 +302,19 @@ export function createFakeDraftPublishAdapterV1(
       }
       commitCreated = true;
       headRevision = ctx.sourceArtifact.headRevision;
-      return { ok: true, commitCreated: true, headRevision };
+      const result = {
+        ok: true as const,
+        commitCreated: true,
+        headRevision,
+        ...phaseOverrides.commit,
+      };
+      if (typeof result.commitCreated === "boolean") {
+        commitCreated = result.commitCreated;
+      }
+      if (typeof result.headRevision === "string" || result.headRevision === null) {
+        headRevision = result.headRevision;
+      }
+      return result;
     },
 
     publishDraftPr(ctx) {
@@ -321,6 +356,7 @@ export function createFakeDraftPublishAdapterV1(
           draftPrNumber,
           draftPrUrl,
           draft: draftFlag,
+          ...phaseOverrides.publish,
         };
       }
 
@@ -339,12 +375,23 @@ export function createFakeDraftPublishAdapterV1(
         observedBaseRevision:
           observedBaseRevision ?? ctx.sourceArtifact.baseRevision,
       });
-      return {
-        ok: true,
+      const result = {
+        ok: true as const,
         draftPrNumber,
         draftPrUrl,
         draft: draftFlag,
+        ...phaseOverrides.publish,
       };
+      if (typeof result.draftPrNumber === "number" || result.draftPrNumber === null) {
+        draftPrNumber = result.draftPrNumber;
+      }
+      if (typeof result.draftPrUrl === "string" || result.draftPrUrl === null) {
+        draftPrUrl = result.draftPrUrl;
+      }
+      if (typeof result.draft === "boolean") {
+        draftFlag = result.draft;
+      }
+      return result;
     },
 
     collectPublicationEvidence(ctx) {

@@ -95,19 +95,28 @@ proposedDraftPr.headBranch === sourceArtifact.branchName
 proposedDraftPr.baseBranch === sourceArtifact.baseBranch
 ```
 
-Adapter evidence is untrusted and revalidated before `PUBLISHED_DRAFT`:
+Adapter evidence is untrusted and revalidated before `PUBLISHED_DRAFT`.
+Each phase `ok=true` payload is also revalidated, then evidence must match
+those phase payloads exactly:
 
 ```text
-observedBaseRevision === expectedTask.baseRevision
-branchPrepared === true
-commitCreated === true
-verifiedPathsWritten == exact set sourceArtifact.changedPaths
-headRevision === expected/committed headRevision
-draftPrNumber = valid positive integer
-draftPrUrl = non-empty bounded string
-draft === true
-```
+prepareBranch.branchPrepared === true
+writeVerifiedChanges.verifiedPathsWritten == exact set sourceArtifact.changedPaths
+createCommit.commitCreated === true
+createCommit.headRevision === sourceArtifact.headRevision
+publishDraftPr.draft === true
+publishDraftPr.draftPrNumber = valid positive integer
+publishDraftPr.draftPrUrl = non-empty bounded string
 
+evidence.observedBaseRevision === expectedTask.baseRevision
+evidence.branchPrepared === prepareBranch.branchPrepared
+evidence.verifiedPathsWritten === writeVerifiedChanges.verifiedPathsWritten
+evidence.commitCreated === createCommit.commitCreated
+evidence.headRevision === createCommit.headRevision
+evidence.draftPrNumber === publishDraftPr.draftPrNumber
+evidence.draftPrUrl === publishDraftPr.draftPrUrl
+evidence.draft === publishDraftPr.draft
+```
 Verifier metadata requires exact `false` for:
 
 ```text

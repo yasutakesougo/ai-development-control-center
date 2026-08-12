@@ -156,6 +156,13 @@ export type DraftPublishReasonCode =
   | "HOLD_EVIDENCE_BASE_MISMATCH"
   | "REJECT_EVIDENCE_PR_NUMBER"
   | "REJECT_EVIDENCE_PR_URL"
+  | "REJECT_EVIDENCE_PHASE_MISMATCH"
+  | "REJECT_PHASE_BRANCH_NOT_PREPARED"
+  | "REJECT_PHASE_PATH_MISMATCH"
+  | "REJECT_PHASE_COMMIT_NOT_CREATED"
+  | "REJECT_PHASE_HEAD_MISMATCH"
+  | "REJECT_PHASE_PR_NUMBER"
+  | "REJECT_PHASE_PR_URL"
   | "REJECT_READY_AUTHORIZED"
   | "REJECT_MERGE_AUTHORIZED"
   | "REJECT_GITHUB_MUTATION_AUTHORIZED"
@@ -558,17 +565,33 @@ function checkVerifierMetadataBoundary(
 
 /**
  * Re-validate untrusted adapter evidence before PUBLISHED_DRAFT.
- * Adapter success alone is never authority.
+ * Adapter ok=true alone is never authority — phase payloads and evidence must
+ * agree with each other and with the source artifact.
  */
 function checkPublicationEvidenceBoundary(input: {
   evidence: DraftPublishEvidenceV1;
   expectedTask: AgentTaskV1;
   sourceArtifact: DraftPublishSourceArtifactV1;
-  expectedHeadRevision: string;
+  prepared: { branchPrepared: boolean };
+  written: { verifiedPathsWritten: string[] };
+  committed: { commitCreated: boolean; headRevision: string };
+  published: {
+    draft: boolean;
+    draftPrNumber: number;
+    draftPrUrl: string;
+  };
 }):
   | { ok: true }
   | { ok: false; reasonCode: DraftPublishReasonCode; reasonMessage: string } {
-  const { evidence, expectedTask, sourceArtifact, expectedHeadRevision } = input;
+  const {
+    evidence,
+    expectedTask,
+    sourceArtifact,
+    prepared,
+    written,
+    committed,
+    published,
+  } = input;
 
   if (evidence.draft !== true) {
     return {
@@ -630,11 +653,11 @@ function checkPublicationEvidenceBoundary(input: {
         "evidence.verifiedPathsWritten set !== sourceArtifact.changedPaths set; fail closed.",
     };
   }
-  if (evidence.headRevision !== expectedHeadRevision) {
+  if (evidence.headRevision !== sourceArtifact.headRevision) {
     return {
       ok: false,
       reasonCode: "REJECT_EVIDENCE_HEAD_MISMATCH",
-      reasonMessage: `evidence.headRevision (${String(evidence.headRevision)}) !== expected headRevision (${expectedHeadRevision}); fail closed.`,
+      reasonMessage: `evidence.headRevision (${String(evidence.headRevision)}) !== sourceArtifact.headRevision (${sourceArtifact.headRevision}); fail closed.`,
     };
   }
   if (
@@ -672,6 +695,69 @@ function checkPublicationEvidenceBoundary(input: {
       reasonCode: "REJECT_INPUT",
       reasonMessage:
         "Publication evidence claims network/secret/GitHub/production mutation; fail closed.",
+    };
+  }
+
+  // Phase ↔ evidence binding (adapter must not invent a second story).
+  if (evidence.branchPrepared !== prepared.branchPrepared) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_EVIDENCE_PHASE_MISMATCH",
+      reasonMessage:
+        "evidence.branchPrepared !== prepareBranch.branchPrepared; fail closed.",
+    };
+  }
+  if (
+    !changedPathSetsEqual(
+      evidence.verifiedPathsWritten,
+      written.verifiedPathsWritten,
+    )
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_EVIDENCE_PHASE_MISMATCH",
+      reasonMessage:
+        "evidence.verifiedPathsWritten !== writeVerifiedChanges.verifiedPathsWritten; fail closed.",
+    };
+  }
+  if (evidence.commitCreated !== committed.commitCreated) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_EVIDENCE_PHASE_MISMATCH",
+      reasonMessage:
+        "evidence.commitCreated !== createCommit.commitCreated; fail closed.",
+    };
+  }
+  if (evidence.headRevision !== committed.headRevision) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_EVIDENCE_PHASE_MISMATCH",
+      reasonMessage:
+        "evidence.headRevision !== createCommit.headRevision; fail closed.",
+    };
+  }
+  if (evidence.draftPrNumber !== published.draftPrNumber) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_EVIDENCE_PHASE_MISMATCH",
+      reasonMessage:
+        "evidence.draftPrNumber !== publishDraftPr.draftPrNumber; fail closed.",
+    };
+  }
+  if (evidence.draftPrUrl !== published.draftPrUrl) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_EVIDENCE_PHASE_MISMATCH",
+      reasonMessage:
+        "evidence.draftPrUrl !== publishDraftPr.draftPrUrl; fail closed.",
+    };
+  }
+  if (evidence.draft !== published.draft) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_EVIDENCE_PHASE_MISMATCH",
+      reasonMessage:
+        "evidence.draft !== publishDraftPr.draft; fail closed.",
     };
   }
   return { ok: true };
@@ -1443,6 +1529,26 @@ export function publishDraftPrV1(
       payloadFingerprint,
     });
   }
+  if (prepared.branchPrepared !== true) {
+    finishCleanup();
+    return buildResult({
+      status: "REJECT",
+      reasonCode: "REJECT_PHASE_BRANCH_NOT_PREPARED",
+      reasonMessage:
+        "prepareBranch.ok=true but branchPrepared !== true; fail closed.",
+      publicationAttemptId,
+      taskId: expectedTask.taskId,
+      repository: expectedTask.repository,
+      baseRevision: expectedTask.baseRevision,
+      headRevision: sourceArtifact.headRevision,
+      branchName: sourceArtifact.branchName,
+      taskValidation: revalidation,
+      observedAt,
+      adapterKind: adapter.kind,
+      cleanupCompleted,
+      payloadFingerprint,
+    });
+  }
 
   const written = adapter.writeVerifiedChanges(ctx);
   if (!written.ok) {
@@ -1465,6 +1571,33 @@ export function publishDraftPrV1(
       payloadFingerprint,
     });
   }
+  if (
+    !Array.isArray(written.verifiedPathsWritten) ||
+    findDuplicateChangedPaths(written.verifiedPathsWritten) !== null ||
+    !changedPathSetsEqual(
+      written.verifiedPathsWritten,
+      sourceArtifact.changedPaths,
+    )
+  ) {
+    finishCleanup();
+    return buildResult({
+      status: "REJECT",
+      reasonCode: "REJECT_PHASE_PATH_MISMATCH",
+      reasonMessage:
+        "writeVerifiedChanges.verifiedPathsWritten must exactly equal sourceArtifact.changedPaths; fail closed.",
+      publicationAttemptId,
+      taskId: expectedTask.taskId,
+      repository: expectedTask.repository,
+      baseRevision: expectedTask.baseRevision,
+      headRevision: sourceArtifact.headRevision,
+      branchName: sourceArtifact.branchName,
+      taskValidation: revalidation,
+      observedAt,
+      adapterKind: adapter.kind,
+      cleanupCompleted,
+      payloadFingerprint,
+    });
+  }
 
   const committed = adapter.createCommit(ctx);
   if (!committed.ok) {
@@ -1473,6 +1606,45 @@ export function publishDraftPrV1(
       status: "FAILED",
       reasonCode: "FAILED_ADAPTER_COMMIT",
       reasonMessage: committed.reasonMessage ?? "Adapter createCommit failed.",
+      publicationAttemptId,
+      taskId: expectedTask.taskId,
+      repository: expectedTask.repository,
+      baseRevision: expectedTask.baseRevision,
+      headRevision: sourceArtifact.headRevision,
+      branchName: sourceArtifact.branchName,
+      taskValidation: revalidation,
+      observedAt,
+      adapterKind: adapter.kind,
+      cleanupCompleted,
+      payloadFingerprint,
+    });
+  }
+  if (committed.commitCreated !== true) {
+    finishCleanup();
+    return buildResult({
+      status: "REJECT",
+      reasonCode: "REJECT_PHASE_COMMIT_NOT_CREATED",
+      reasonMessage:
+        "createCommit.ok=true but commitCreated !== true; fail closed.",
+      publicationAttemptId,
+      taskId: expectedTask.taskId,
+      repository: expectedTask.repository,
+      baseRevision: expectedTask.baseRevision,
+      headRevision: sourceArtifact.headRevision,
+      branchName: sourceArtifact.branchName,
+      taskValidation: revalidation,
+      observedAt,
+      adapterKind: adapter.kind,
+      cleanupCompleted,
+      payloadFingerprint,
+    });
+  }
+  if (committed.headRevision !== sourceArtifact.headRevision) {
+    finishCleanup();
+    return buildResult({
+      status: "REJECT",
+      reasonCode: "REJECT_PHASE_HEAD_MISMATCH",
+      reasonMessage: `createCommit.headRevision (${String(committed.headRevision)}) !== sourceArtifact.headRevision (${sourceArtifact.headRevision}); fail closed.`,
       publicationAttemptId,
       taskId: expectedTask.taskId,
       repository: expectedTask.repository,
@@ -1525,7 +1697,59 @@ export function publishDraftPrV1(
       taskId: expectedTask.taskId,
       repository: expectedTask.repository,
       baseRevision: expectedTask.baseRevision,
-      headRevision: committed.headRevision ?? sourceArtifact.headRevision,
+      headRevision: sourceArtifact.headRevision,
+      branchName: sourceArtifact.branchName,
+      draftPrNumber: published.draftPrNumber,
+      draftPrUrl: published.draftPrUrl,
+      taskValidation: revalidation,
+      observedAt,
+      adapterKind: adapter.kind,
+      cleanupCompleted,
+      payloadFingerprint,
+    });
+  }
+  if (
+    typeof published.draftPrNumber !== "number" ||
+    !Number.isInteger(published.draftPrNumber) ||
+    published.draftPrNumber < 1
+  ) {
+    finishCleanup();
+    return buildResult({
+      status: "REJECT",
+      reasonCode: "REJECT_PHASE_PR_NUMBER",
+      reasonMessage:
+        "publishDraftPr.draftPrNumber must be a valid positive integer; fail closed.",
+      publicationAttemptId,
+      taskId: expectedTask.taskId,
+      repository: expectedTask.repository,
+      baseRevision: expectedTask.baseRevision,
+      headRevision: sourceArtifact.headRevision,
+      branchName: sourceArtifact.branchName,
+      draftPrNumber: published.draftPrNumber,
+      draftPrUrl: published.draftPrUrl,
+      taskValidation: revalidation,
+      observedAt,
+      adapterKind: adapter.kind,
+      cleanupCompleted,
+      payloadFingerprint,
+    });
+  }
+  if (
+    typeof published.draftPrUrl !== "string" ||
+    published.draftPrUrl.length < 1 ||
+    published.draftPrUrl.length > 2048
+  ) {
+    finishCleanup();
+    return buildResult({
+      status: "REJECT",
+      reasonCode: "REJECT_PHASE_PR_URL",
+      reasonMessage:
+        "publishDraftPr.draftPrUrl must be a non-empty bounded string; fail closed.",
+      publicationAttemptId,
+      taskId: expectedTask.taskId,
+      repository: expectedTask.repository,
+      baseRevision: expectedTask.baseRevision,
+      headRevision: sourceArtifact.headRevision,
       branchName: sourceArtifact.branchName,
       draftPrNumber: published.draftPrNumber,
       draftPrUrl: published.draftPrUrl,
@@ -1549,7 +1773,7 @@ export function publishDraftPrV1(
       taskId: expectedTask.taskId,
       repository: expectedTask.repository,
       baseRevision: expectedTask.baseRevision,
-      headRevision: committed.headRevision ?? sourceArtifact.headRevision,
+      headRevision: sourceArtifact.headRevision,
       branchName: sourceArtifact.branchName,
       draftPrNumber: published.draftPrNumber,
       draftPrUrl: published.draftPrUrl,
@@ -1563,13 +1787,21 @@ export function publishDraftPrV1(
   }
 
   const evidence = collected.evidence;
-  const expectedHeadRevision =
-    committed.headRevision ?? sourceArtifact.headRevision;
   const evidenceCheck = checkPublicationEvidenceBoundary({
     evidence,
     expectedTask,
     sourceArtifact,
-    expectedHeadRevision,
+    prepared: { branchPrepared: prepared.branchPrepared },
+    written: { verifiedPathsWritten: written.verifiedPathsWritten },
+    committed: {
+      commitCreated: committed.commitCreated,
+      headRevision: committed.headRevision as string,
+    },
+    published: {
+      draft: published.draft,
+      draftPrNumber: published.draftPrNumber,
+      draftPrUrl: published.draftPrUrl,
+    },
   });
   if (!evidenceCheck.ok) {
     finishCleanup();
@@ -1585,7 +1817,7 @@ export function publishDraftPrV1(
       taskId: expectedTask.taskId,
       repository: expectedTask.repository,
       baseRevision: expectedTask.baseRevision,
-      headRevision: evidence.headRevision || expectedHeadRevision,
+      headRevision: evidence.headRevision || sourceArtifact.headRevision,
       branchName: sourceArtifact.branchName,
       draftPrNumber: evidence.draftPrNumber,
       draftPrUrl: evidence.draftPrUrl,
