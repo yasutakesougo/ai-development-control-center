@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-development-control-center.local/schemas/issue-proposal-v1.json",
+  "title": "IssueProposalV1",
+  "description": "Machine-readable bounded Issue proposal derived from a RoadmapNodeV1. Runtime parser must mirror this schema (additionalProperties:false). Authority fingerprint hashes proposal authority + Roadmap provenance binding. metadata/observedAt are audit-only and excluded. Semantic Roadmap/Project binding rules are enforced at runtime. Validation does not grant GitHub Issue mutation or Agent execution authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "proposalId",
+    "roadmapNodeId",
+    "repository",
+    "title",
+    "objective",
+    "dependsOn",
+    "allowedPaths",
+    "forbiddenPaths",
+    "acceptanceCriteria",
+    "verificationCommands",
+    "allowedCapabilities",
+    "riskClass",
+    "stopAt",
+    "estimatedChangedFiles",
+    "provenance"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ISSUE-PROPOSAL-V1" },
+    "proposalId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+    },
+    "roadmapNodeId": {
+      "description": "Exact RoadmapNodeV1.nodeId binding. Runtime requires membership in the supplied RoadmapContractV1.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+    },
+    "repository": {
+      "description": "Required repository binding. Runtime requires ProjectContract repository authority and equality with bound RoadmapNode.repository when that node has a repository.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 256,
+      "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "objective": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "dependsOn": {
+      "description": "Authority-bearing proposalId dependencies. Runtime rejects duplicates and self-deps. Changes alter the proposal authority fingerprint.",
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+      },
+      "uniqueItems": true
+    },
+    "allowedPaths": {
+      "description": "Required non-empty repository-relative path allowlist. Changes alter the proposal authority fingerprint.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
+      },
+      "uniqueItems": true
+    },
+    "forbiddenPaths": {
+      "description": "Repository-relative path denylist. Runtime rejects exact/prefix overlap with allowedPaths. Changes alter the proposal authority fingerprint.",
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
+      },
+      "uniqueItems": true
+    },
+    "acceptanceCriteria": {
+      "description": "Required non-empty acceptance criteria. Changes alter the proposal authority fingerprint.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": { "type": "string", "minLength": 1, "maxLength": 2048 },
+      "uniqueItems": true
+    },
+    "verificationCommands": {
+      "description": "Required non-empty verification command objects. Changes alter the proposal authority fingerprint.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "command"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "command": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "workingDirectory": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$))[^\\x00\\\\]+$"
+          },
+          "description": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "allowedCapabilities": {
+      "description": "Capability identifiers expressed as proposal data only. Validation never grants GitHub Issue mutation or Agent execution. Runtime rejects duplicates, malformed ids, and ProjectContract prohibitedCapabilities.",
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+\\.v[0-9]+$"
+      },
+      "uniqueItems": true
+    },
+    "riskClass": {
+      "description": "Authority-bearing risk band. Runtime rejects values above ProjectContract maxRiskClass when present.",
+      "enum": ["R0", "R1", "R2", "R3", "R4", "R5"]
+    },
+    "stopAt": {
+      "description": "Explicit stop boundary for later execution stages. Not publication authority.",
+      "enum": ["TASK_BUILT", "AGENT_COMPLETE", "VERIFY_COMPLETE", "DRAFT_PR"]
+    },
+    "estimatedChangedFiles": {
+      "description": "Authority-bearing estimated changed-file budget (integer 1..10000).",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "provenance": {
+      "description": "Exact RoadmapContract authority binding. Changes alter the proposal authority fingerprint.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roadmapId", "roadmapAuthorityFingerprint"],
+      "properties": {
+        "roadmapId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
+        },
+        "roadmapAuthorityFingerprint": {
+          "description": "Exact RoadmapContractV1 authority fingerprint binding (64-char lowercase SHA-256 hex).",
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "metadata": {
+      "description": "Audit / observation fields only. observedAt and other metadata MUST NOT participate in the authority fingerprint.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "createdAt": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "observedAt": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "sourceIssueUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "notes": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        }
+      }
+    }
+  }
+}
