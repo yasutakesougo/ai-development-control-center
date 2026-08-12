@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "ACTION-GATEWAY-COMMENT-REQUEST-V1",
+  "capabilityId": "github.comment.create.v1",
+  "repository": "yasutakesougo/ai-development-control-center",
+  "target": { "kind": "ISSUE", "number": 41 },
+  "body": "## Design note\n\nACTION-GATEWAY-V1 comment capability design complete for Fresh Review.",
+  "purpose": "Publish design completion evidence on Issue #41",
+  "idempotencyKey": "agw-comment-41-design-2026-08-12-a1",
+  "requestedBy": {
+    "principalKind": "HUMAN",
+    "subjectId": "example-human-subject",
+    "issuer": "https://example.invalid/issuer"
+  },
+  "humanAuthorization": {
+    "authorizedCapabilityId": "github.comment.create.v1",
+    "authorizedRepository": "yasutakesougo/ai-development-control-center",
+    "authorizedTarget": { "kind": "ISSUE", "number": 41 },
+    "authorizedRequestFingerprint": "REPLACE_WITH_COMPUTED_FINGERPRINT",
+    "authorizedIdempotencyKey": "agw-comment-41-design-2026-08-12-a1",
+    "authorizedRequestedBy": {
+      "principalKind": "HUMAN",
+      "subjectId": "example-human-subject",
+      "issuer": "https://example.invalid/issuer"
+    },
+    "authorizationArtifact": {
+      "kind": "SERVER_ISSUED_AUTHORIZATION_V1",
+      "artifactId": "authz-grant-41-a1",
+      "artifactLocator": "ledger://authorization/authz-grant-41-a1"
+    },
+    "authorizedAt": "2026-08-12T06:30:00.000Z",
+    "expiresAt": "2026-08-12T18:30:00.000Z",
+    "evidenceRefs": [
+      "https://github.com/yasutakesougo/ai-development-control-center/issues/41"
+    ]
+  },
+  "expectedObservations": {
+    "repository": "yasutakesougo/ai-development-control-center",
+    "targetKind": "ISSUE",
+    "targetNumber": 41,
+    "targetExists": true
+  }
+}

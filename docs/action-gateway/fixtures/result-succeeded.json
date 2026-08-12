@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "ACTION-GATEWAY-COMMENT-RESULT-V1",
+  "capabilityId": "github.comment.create.v1",
+  "status": "SUCCEEDED",
+  "repository": "yasutakesougo/ai-development-control-center",
+  "target": { "kind": "ISSUE", "number": 41 },
+  "comment": {
+    "id": 999001,
+    "url": "https://github.com/yasutakesougo/ai-development-control-center/issues/41#issuecomment-999001"
+  },
+  "requestFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "idempotencyKey": "agw-comment-41-design-2026-08-12-a1",
+  "authorization": {
+    "matched": true,
+    "evidenceRefs": [
+      "https://github.com/yasutakesougo/ai-development-control-center/issues/41"
+    ]
+  },
+  "timestamps": {
+    "acceptedAt": "2026-08-12T06:31:00.000Z",
+    "attemptedAt": "2026-08-12T06:31:01.000Z",
+    "completedAt": "2026-08-12T06:31:02.000Z"
+  },
+  "reasonCode": "SUCCEEDED_CREATED",
+  "reasonMessage": "Top-level Issue comment creation confirmed."
+}

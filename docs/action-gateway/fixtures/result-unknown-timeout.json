@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "ACTION-GATEWAY-COMMENT-RESULT-V1",
+  "capabilityId": "github.comment.create.v1",
+  "status": "UNKNOWN",
+  "repository": "yasutakesougo/ai-development-control-center",
+  "target": { "kind": "ISSUE", "number": 41 },
+  "requestFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "idempotencyKey": "agw-comment-41-timeout",
+  "authorization": {
+    "matched": true,
+    "evidenceRefs": [
+      "https://github.com/yasutakesougo/ai-development-control-center/issues/41"
+    ]
+  },
+  "timestamps": {
+    "acceptedAt": "2026-08-12T06:34:00.000Z",
+    "attemptedAt": "2026-08-12T06:34:01.000Z",
+    "completedAt": "2026-08-12T06:34:30.000Z"
+  },
+  "reasonCode": "UNKNOWN_GITHUB_OUTCOME",
+  "reasonMessage": "GitHub write outcome could not be proven after transport timeout; do not auto-retry."
+}
