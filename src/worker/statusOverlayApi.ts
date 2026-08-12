@@ -3,11 +3,16 @@
  *
  * GET /api/status-overlay → StatusOverlayDocument
  * Uses only GET GitHub APIs via createStatusOverlayGithubHttpClient.
+ *
+ * Unauthenticated access is fail-closed to the canonical public repository only.
  */
 
 import { PERSISTENT_WORKFLOW_PATH } from "../domain/persistentAutoRefreshContract";
 import type { HandoffReport } from "../domain/handoffReport";
-import { createStatusOverlayGithubHttpClient } from "../observer/statusOverlayGithubObserver";
+import {
+  createStatusOverlayGithubHttpClient,
+  type StatusOverlayReadonlyGithubClient,
+} from "../observer/statusOverlayGithubObserver";
 import {
   STATUS_OVERLAY_DEFAULT_REPOSITORY,
   buildStatusOverlayLocalObservation,
@@ -16,12 +21,41 @@ import {
   statusOverlayRuntimeUnavailable,
 } from "../runtime/statusOverlayRuntime";
 
+/** Canonical public repository allowed for unauthenticated STATUS-OVERLAY reads. */
+export const STATUS_OVERLAY_PUBLIC_REPOSITORY =
+  STATUS_OVERLAY_DEFAULT_REPOSITORY;
+
 export interface StatusOverlayApiEnv {
   GITHUB_TOKEN?: string;
   /** Optional override; defaults to ai-development-control-center. */
   STATUS_OVERLAY_REPOSITORY?: string;
   /** Set to "false" to disable the endpoint. */
   STATUS_OVERLAY_RUNTIME_ENABLED?: string;
+}
+
+export type StatusOverlayRepositoryGate =
+  | { allowed: true; repository: typeof STATUS_OVERLAY_PUBLIC_REPOSITORY }
+  | { allowed: false; repository: string; reason: string };
+
+/**
+ * Resolve the repository for unauthenticated /api/status-overlay.
+ * Only the canonical public control-center repository is permitted.
+ */
+export function resolveUnauthenticatedStatusOverlayRepository(
+  configured: string | undefined,
+): StatusOverlayRepositoryGate {
+  const repository = (configured?.trim() || STATUS_OVERLAY_PUBLIC_REPOSITORY).replace(
+    /^\/+|\/+$/g,
+    "",
+  );
+  if (repository === STATUS_OVERLAY_PUBLIC_REPOSITORY) {
+    return { allowed: true, repository: STATUS_OVERLAY_PUBLIC_REPOSITORY };
+  }
+  return {
+    allowed: false,
+    repository,
+    reason: `STATUS-OVERLAY unauthenticated access is limited to ${STATUS_OVERLAY_PUBLIC_REPOSITORY}; refused repository override: ${repository}`,
+  };
 }
 
 async function githubGetTextFile(
@@ -45,29 +79,77 @@ async function githubGetTextFile(
   return await response.text();
 }
 
+export interface StatusOverlayApiDeps {
+  createClient?: (env: { GITHUB_TOKEN?: string }) => StatusOverlayReadonlyGithubClient;
+  getTextFile?: (
+    repository: string,
+    path: string,
+    token?: string,
+  ) => Promise<string | null>;
+  runCycle?: typeof runStatusOverlayCycle;
+  now?: () => string;
+}
+
+function sanitizeUnavailableReason(reason: string): string {
+  return reason
+    .replace(/bearer\s+[a-z0-9._\-]+/gi, "bearer [REDACTED]")
+    .replace(/ghp_[a-zA-Z0-9]+/g, "[REDACTED_TOKEN]")
+    .replace(/github_pat_[a-zA-Z0-9_]+/g, "[REDACTED_TOKEN]");
+}
+
+function jsonResponse(body: unknown, status: number): Response {
+  const payload = JSON.stringify(body);
+  if (/ghp_[a-zA-Z0-9]+/i.test(payload) || /github_pat_[a-zA-Z0-9_]+/i.test(payload)) {
+    return Response.json(
+      statusOverlayRuntimeUnavailable("STATUS-OVERLAY refused to emit secret material"),
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  return new Response(payload, {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export async function handleStatusOverlayGet(
   env: StatusOverlayApiEnv,
+  deps: StatusOverlayApiDeps = {},
 ): Promise<Response> {
   if (env.STATUS_OVERLAY_RUNTIME_ENABLED === "false") {
-    return Response.json(
+    return jsonResponse(
       statusOverlayRuntimeUnavailable("STATUS-OVERLAY runtime disabled"),
-      { status: 404, headers: { "Cache-Control": "no-store" } },
+      404,
     );
   }
 
-  const repository =
-    env.STATUS_OVERLAY_REPOSITORY?.trim() || STATUS_OVERLAY_DEFAULT_REPOSITORY;
+  const gate = resolveUnauthenticatedStatusOverlayRepository(env.STATUS_OVERLAY_REPOSITORY);
+  if (!gate.allowed) {
+    // Fail closed BEFORE any token-backed GitHub client/API usage.
+    return jsonResponse(
+      statusOverlayRuntimeUnavailable(gate.reason),
+      403,
+    );
+  }
+
+  const repository = gate.repository;
+  const createClient = deps.createClient ?? createStatusOverlayGithubHttpClient;
+  const getTextFile = deps.getTextFile ?? githubGetTextFile;
+  const runCycle = deps.runCycle ?? runStatusOverlayCycle;
+  const now = deps.now ?? (() => new Date().toISOString());
 
   try {
-    const client = createStatusOverlayGithubHttpClient({
+    const client = createClient({
       GITHUB_TOKEN: env.GITHUB_TOKEN,
     });
     const tip = await client.getDefaultBranchTip(repository);
 
     const [snapshotRaw, workflowYaml, handoffRaw] = await Promise.all([
-      githubGetTextFile(repository, "docs/architecture/architecture.json", env.GITHUB_TOKEN),
-      githubGetTextFile(repository, PERSISTENT_WORKFLOW_PATH, env.GITHUB_TOKEN),
-      githubGetTextFile(repository, "docs/handoff/handoff.json", env.GITHUB_TOKEN),
+      getTextFile(repository, "docs/architecture/architecture.json", env.GITHUB_TOKEN),
+      getTextFile(repository, PERSISTENT_WORKFLOW_PATH, env.GITHUB_TOKEN),
+      getTextFile(repository, "docs/handoff/handoff.json", env.GITHUB_TOKEN),
     ]);
 
     const snapshot = snapshotRaw
@@ -90,22 +172,18 @@ export async function handleStatusOverlayGet(
       architectureRelevantChanges: handoff?.snapshot.architectureRelevantPaths ?? null,
     });
 
-    const document = await runStatusOverlayCycle({
+    const document = await runCycle({
       repository,
       client,
       local,
-      now: () => new Date().toISOString(),
+      now,
     });
 
-    return Response.json(document, {
-      headers: { "Cache-Control": "no-store" },
-    });
+    return jsonResponse(document, 200);
   } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "STATUS-OVERLAY runtime failed";
-    return Response.json(statusOverlayRuntimeUnavailable(reason), {
-      status: 503,
-      headers: { "Cache-Control": "no-store" },
-    });
+    const reason = sanitizeUnavailableReason(
+      error instanceof Error ? error.message : "STATUS-OVERLAY runtime failed",
+    );
+    return jsonResponse(statusOverlayRuntimeUnavailable(reason), 503);
   }
 }
