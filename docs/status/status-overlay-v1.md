@@ -1,6 +1,6 @@
 # STATUS-OVERLAY-V1
 
-**Status: DESIGNED · runtime generator IMPLEMENTED · GitHub/workflow observer IMPLEMENTED · UI IMPLEMENTED (read-only) · runtime wiring MERGED · production pilot HOLD / tip not observed after Human deploy report (see `status-overlay-v1-pilot-enablement.md`)**
+**Status: DESIGNED · runtime generator IMPLEMENTED · GitHub/workflow observer IMPLEMENTED · UI IMPLEMENTED (read-only) · runtime wiring MERGED · production pilot PASS / tip + rendered panel observed (see `status-overlay-v1-pilot-enablement.md`)**
 
 This document designs **STATUS-OVERLAY-V1**: a replaceable **current-state
 projection** that answers:
