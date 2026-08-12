@@ -624,6 +624,56 @@ describe("INDEPENDENT-VERIFY-V1 metadata / workspace boundaries", () => {
     expect(out.status).toBe("REJECT");
   });
 
+  it("P1. COMPLETED + workspaceOutcome property missing → REJECT", () => {
+    const { runnerResult, expectedTask } = completedRunner({
+      changedPaths: [ALLOWED_DOC],
+    });
+    const { workspaceOutcome: _omit, ...rest } = runnerResult;
+    void _omit;
+    const out = verifyAgentRunnerResultV1(
+      {
+        runnerResult: rest as AgentRunnerResultV1,
+        expectedTask,
+        verificationAttemptId: ATTEMPT,
+        observedAt: OBSERVED_AT,
+      },
+      {
+        adapter: createFakeIndependentVerifyAdapterV1({
+          observedChangedPaths: [ALLOWED_DOC],
+        }),
+        validatedAt: REVALIDATED_AT,
+      },
+    );
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_INPUT");
+  });
+
+  it("P1. COMPLETED + workspaceOutcome = undefined → REJECT", () => {
+    const { runnerResult, expectedTask } = completedRunner({
+      changedPaths: [ALLOWED_DOC],
+    });
+    const bad = {
+      ...runnerResult,
+      workspaceOutcome: undefined,
+    } as unknown as AgentRunnerResultV1;
+    const out = verifyAgentRunnerResultV1(
+      {
+        runnerResult: bad,
+        expectedTask,
+        verificationAttemptId: ATTEMPT,
+        observedAt: OBSERVED_AT,
+      },
+      {
+        adapter: createFakeIndependentVerifyAdapterV1({
+          observedChangedPaths: [ALLOWED_DOC],
+        }),
+        validatedAt: REVALIDATED_AT,
+      },
+    );
+    expect(out.status).toBe("REJECT");
+    expect(out.reasonCode).toBe("REJECT_INPUT");
+  });
+
   it("P1. COMPLETED + workspaceOutcome=null remains allowed; positive path VERIFIED with exact false flags", () => {
     const { runnerResult, expectedTask } = completedRunner({
       changedPaths: [ALLOWED_DOC],

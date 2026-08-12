@@ -382,6 +382,34 @@ export function parseAgentRunnerResultStructural(
       reasonMessage: "runnerResult.changedPaths must be a string array.",
     };
   }
+  // workspaceOutcome is a required AgentRunnerResultV1 root field.
+  // null = allowed no-outcome representation; missing/undefined = REJECT.
+  if (!Object.prototype.hasOwnProperty.call(value, "workspaceOutcome")) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_INPUT",
+      reasonMessage:
+        "runnerResult.workspaceOutcome is required; null is the only allowed no-outcome representation.",
+    };
+  }
+  if (value.workspaceOutcome === undefined) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_INPUT",
+      reasonMessage:
+        "runnerResult.workspaceOutcome is required; null is the only allowed no-outcome representation.",
+    };
+  }
+  if (
+    value.workspaceOutcome !== null &&
+    !isPlainObject(value.workspaceOutcome)
+  ) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_INPUT",
+      reasonMessage: "runnerResult.workspaceOutcome must be an object or null.",
+    };
+  }
   if (!isPlainObject(value.metadata)) {
     return {
       ok: false,
@@ -648,7 +676,8 @@ function checkRunnerMetadataBoundary(
 
 /**
  * workspaceOutcome policy (COMPLETED path):
- * - null is allowed (no workspace outcome reported).
+ * - null is allowed (explicit no-outcome representation).
+ * - undefined / missing property → REJECT (AgentRunnerResultV1 requires the field).
  * - when an object is present, fail closed on shape: missing / undefined /
  *   wrong type / true are REJECT; only exact required literals PASS.
  */
@@ -657,8 +686,16 @@ function checkWorkspaceOutcomeBoundary(
 ):
   | { ok: true }
   | { ok: false; reasonCode: IndependentVerifyReasonCode; reasonMessage: string } {
-  if (workspaceOutcome === null || workspaceOutcome === undefined) {
+  if (workspaceOutcome === null) {
     return { ok: true };
+  }
+  if (workspaceOutcome === undefined) {
+    return {
+      ok: false,
+      reasonCode: "REJECT_INPUT",
+      reasonMessage:
+        "workspaceOutcome is required; null is the only allowed no-outcome representation.",
+    };
   }
   if (!isPlainObject(workspaceOutcome)) {
     return {

@@ -146,7 +146,8 @@ verifiedMeansFakeLocalEvidenceOnly = true
 | Runner claims publication / Ready / Merge / GitHub auth | `REJECT` |
 | `workspaceOutcome` present but missing / non-false network/secrets/GitHub/production flags | `REJECT` |
 | `workspaceOutcome` present but `isolated !== true` | `REJECT` |
-| `workspaceOutcome === null` | allowed (no outcome reported) |
+| `workspaceOutcome === null` | allowed (explicit no-outcome representation) |
+| `workspaceOutcome` missing / `undefined` | `REJECT` |
 | Unsafe / out-of-scope / forbidden changed path | `REJECT` / `FAILED` |
 | Independent evidence path set mismatch | `REJECT` (`REJECT_EVIDENCE_CHANGED_PATH_MISMATCH`) |
 | Duplicate path evidence | `REJECT` (`REJECT_CHANGED_PATH_DUPLICATE`) |
