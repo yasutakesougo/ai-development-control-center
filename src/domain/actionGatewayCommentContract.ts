@@ -33,6 +33,13 @@ export const ACTION_GATEWAY_COMMENT_BODY_MAX = 65536 as const;
 export const ACTION_GATEWAY_COMMENT_PURPOSE_MAX = 2048 as const;
 export const ACTION_GATEWAY_IDEMPOTENCY_KEY_MAX = 128 as const;
 
+/**
+ * When `humanAuthorization.expiresAt` is omitted, authorization expires at
+ * `authorizedAt + DEFAULT_TTL_MS`. Evaluation must supply an independent clock
+ * (`nowIso`); `authorizedAt` is never treated as "now".
+ */
+export const ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS = 60 * 60 * 1000;
+
 export type ActionGatewayTargetKind = "ISSUE" | "PULL_REQUEST";
 
 export type ActionGatewayCommentResultStatus =
@@ -59,7 +66,13 @@ export interface ActionGatewayHumanAuthorization {
   authorizedRepository: string;
   authorizedTarget: ActionGatewayCommentTarget;
   authorizedRequestFingerprint: string;
+  /**
+   * Exact attempt binding. Must equal `request.idempotencyKey`.
+   * Prevents reusing one Human authorization across different keys.
+   */
+  authorizedIdempotencyKey: string;
   authorizedAt: string;
+  /** Optional absolute expiry. If omitted, default TTL from authorizedAt applies. */
   expiresAt?: string;
   evidenceRefs: string[];
 }
@@ -124,6 +137,9 @@ export type ActionGatewayRejectReason =
   | "REJECTED_TARGET_MISMATCH"
   | "REJECTED_PAYLOAD_LIMIT"
   | "REJECTED_IDEMPOTENCY_KEY_MISSING"
+  | "REJECTED_IDEMPOTENCY_KEY_MISMATCH"
+  | "REJECTED_OBSERVATION_MISSING"
+  | "REJECTED_EVALUATION_CLOCK_MISSING"
   | "REJECTED_OVERLAY_NOT_AUTHORIZATION";
 
 export interface ActionGatewayEvaluationRejected {
@@ -201,6 +217,41 @@ function targetsEqual(
   return a.kind === b.kind && a.number === b.number;
 }
 
+export interface ActionGatewayPreWriteOptions {
+  /**
+   * Independent evaluation clock (ISO-8601). Required.
+   * Must not be derived from `authorizedAt`.
+   */
+  nowIso: string;
+  /**
+   * Live read-only re-observation of target existence.
+   * Must be the boolean `true` to proceed; omitted/false ⇒ REJECTED.
+   */
+  observedTargetExists?: boolean;
+  observedTargetNodeId?: string;
+  observedTargetTitle?: string;
+  /** If caller attempts to pass STATUS-OVERLAY as authorization. */
+  overlayUsedAsAuthorization?: boolean;
+}
+
+/**
+ * Effective authorization expiry:
+ * - explicit `expiresAt` when present and valid
+ * - otherwise `authorizedAt + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS`
+ */
+export function effectiveAuthorizationExpiryMs(
+  authorizedAtIso: string,
+  expiresAtIso?: string,
+): number | null {
+  const authorizedAt = Date.parse(authorizedAtIso);
+  if (!Number.isFinite(authorizedAt)) return null;
+  if (expiresAtIso !== undefined) {
+    const expiresAt = Date.parse(expiresAtIso);
+    return Number.isFinite(expiresAt) ? expiresAt : null;
+  }
+  return authorizedAt + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS;
+}
+
 /**
  * Pure pre-write evaluation. Never calls GitHub. On success returns ELIGIBLE
  * with executionImplemented=false so callers cannot treat this as authorization
@@ -208,18 +259,9 @@ function targetsEqual(
  */
 export async function evaluateCommentRequestPreWrite(
   request: ActionGatewayCommentRequestV1,
-  options?: {
-    /** ISO time used for expiry checks; defaults to request evaluation "now". */
-    nowIso?: string;
-    /** Observed target existence from a read-only probe. */
-    observedTargetExists?: boolean;
-    observedTargetNodeId?: string;
-    observedTargetTitle?: string;
-    /** If caller attempts to pass STATUS-OVERLAY as authorization. */
-    overlayUsedAsAuthorization?: boolean;
-  },
+  options: ActionGatewayPreWriteOptions,
 ): Promise<ActionGatewayPreWriteEvaluation> {
-  if (options?.overlayUsedAsAuthorization) {
+  if (options.overlayUsedAsAuthorization) {
     return rejected(
       "REJECTED_OVERLAY_NOT_AUTHORIZATION",
       "STATUS-OVERLAY recommendations never authorize Action Gateway mutations.",
@@ -317,6 +359,22 @@ export async function evaluateCommentRequestPreWrite(
     );
   }
 
+  if (!validIdempotencyKey(auth.authorizedIdempotencyKey)) {
+    return rejected(
+      "REJECTED_AUTHORIZATION_MISSING",
+      "humanAuthorization.authorizedIdempotencyKey is required.",
+      fingerprint,
+    );
+  }
+
+  if (auth.authorizedIdempotencyKey !== request.idempotencyKey) {
+    return rejected(
+      "REJECTED_IDEMPOTENCY_KEY_MISMATCH",
+      "Human authorization is bound to a different idempotencyKey and cannot be reused.",
+      fingerprint,
+    );
+  }
+
   if (!Array.isArray(auth.evidenceRefs) || auth.evidenceRefs.length < 1) {
     return rejected(
       "REJECTED_AUTHORIZATION_MISSING",
@@ -325,7 +383,23 @@ export async function evaluateCommentRequestPreWrite(
     );
   }
 
-  const now = Date.parse(options?.nowIso ?? auth.authorizedAt);
+  if (typeof options.nowIso !== "string" || options.nowIso.length < 1) {
+    return rejected(
+      "REJECTED_EVALUATION_CLOCK_MISSING",
+      "Evaluation requires an independent nowIso clock; authorizedAt is never used as now.",
+      fingerprint,
+    );
+  }
+
+  const now = Date.parse(options.nowIso);
+  if (!Number.isFinite(now)) {
+    return rejected(
+      "REJECTED_EVALUATION_CLOCK_MISSING",
+      "nowIso must be a valid ISO-8601 timestamp.",
+      fingerprint,
+    );
+  }
+
   const authorizedAt = Date.parse(auth.authorizedAt);
   if (!Number.isFinite(authorizedAt)) {
     return rejected(
@@ -334,15 +408,14 @@ export async function evaluateCommentRequestPreWrite(
       fingerprint,
     );
   }
-  if (auth.expiresAt) {
-    const expiresAt = Date.parse(auth.expiresAt);
-    if (!Number.isFinite(expiresAt) || !Number.isFinite(now) || now > expiresAt) {
-      return rejected(
-        "REJECTED_AUTHORIZATION_EXPIRED",
-        "Human authorization is expired or has an invalid expiresAt.",
-        fingerprint,
-      );
-    }
+
+  const expiresAtMs = effectiveAuthorizationExpiryMs(auth.authorizedAt, auth.expiresAt);
+  if (expiresAtMs === null || now > expiresAtMs) {
+    return rejected(
+      "REJECTED_AUTHORIZATION_EXPIRED",
+      "Human authorization is expired (explicit expiresAt or default TTL from authorizedAt).",
+      fingerprint,
+    );
   }
 
   if (
@@ -358,36 +431,50 @@ export async function evaluateCommentRequestPreWrite(
     );
   }
 
-  if (options?.observedTargetExists === false) {
+  if (options.observedTargetExists !== true) {
     return rejected(
-      "REJECTED_TARGET_NOT_FOUND",
-      "Target Issue/PR was not observed as existing.",
+      options.observedTargetExists === false
+        ? "REJECTED_TARGET_NOT_FOUND"
+        : "REJECTED_OBSERVATION_MISSING",
+      options.observedTargetExists === false
+        ? "Target Issue/PR was not observed as existing."
+        : "Live target re-observation is required before any write eligibility.",
       fingerprint,
     );
   }
 
-  if (
-    request.expectedObservations.targetNodeId &&
-    options?.observedTargetNodeId &&
-    request.expectedObservations.targetNodeId !== options.observedTargetNodeId
-  ) {
-    return rejected(
-      "REJECTED_TARGET_MISMATCH",
-      "Observed targetNodeId does not match expectedObservations.",
-      fingerprint,
-    );
+  if (request.expectedObservations.targetNodeId) {
+    if (!options.observedTargetNodeId) {
+      return rejected(
+        "REJECTED_OBSERVATION_MISSING",
+        "expectedObservations.targetNodeId requires a live observedTargetNodeId.",
+        fingerprint,
+      );
+    }
+    if (request.expectedObservations.targetNodeId !== options.observedTargetNodeId) {
+      return rejected(
+        "REJECTED_TARGET_MISMATCH",
+        "Observed targetNodeId does not match expectedObservations.",
+        fingerprint,
+      );
+    }
   }
 
-  if (
-    request.expectedObservations.targetTitle &&
-    options?.observedTargetTitle &&
-    request.expectedObservations.targetTitle !== options.observedTargetTitle
-  ) {
-    return rejected(
-      "REJECTED_TARGET_MISMATCH",
-      "Observed targetTitle does not match expectedObservations.",
-      fingerprint,
-    );
+  if (request.expectedObservations.targetTitle) {
+    if (!options.observedTargetTitle) {
+      return rejected(
+        "REJECTED_OBSERVATION_MISSING",
+        "expectedObservations.targetTitle requires a live observedTargetTitle.",
+        fingerprint,
+      );
+    }
+    if (request.expectedObservations.targetTitle !== options.observedTargetTitle) {
+      return rejected(
+        "REJECTED_TARGET_MISMATCH",
+        "Observed targetTitle does not match expectedObservations.",
+        fingerprint,
+      );
+    }
   }
 
   return {

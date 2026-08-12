@@ -67,9 +67,9 @@ authenticated caller
   → capability allowlist
   → repository allowlist
   → request schema + payload limits
-  → request fingerprint
-  → exact authorization binder
-  → target existence observation (read-only)
+  → request fingerprint + authorized idempotency key
+  → exact authorization binder (incl. independent nowIso / default TTL)
+  → required live target re-observation
   → idempotency reconciliation
   → capability adapter (e.g. GitHub comment create)
   → outcome reconciliation (SUCCEEDED | FAILED | UNKNOWN)
@@ -88,9 +88,11 @@ authenticated caller
 | Authorization (Human evidence) | authorization binder | `REJECTED`; no adapter call |
 | Capability allowlist | capability validator | `REJECTED` if not exactly allowlisted |
 | Repository allowlist | capability validator | `REJECTED` if outside allowlist |
-| Exact target binding | authorization binder + observation | `REJECTED` on mismatch / missing target |
+| Exact target binding | authorization binder + **required** live observation | `REJECTED` on mismatch / missing observation |
 | Request fingerprint | binder compares expected vs computed | `REJECTED` on mismatch |
-| Idempotency | before adapter | Return prior result; never duplicate on same key |
+| Attempt idempotency key | `authorizedIdempotencyKey == request.idempotencyKey` | `REJECTED` on mismatch / reuse |
+| Auth lifetime | independent `nowIso` vs expiresAt or authorizedAt+DEFAULT_TTL | `REJECTED` if clock missing or expired |
+| Idempotency store | before adapter | Return prior result; never duplicate on same key |
 | Payload size/content limits | request validation | `REJECTED`; no adapter call |
 | GitHub API outcome reconciliation | after adapter | `SUCCEEDED` / `FAILED` / `UNKNOWN` only with proof rules |
 | UNKNOWN vs FAILED | outcome reconciler | No auto-retry write on UNKNOWN |

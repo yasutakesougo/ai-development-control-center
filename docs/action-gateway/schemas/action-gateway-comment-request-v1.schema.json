@@ -55,6 +55,7 @@
         "authorizedRepository",
         "authorizedTarget",
         "authorizedRequestFingerprint",
+        "authorizedIdempotencyKey",
         "authorizedAt",
         "evidenceRefs"
       ],
@@ -73,6 +74,12 @@
         "authorizedRequestFingerprint": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        },
+        "authorizedIdempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[\\x20-\\x7E]+$"
         },
         "authorizedAt": { "type": "string", "minLength": 1 },
         "expiresAt": { "type": "string", "minLength": 1 },

@@ -16,6 +16,7 @@
     "authorizedRepository": "yasutakesougo/ai-development-control-center",
     "authorizedTarget": { "kind": "ISSUE", "number": 41 },
     "authorizedRequestFingerprint": "REPLACE_WITH_COMPUTED_FINGERPRINT",
+    "authorizedIdempotencyKey": "agw-comment-41-design-2026-08-12-a1",
     "authorizedAt": "2026-08-12T06:30:00.000Z",
     "expiresAt": "2026-08-12T18:30:00.000Z",
     "evidenceRefs": [

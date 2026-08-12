@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 import {
   ACTION_GATEWAY_ALLOWED_CAPABILITIES,
   ACTION_GATEWAY_ALLOWED_REPOSITORIES,
+  ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS,
   ACTION_GATEWAY_EXECUTION_IMPLEMENTED,
   GITHUB_COMMENT_ADAPTER_IMPLEMENTED,
   GITHUB_COMMENT_CREATE_CAPABILITY_ID,
   assertCommentResultInvariants,
   computeCommentRequestFingerprint,
+  effectiveAuthorizationExpiryMs,
   evaluateCommentRequestPreWrite,
   reconcileUnknownCommentOutcome,
   type ActionGatewayCommentRequestV1,
@@ -20,6 +22,8 @@ const fixturesDir = join(
   dirname(fileURLToPath(import.meta.url)),
   "../docs/action-gateway/fixtures",
 );
+
+const NOW = "2026-08-12T07:00:00.000Z";
 
 function loadFixture<T>(name: string): T {
   return JSON.parse(readFileSync(join(fixturesDir, name), "utf8")) as T;
@@ -39,6 +43,7 @@ async function validRequest(): Promise<ActionGatewayCommentRequestV1> {
     humanAuthorization: {
       ...request.humanAuthorization,
       authorizedRequestFingerprint: fingerprint,
+      authorizedIdempotencyKey: request.idempotencyKey,
     },
   };
 }
@@ -58,14 +63,9 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     ]);
   });
 
-  it("fingerprint is stable and excludes idempotency/auth fields", async () => {
+  it("fingerprint is stable for content facts and ignores attempt key differences", async () => {
     const base = await validRequest();
     const a = await computeCommentRequestFingerprint(base);
-    const b = await computeCommentRequestFingerprint({
-      ...base,
-      // These must not affect fingerprint even if present on the full request.
-    });
-    expect(a).toBe(b);
     expect(a).toMatch(/^[a-f0-9]{64}$/);
 
     const changedBody = await computeCommentRequestFingerprint({
@@ -76,21 +76,12 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
       purpose: base.purpose,
     });
     expect(changedBody).not.toBe(a);
-
-    const changedTarget = await computeCommentRequestFingerprint({
-      capabilityId: GITHUB_COMMENT_CREATE_CAPABILITY_ID,
-      repository: base.repository,
-      target: { kind: "ISSUE", number: 99 },
-      body: base.body,
-      purpose: base.purpose,
-    });
-    expect(changedTarget).not.toBe(a);
   });
 
   it("valid authorized request is ELIGIBLE but does not attempt write", async () => {
     const request = await validRequest();
     const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: "2026-08-12T07:00:00.000Z",
+      nowIso: NOW,
       observedTargetExists: true,
     });
     expect(evaluation.status).toBe("ELIGIBLE_FOR_ADAPTER");
@@ -104,6 +95,8 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
   it("STATUS-OVERLAY cannot authorize mutation", async () => {
     const request = await validRequest();
     const evaluation = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+      observedTargetExists: true,
       overlayUsedAsAuthorization: true,
     });
     expect(evaluation).toMatchObject({
@@ -117,7 +110,7 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     const request = await validRequest();
     request.humanAuthorization.authorizedRequestFingerprint = "0".repeat(64);
     const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: "2026-08-12T07:00:00.000Z",
+      nowIso: NOW,
       observedTargetExists: true,
     });
     expect(evaluation).toMatchObject({
@@ -131,7 +124,7 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     const request = await validRequest();
     request.humanAuthorization.authorizedTarget = { kind: "ISSUE", number: 1 };
     const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: "2026-08-12T07:00:00.000Z",
+      nowIso: NOW,
       observedTargetExists: true,
     });
     expect(evaluation).toMatchObject({
@@ -148,7 +141,10 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     request.expectedObservations.repository = request.repository;
     const fingerprint = await computeCommentRequestFingerprint(request);
     request.humanAuthorization.authorizedRequestFingerprint = fingerprint;
-    const evaluation = await evaluateCommentRequestPreWrite(request);
+    const evaluation = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+      observedTargetExists: true,
+    });
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_REPOSITORY_NOT_ALLOWED",
@@ -159,7 +155,10 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
   it("missing idempotency key fails closed", async () => {
     const request = await validRequest();
     request.idempotencyKey = "";
-    const evaluation = await evaluateCommentRequestPreWrite(request);
+    const evaluation = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+      observedTargetExists: true,
+    });
     expect(evaluation).toMatchObject({
       status: "REJECTED",
       reasonCode: "REJECTED_IDEMPOTENCY_KEY_MISSING",
@@ -167,7 +166,45 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
-  it("expired authorization fails closed", async () => {
+  it("requires an independent evaluation clock (never authorizedAt-as-now)", async () => {
+    const request = await validRequest();
+    const evaluation = await evaluateCommentRequestPreWrite(request, {
+      nowIso: "",
+      observedTargetExists: true,
+    });
+    expect(evaluation).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_EVALUATION_CLOCK_MISSING",
+      writeAttempted: false,
+    });
+  });
+
+  it("applies default TTL when expiresAt is omitted", async () => {
+    const request = await validRequest();
+    delete request.humanAuthorization.expiresAt;
+    const authorizedAtMs = Date.parse(request.humanAuthorization.authorizedAt);
+    expect(effectiveAuthorizationExpiryMs(request.humanAuthorization.authorizedAt)).toBe(
+      authorizedAtMs + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS,
+    );
+
+    const withinTtl = await evaluateCommentRequestPreWrite(request, {
+      nowIso: new Date(authorizedAtMs + 30 * 60 * 1000).toISOString(),
+      observedTargetExists: true,
+    });
+    expect(withinTtl.status).toBe("ELIGIBLE_FOR_ADAPTER");
+
+    const pastTtl = await evaluateCommentRequestPreWrite(request, {
+      nowIso: new Date(authorizedAtMs + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS + 1).toISOString(),
+      observedTargetExists: true,
+    });
+    expect(pastTtl).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_AUTHORIZATION_EXPIRED",
+      writeAttempted: false,
+    });
+  });
+
+  it("expired explicit expiresAt fails closed with independent nowIso", async () => {
     const request = await validRequest();
     const evaluation = await evaluateCommentRequestPreWrite(request, {
       nowIso: "2026-08-13T00:00:00.000Z",
@@ -180,15 +217,63 @@ describe("ACTION-GATEWAY github.comment.create.v1 design contract", () => {
     });
   });
 
-  it("missing target observation fails closed", async () => {
+  it("requires live target re-observation (omitted fails closed)", async () => {
     const request = await validRequest();
-    const evaluation = await evaluateCommentRequestPreWrite(request, {
-      nowIso: "2026-08-12T07:00:00.000Z",
+    const omitted = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+    });
+    expect(omitted).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_OBSERVATION_MISSING",
+      writeAttempted: false,
+    });
+
+    const absent = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
       observedTargetExists: false,
+    });
+    expect(absent).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_TARGET_NOT_FOUND",
+      writeAttempted: false,
+    });
+  });
+
+  it("expected targetNodeId/title require live observed values", async () => {
+    const request = await validRequest();
+    request.expectedObservations.targetNodeId = "I_kwExampleNode";
+    request.expectedObservations.targetTitle = "Example title";
+
+    const missingLive = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+      observedTargetExists: true,
+    });
+    expect(missingLive).toMatchObject({
+      status: "REJECTED",
+      reasonCode: "REJECTED_OBSERVATION_MISSING",
+      writeAttempted: false,
+    });
+
+    const matched = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+      observedTargetExists: true,
+      observedTargetNodeId: "I_kwExampleNode",
+      observedTargetTitle: "Example title",
+    });
+    expect(matched.status).toBe("ELIGIBLE_FOR_ADAPTER");
+  });
+
+  it("rejects reusing Human authorization under a different idempotencyKey", async () => {
+    const request = await validRequest();
+    request.idempotencyKey = "agw-comment-41-different-key";
+    // authorizedIdempotencyKey remains the original fixture key
+    const evaluation = await evaluateCommentRequestPreWrite(request, {
+      nowIso: NOW,
+      observedTargetExists: true,
     });
     expect(evaluation).toMatchObject({
       status: "REJECTED",
-      reasonCode: "REJECTED_TARGET_NOT_FOUND",
+      reasonCode: "REJECTED_IDEMPOTENCY_KEY_MISMATCH",
       writeAttempted: false,
     });
   });

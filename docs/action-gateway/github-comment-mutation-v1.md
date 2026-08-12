@@ -94,8 +94,14 @@ type ActionGatewayCommentRequestV1 = {
     authorizedTarget: { kind: "ISSUE" | "PULL_REQUEST"; number: number };
     /** Must equal computeCommentRequestFingerprint(requestFacts). */
     authorizedRequestFingerprint: string;
+    /** Must equal request.idempotencyKey (one Human auth ⇒ one attempt key). */
+    authorizedIdempotencyKey: string;
     authorizedAt: string; // ISO-8601
-    expiresAt?: string;   // ISO-8601; missing ⇒ policy default TTL required at impl
+    /**
+     * Absolute expiry. If omitted, effective expiry =
+     * authorizedAt + ACTION_GATEWAY_AUTHORIZATION_DEFAULT_TTL_MS (1h).
+     */
+    expiresAt?: string;
     evidenceRefs: string[]; // non-secret refs (e.g. authorizing comment URLs)
   };
 
@@ -142,7 +148,20 @@ tokens / secrets
 Canonicalization: deterministic JSON (sorted object keys) → SHA-256 hex
 (same family as Approval Ledger `canonicalJson` / decision fingerprint).
 
-Human authorization must bind to that fingerprint. Mismatch ⇒ `REJECTED`.
+Human authorization must bind to that fingerprint **and** to
+`authorizedIdempotencyKey === request.idempotencyKey`. Content fingerprint
+alone is not enough to reuse one authorization across different attempt keys.
+
+### Authorization lifetime
+
+```text
+evaluation clock          = independent nowIso (REQUIRED)
+                            NEVER derived from authorizedAt
+effectiveExpiry           = expiresAt  if present
+                          = authorizedAt + DEFAULT_TTL (1h)  if expiresAt omitted
+nowIso > effectiveExpiry  ⇒ REJECTED_AUTHORIZATION_EXPIRED
+nowIso missing/invalid    ⇒ REJECTED_EVALUATION_CLOCK_MISSING
+```
 
 ---
 
@@ -198,17 +217,22 @@ type ActionGatewayCommentResultV1 = {
 2. `recommendedNextAction.authorizesMutation` remains **`false`** and is not an
    input to the Gateway authorizer.
 3. Mutation requires `humanAuthorization` bound to **exact**
-   `capabilityId + repository + target + requestFingerprint`.
+   `capabilityId + repository + target + requestFingerprint + idempotencyKey`.
 4. Missing / malformed / expired / mismatched authorization ⇒ `REJECTED`
-   before any GitHub write.
+   before any GitHub write. Default TTL applies when `expiresAt` is omitted.
 5. Repository allowlist (V1) is exactly
    `yasutakesougo/ai-development-control-center`.
-6. Target must already exist and be re-observed as existing before write.
+6. Target must already exist and be **live re-observed** as existing before
+   write (`observedTargetExists === true` required; omitted observation fails
+   closed). If `expectedObservations` includes `targetNodeId` / `targetTitle`,
+   matching live observations are required (not optional).
 7. Authorization for number N cannot be replayed against number M.
 8. Authorization for `github.comment.create.v1` cannot authorize Ready / Merge /
    Close / workflow dispatch / repository-file writes / other capabilities.
 9. Same `idempotencyKey` (within principal+capability+repository scope) must not
    create a second comment; return the prior terminal result.
+   Different key requires a **new** Human authorization whose
+   `authorizedIdempotencyKey` matches that key.
 10. Secrets / tokens never appear in request, result, UI, logs, or persisted
     evidence documents.
 
@@ -220,9 +244,12 @@ authorizedRepository    == request.repository == allowlist repo
                             == expectedObservations.repository
 authorizedTarget        == request.target == expectedObservations target
 authorizedRequestFingerprint == computeCommentRequestFingerprint(...)
-authorizedAt / expiresAt valid at evaluation time
+authorizedIdempotencyKey == request.idempotencyKey
+nowIso provided independently of authorizedAt
+nowIso <= effectiveExpiry (expiresAt or authorizedAt+DEFAULT_TTL)
 evidenceRefs non-empty and non-secret
-target re-observation: exists + kind/number match (+ optional nodeId/title)
+live re-observation: observedTargetExists === true
+  + if expected targetNodeId/title set → live observed values required and equal
 ```
 
 Any failure ⇒ `REJECTED` / no adapter call.
@@ -250,10 +277,12 @@ idempotency scope =
 | Retry with **same** key after `REJECTED` | Return prior `REJECTED` (deterministic); do not invent success |
 | Retry with **same** key after `FAILED` | Return prior `FAILED` unless a later Human-authorized recovery design says otherwise (V1: no auto-retry write) |
 | Retry with **same** key while prior is `UNKNOWN` | Run **reconciliation only** (§6); do not blindly POST again |
-| Different key, same fingerprint | Requires **new** Human authorization for that attempt; V1 may create a second comment only with fresh auth (not a silent dedupe) |
+| Different key, same content fingerprint | **Forbidden** with the prior Human auth. Requires a **new** authorization whose `authorizedIdempotencyKey` equals the new key. Reusing prior auth ⇒ `REJECTED_IDEMPOTENCY_KEY_MISMATCH` |
 | Missing / empty idempotencyKey | `REJECTED` |
+| Auth `authorizedIdempotencyKey` ≠ request key | `REJECTED_IDEMPOTENCY_KEY_MISMATCH` |
 
 Duplicate publication for the same `idempotencyKey` is **forbidden**.
+One Human authorization authorizes **exactly one** idempotencyKey.
 
 ---
 
@@ -299,6 +328,9 @@ REJECTED_TARGET_NOT_FOUND
 REJECTED_TARGET_MISMATCH
 REJECTED_PAYLOAD_LIMIT
 REJECTED_IDEMPOTENCY_KEY_MISSING
+REJECTED_IDEMPOTENCY_KEY_MISMATCH
+REJECTED_OBSERVATION_MISSING
+REJECTED_EVALUATION_CLOCK_MISSING
 REJECTED_OVERLAY_NOT_AUTHORIZATION   // if caller tries to treat overlay as auth
 FAILED_GITHUB_HTTP
 FAILED_GITHUB_CONFIRMED
@@ -317,6 +349,8 @@ purpose max length     = 2048
 evidenceRefs max count = 16
 evidenceRefs max each  = 2048
 idempotencyKey         = non-empty, max 128, printable ASCII
+authorizedIdempotencyKey = same constraints; must equal idempotencyKey
+default auth TTL       = 1 hour from authorizedAt when expiresAt omitted
 ```
 
 Body MUST NOT contain credential material (token patterns fail closed as
@@ -333,9 +367,11 @@ detail; design requires a deny-on-secret-scan hook before write).
 | Human authorization binder | Before observation finalize / before adapter |
 | Capability allowlist | Capability validator (`github.comment.create.v1` only) |
 | Repository allowlist | Capability validator |
-| Exact target binding | Auth binder + read-only target observation |
+| Exact target binding | Auth binder + **required** live target re-observation |
 | Request fingerprint | Computed from semantic facts; compared to `authorizedRequestFingerprint` |
-| Idempotency | After auth+observation pass; before adapter |
+| Attempt key binding | `authorizedIdempotencyKey == request.idempotencyKey` |
+| Auth lifetime | Independent `nowIso` vs `expiresAt` or `authorizedAt+DEFAULT_TTL` |
+| Idempotency store | After auth+observation pass; before adapter |
 | Payload limits / secret scan | Request validation (pre-adapter) |
 | GitHub outcome reconciliation | Adapter result handler |
 | UNKNOWN vs FAILED | Outcome reconciler (no auto-retry write) |
@@ -349,6 +385,9 @@ detail; design requires a deny-on-secret-scan hook before write).
 |---|---|
 | Overlay “next action” treated as auth | Explicit rule: overlay never authorizes; reason `REJECTED_OVERLAY_NOT_AUTHORIZATION` |
 | Auth replay on different Issue/PR | Exact target + fingerprint binding |
+| Auth reused with a different idempotencyKey | `authorizedIdempotencyKey` exact match |
+| Clock derived from `authorizedAt` skips expiry | Independent required `nowIso`; default TTL always applied when `expiresAt` omitted |
+| Skipping live target probe | `observedTargetExists === true` required; expected nodeId/title require live values |
 | Auth for comment used as Ready/Merge | Capability allowlist exact-match only |
 | Cross-repo write | Repository allowlist exact-match |
 | Network retry duplicates comment | Idempotency key scope + replay prior result |
@@ -378,14 +417,18 @@ Contract helpers in `src/domain/actionGatewayCommentContract.ts` encode:
 
 1. Only `github.comment.create.v1` is allowlisted.
 2. Only canonical repository is allowlisted.
-3. Fingerprint excludes idempotency / auth / timestamps.
-4. Auth mismatch / fingerprint mismatch / missing key ⇒ evaluate as `REJECTED`
+3. Content fingerprint excludes idempotency / auth / timestamps; attempt uniqueness
+   is enforced via `authorizedIdempotencyKey`.
+4. Auth mismatch / fingerprint mismatch / missing key / key mismatch ⇒ `REJECTED`
    without marking a write attempt.
 5. Overlay document is never accepted as `humanAuthorization`.
-6. `SUCCEEDED` requires comment id+url; `REJECTED` forbids comment field and
+6. Independent `nowIso` required; default TTL enforced when `expiresAt` omitted.
+7. Live `observedTargetExists === true` required; expected nodeId/title require
+   live observed values.
+8. `SUCCEEDED` requires comment id+url; `REJECTED` forbids comment field and
    forbids `attemptedAt`.
-7. UNKNOWN reconciliation prefers prior SUCCEEDED over new write.
-8. `ACTION_GATEWAY_EXECUTION_IMPLEMENTED === false` in this slice.
+9. UNKNOWN reconciliation prefers prior SUCCEEDED over new write.
+10. `ACTION_GATEWAY_EXECUTION_IMPLEMENTED === false` in this slice.
 
 ---
 
