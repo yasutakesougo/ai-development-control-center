@@ -1483,14 +1483,18 @@ export function runNoPromptPilotV2(
     });
   }
 
-  if (
-    draftPublishResult.metadata.githubMutationPerformed === true ||
-    draftPublishResult.metadata.realGithubPublicationImplemented === true ||
-    draftPublishResult.metadata.readyAuthorized === true ||
-    draftPublishResult.metadata.mergeAuthorized === true ||
-    draftPublishResult.metadata.issueCloseAuthorized === true ||
-    draftPublishResult.metadata.deployAuthorized === true
-  ) {
+  // Metadata fields are typed as literal `false` by DRAFT-PUBLISH-V1; still
+  // fail closed if a future/wider result shape ever reports a true flag.
+  const publishMetaFlags: Record<string, boolean> = {
+    githubMutationPerformed: draftPublishResult.metadata.githubMutationPerformed,
+    realGithubPublicationImplemented:
+      draftPublishResult.metadata.realGithubPublicationImplemented,
+    readyAuthorized: draftPublishResult.metadata.readyAuthorized,
+    mergeAuthorized: draftPublishResult.metadata.mergeAuthorized,
+    issueCloseAuthorized: draftPublishResult.metadata.issueCloseAuthorized,
+    deployAuthorized: draftPublishResult.metadata.deployAuthorized,
+  };
+  if (Object.values(publishMetaFlags).some((flag) => flag === true)) {
     return failEarly({
       pilotId,
       selectedIssue,
