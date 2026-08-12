@@ -47,6 +47,9 @@ export function buildSnapshot(commit, generatedAt = new Date().toISOString()) {
       fact("approval-ui", "Approval intent UI", "Shows decision context and submits APPROVE, REJECT, or DEFER only when the UI gate allows it.", ["src/ui/App.tsx", "src/ui/ApprovalIntentPanel.tsx", "src/ui/LedgerRecordControls.tsx"], { layer: 5 }),
       fact("history-ui", "Ledger history UI", "Reads and renders recent immutable records, empty state, auth failures, and NOT EXECUTED status.", ["src/ui/App.tsx", "src/ui/ledgerApi.ts", "src/ui/LedgerHistoryPanel.tsx"], { layer: 9 }),
       fact("staging-config", "Cloudflare staging configuration", "Wires the isolated staging Worker to Access policy mode and staging-only LEDGER_DB.", ["wrangler.jsonc", "docs/mvp-3-approval-ledger-staging-pilot-v1.md"], { layer: 1 }),
+      fact("handoff-live-observer", "HANDOFF live GitHub reconciliation", "Reads this repository's default-branch tip, open PRs, checks/status, reviews, and Human-Decision markers through GET-only requests; failures become fail-closed live evidence.", ["src/domain/observeHandoffLiveState.ts", "docs/handoff/README.md"], { layer: 2 }),
+      fact("handoff-evaluator", "HANDOFF-V1 evaluator", "Compares architecture.json to current main, classifies snapshot staleness, preserves confirmed/assumed/unknown facts, and resolves nextAction as NO_ACTION, ACTION_REQUIRED, or UNKNOWN without inventing work.", ["src/domain/handoffEvaluator.ts", "src/domain/architectureSnapshot.ts", "docs/handoff/README.md"], { layer: 3 }),
+      fact("handoff-report", "HANDOFF report generation", "Emits machine-readable handoff.json and Human-readable handoff.md from an evaluated HandoffReport; decision-support only, no Ledger write or execution.", ["src/domain/formatHandoffReport.ts", "src/domain/handoffReport.ts", "scripts/run-handoff.ts"], { layer: 4 }),
     ],
     dependencies: [
       fact("dep-route-observe", "route status", "Worker invokes observation for status and record validation.", ["src/worker/index.ts", "src/worker/ledger/recordsApi.ts"], { source: "worker-router", target: "github-observer" }),
@@ -63,6 +66,9 @@ export function buildSnapshot(commit, generatedAt = new Date().toISOString()) {
       fact("dep-store-d1", "D1 SQL", "Store persists immutable records in Cloudflare D1.", ["src/worker/ledger/ledgerStore.ts", "migrations/0001_approval_ledger.sql"], { source: "d1-store", target: "ext-d1" }),
       fact("dep-history-router", "GET records", "History UI fetches recent records through the Worker.", ["src/ui/ledgerApi.ts", "src/ui/LedgerHistoryPanel.tsx"], { source: "history-ui", target: "worker-router" }),
       fact("dep-config-runtime", "staging bindings", "Staging config supplies Access and D1 bindings to runtime gates.", ["wrangler.jsonc"], { source: "staging-config", target: "ledger-guard" }),
+      fact("dep-handoff-live-github", "control-center GitHub GET", "HANDOFF live observer reads this repository through GET-only GitHub REST calls.", ["src/domain/observeHandoffLiveState.ts"], { source: "handoff-live-observer", target: "ext-github" }),
+      fact("dep-handoff-live-eval", "live state", "HANDOFF evaluator consumes fail-closed live observation when classifying nextAction and live differences.", ["src/domain/handoffEvaluator.ts", "scripts/run-handoff.ts"], { source: "handoff-live-observer", target: "handoff-evaluator" }),
+      fact("dep-handoff-eval-report", "HandoffReport", "Evaluated handoff facts are formatted into machine- and Human-readable reports.", ["src/domain/formatHandoffReport.ts", "scripts/run-handoff.ts"], { source: "handoff-evaluator", target: "handoff-report" }),
     ],
     flows: [
       fact("flow-observation", "Observe and resolve", "Read-only GitHub observation becomes a HumanAction and optional recordable fingerprint.", ["src/worker/index.ts", "src/worker/github/readOnlyAdapter.ts", "src/domain/humanActionResolver.ts", "src/domain/decisionFingerprint.ts"], {
@@ -72,6 +78,10 @@ export function buildSnapshot(commit, generatedAt = new Date().toISOString()) {
       fact("flow-ledger-record", "Human-gated Ledger record", "A recordable decision passes Human authentication and authorization before append-only persistence and history display.", ["src/ui/App.tsx", "src/worker/ledger/recordsApi.ts", "src/worker/auth/ledgerGuard.ts", "src/worker/ledger/ledgerStore.ts", "src/ui/LedgerHistoryPanel.tsx"], {
         steps: ["ext-github", "github-observer", "human-action", "decision-fingerprint", "gate-human-decision", "access-auth", "ledger-guard", "ledger-api", "d1-store", "ext-d1", "history-ui"],
         dependencyIds: ["dep-observe-github", "dep-observe-action", "dep-action-fingerprint", "dep-guard-auth", "dep-api-guard", "dep-api-fingerprint", "dep-api-store", "dep-store-d1"],
+      }),
+      fact("flow-handoff-reconcile", "HANDOFF-V1 context reconciliation", "Architecture Snapshot facts plus current main and read-only GitHub live state produce a fail-closed handoff report without regenerating the Snapshot or authorizing execution.", ["scripts/run-handoff.ts", "src/domain/observeHandoffLiveState.ts", "src/domain/handoffEvaluator.ts", "src/domain/formatHandoffReport.ts", "docs/handoff/README.md"], {
+        steps: ["ext-github", "handoff-live-observer", "handoff-evaluator", "handoff-report"],
+        dependencyIds: ["dep-handoff-live-github", "dep-handoff-live-eval", "dep-handoff-eval-report"],
       }),
     ],
     externalSystems: [
@@ -90,6 +100,7 @@ export function buildSnapshot(commit, generatedAt = new Date().toISOString()) {
     decisions: [
       fact("decision-fail-closed", "Fail closed on incomplete evidence or auth", "Unknown observation, invalid Access identity, and absent authorization policy deny progress.", ["src/domain/humanActionResolver.ts", "src/worker/auth/ledgerGuard.ts"]),
       fact("decision-append-only", "Ledger is append-only", "Application exposes no update/delete path and D1 triggers reject both operations.", ["src/worker/ledger/ledgerStore.ts", "migrations/0001_approval_ledger.sql"]),
+      fact("decision-handoff-decision-support", "HANDOFF is decision-support only", "HANDOFF-V1 reconstructs current state and nextAction without regenerating the Snapshot, writing the Ledger, mutating GitHub/Cloudflare, or authorizing execution.", ["docs/handoff/README.md", "src/domain/handoffEvaluator.ts", "scripts/run-handoff.ts"]),
     ],
     unknowns: [
       { id: "unknown-action-gateway", name: "Action Gateway contract", responsibility: "No Action Gateway implementation or approved contract exists in this snapshot.", status: "unknown", confidence: "high", evidence: ["src/worker/index.ts", "src/worker/ledger/recordsApi.ts"] },
@@ -103,6 +114,7 @@ export function buildSnapshot(commit, generatedAt = new Date().toISOString()) {
       fact("stale-head", "Repository HEAD differs", "Compare repository HEAD with generatedFrom.commit.", ["scripts/generate-architecture-snapshot.mjs"]),
       fact("stale-worker", "Worker sources changed", "Treat changes under src/worker/** as architecture-relevant.", ["src/worker/index.ts"]),
       fact("stale-config", "Architecture configuration changed", "Treat wrangler.jsonc, migrations/**, package.json, and architecture generator changes as relevant.", ["wrangler.jsonc", "migrations/0001_approval_ledger.sql", "package.json"]),
+      fact("stale-handoff", "HANDOFF-V1 sources changed", "Treat changes to scripts/run-handoff.ts and HANDOFF domain modules as architecture-relevant.", ["scripts/run-handoff.ts", "src/domain/handoffEvaluator.ts", "src/domain/observeHandoffLiveState.ts", "src/domain/formatHandoffReport.ts", "src/domain/handoffReport.ts", "src/domain/architectureSnapshot.ts"]),
       fact("stale-generator", "Schema or generator changed", `Regenerate when schemaVersion differs from ${SCHEMA_VERSION} or generator differs from ${GENERATOR}.`, ["scripts/generate-architecture-snapshot.mjs"]),
     ],
   };

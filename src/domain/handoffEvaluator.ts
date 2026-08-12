@@ -25,6 +25,12 @@ export const ARCHITECTURE_RELEVANT_EXACT_PATHS = [
   "wrangler.jsonc",
   "package.json",
   "scripts/generate-architecture-snapshot.mjs",
+  "scripts/run-handoff.ts",
+  "src/domain/handoffEvaluator.ts",
+  "src/domain/observeHandoffLiveState.ts",
+  "src/domain/formatHandoffReport.ts",
+  "src/domain/handoffReport.ts",
+  "src/domain/architectureSnapshot.ts",
 ] as const;
 
 export interface EvaluateHandoffInput {

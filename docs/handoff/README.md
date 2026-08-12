@@ -58,6 +58,8 @@ Architecture-relevant paths follow the Snapshot `staleIndicators`:
 - `migrations/**`
 - `package.json`
 - `scripts/generate-architecture-snapshot.mjs`
+- `scripts/run-handoff.ts`
+- HANDOFF domain modules under `src/domain/` (`handoffEvaluator.ts`, `observeHandoffLiveState.ts`, `formatHandoffReport.ts`, `handoffReport.ts`, `architectureSnapshot.ts`)
 
 HANDOFF-V1 does not regenerate the Architecture Snapshot.
 
