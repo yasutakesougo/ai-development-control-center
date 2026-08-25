@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "PERSONAL-WORKER-DEFINITION-V1",
+  "workerId": "developer-01",
+  "owner": "me",
+  "role": "DEVELOPER",
+  "lifecycle": "ACTIVE",
+  "autonomy": "A2_EXECUTE_APPROVED_ACTION",
+  "riskTier": "MEDIUM",
+  "service": "CHATGPT",
+  "model": "gpt-5.6",
+  "authority": {
+    "allow": [
+      {
+        "action": "repository.read",
+        "resource": "github:yasutakesougo/*"
+      },
+      {
+        "action": "worktree.write",
+        "resource": "local:*"
+      },
+      {
+        "action": "test.execute",
+        "resource": "local:*"
+      }
+    ],
+    "deny": [
+      {
+        "action": "secret.read",
+        "resource": "*"
+      },
+      {
+        "action": "deployment.execute",
+        "resource": "*"
+      }
+    ]
+  },
+  "humanGates": [
+    { "action": "repository.push" },
+    { "action": "pull_request.ready" },
+    { "action": "pull_request.merge" },
+    { "action": "external.send" },
+    { "action": "deployment.execute" }
+  ]
+}
