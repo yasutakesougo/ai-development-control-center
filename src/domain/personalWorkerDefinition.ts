@@ -203,7 +203,7 @@ function hasDuplicateAuthorityRules(values: PersonalAuthorityRuleV1[]): boolean 
 function hasDuplicateHumanGateRules(values: PersonalHumanGateRuleV1[]): boolean {
   const seen = new Set<string>();
   for (const value of values) {
-    const key = `${value.action}\u0000${value.resource ?? "<ALL_RESOURCES>"}`;
+    const key = JSON.stringify([value.action, value.resource ?? null]);
     if (seen.has(key)) return true;
     seen.add(key);
   }
