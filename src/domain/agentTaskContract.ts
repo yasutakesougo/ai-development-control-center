@@ -284,7 +284,7 @@ export function isRepoRelativePath(value: unknown): value is string {
   return true;
 }
 
-function isCapabilityId(value: unknown): value is string {
+export function isAgentTaskCapabilityId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length >= 1 &&
@@ -669,7 +669,7 @@ export function parseAgentTaskV1(
   if (
     !Array.isArray(value.allowedCapabilities) ||
     value.allowedCapabilities.length > AGENT_TASK_CAPABILITIES_MAX ||
-    !value.allowedCapabilities.every(isCapabilityId)
+    !value.allowedCapabilities.every(isAgentTaskCapabilityId)
   ) {
     return {
       ok: false,
