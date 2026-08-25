@@ -443,7 +443,9 @@ export function captureAiWorkerRegistryFingerprintFacts(
   return {
     schemaVersion: AI_WORKER_REGISTRY_SCHEMA,
     workers: [...registry.workers]
-      .sort((a, b) => a.workerId.localeCompare(b.workerId))
+      .sort((a, b) =>
+        a.workerId < b.workerId ? -1 : a.workerId > b.workerId ? 1 : 0,
+      )
       .map(captureWorkerAuthorityFingerprintFacts),
   };
 }
