@@ -59,7 +59,7 @@ export const AGENT_TASK_VERIFICATION_COMMAND_IDS_MUST_BE_UNIQUE = true as const;
 
 /**
  * Path list uniqueness is evaluated after trailing-slash normalization so
- * `docs/foo/` and `docs/foo` cannot both appear as distinct boundaries.
+ * `docs/foo` and `docs/foo/` cannot both appear as distinct boundaries.
  */
 export const AGENT_TASK_PATH_UNIQUENESS_NORMALIZES_TRAILING_SLASH = true as const;
 
