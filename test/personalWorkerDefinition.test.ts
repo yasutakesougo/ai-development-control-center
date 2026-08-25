@@ -197,6 +197,13 @@ describe("PERSONAL-WORKER-DEFINITION-V1", () => {
     const duplicateGate = validWorker();
     duplicateGate.humanGates.push({ ...duplicateGate.humanGates[0] });
     expect(parsePersonalWorkerDefinitionV1(duplicateGate).ok).toBe(false);
+
+    const sentinelCollision = validWorker();
+    sentinelCollision.humanGates = [
+      { action: "repository.push" },
+      { action: "repository.push", resource: "<ALL_RESOURCES>" },
+    ];
+    expect(parsePersonalWorkerDefinitionV1(sentinelCollision).ok).toBe(true);
   });
 
   it("enforces the V1 array bounds and permits empty declarations", () => {
