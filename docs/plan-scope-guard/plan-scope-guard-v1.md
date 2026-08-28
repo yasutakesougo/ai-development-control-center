@@ -5,7 +5,7 @@
 - Definition: LOCKED
 - Implementation Start: GO
 - Slice: A — READ-ONLY / Shadow Evaluation
-- Implementation Correction: Correction-1
+- Implementation Correction: Correction-2
 - Repository baseline: `c15dbd60fe51bcb894dc555fee5defb859d3df5f`
 - Runtime Enforcement: NOT AUTHORIZED
 - Worker Intervention: NOT AUTHORIZED
@@ -20,61 +20,143 @@ Slice A evaluates whether a proposed implementation action remains within an app
 ```text
 READ
 → validate contracts
-→ verify approval eligibility
-→ bind Plan / Task / Action evidence
-→ evaluate scope
+→ verify canonical approval eligibility
+→ bind Action / Plan / classification provenance
+→ resolve canonical evidence
+→ evaluate scope by fixed precedence
 → emit SHADOW evidence
 ```
 
 A shadow result never grants or denies execution authority.
 
-## Implementation Correction-1
+## Implementation Correction-2
 
-Independent Implementation Review-1 identified four issues:
+Independent Implementation Re-Review-1 left three unresolved P1 concerns:
 
-1. final decisions relied too heavily on caller-provided classification flags;
-2. reuse checks bound identity strings but not underlying Plan / Action content;
-3. the public evaluation path lacked strict runtime contract validation and contradiction fail-closed behavior;
-4. the JSON fixture registry and executable Vitest cases were separately maintained.
+1. a canonical scope entry could exist without proving that the evaluated Action was the Action classified against that entry;
+2. Necessary Dependency evidence references only needed to be non-empty, not resolvable from the canonical evidence set;
+3. contradiction handling remained pairwise and Approval Resolution Evidence content was not bound to stale-decision reuse checks.
 
-Correction-1 addresses each issue without expanding the authorized Slice A write boundary.
+Correction-2 addresses these concerns without expanding the authorized Slice A write boundary.
 
-## Existing contract reuse
+## Classification provenance and Action binding
 
-`AgentTaskV1` remains the canonical task contract. The Scope Guard uses the existing task parser and reuses:
+`ScopeEvidenceClassificationV1` remains evidence, not authority.
 
-- objective
-- allowedPaths
-- forbiddenPaths
-- acceptanceCriteria
-- constraints
-- repository/base revision binding
+Every classification now carries `ScopeClassificationProvenanceV1`:
 
-The Scope Guard adds only facts not owned by `AgentTaskV1`:
+```text
+producer
+method
+version
+evidenceRefs
+actionBinding
+```
 
-- immutable Plan identity/version and Scope Snapshot identity
-- Canonical Approval Resolution Evidence
-- Proposed Action identity/content
-- evidence classifications with canonical source bindings
-- Shadow Scope Evaluation Record
+The `actionBinding` must match the actual Proposed Action across:
+
+```text
+proposedActionIdentity
+actionType
+description
+affectedTargets
+justification
+actor
+```
+
+The producer must also be different from the Proposed Action actor.
+
+Canonical rule:
+
+```text
+Classification Producer
+!=
+Proposed Action Actor
+```
+
+and:
+
+```text
+Scope Entry Exists
+!=
+Action Bound To Scope Entry
+```
+
+Classification and provenance evidence references must resolve against the canonical `ScopeEvaluationInputV1.evidenceRefs` set.
+
+If provenance does not bind to the exact Action or its evidence cannot be resolved:
+
+```text
+UNKNOWN
+CLASSIFICATION_PROVENANCE_INVALID
+```
+
+## Canonical source bindings
+
+The evaluator continues to resolve semantic claims against canonical Plan / AgentTask facts:
+
+```text
+explicitIncluded
+→ sourceBindings.explicitInScope
+→ PlanScopeSnapshotV1.explicitInScope
+```
+
+```text
+acceptanceRequired
+→ sourceBindings.acceptanceCriteria
+→ AgentTaskV1.acceptanceCriteria
+```
+
+```text
+explicitExcluded
+→ sourceBindings.explicitOutOfScope
+→ PlanScopeSnapshotV1.explicitOutOfScope
+```
+
+A Necessary Dependency must additionally resolve:
+
+```text
+acceptanceCriterion
+→ AgentTaskV1.acceptanceCriteria
+
+technicalConstraintRef
+→ ScopeEvaluationInputV1.evidenceRefs
+
+requiredChangeRef
+→ ScopeEvaluationInputV1.evidenceRefs
+```
+
+Non-empty references alone are insufficient.
+
+Canonical rule:
+
+```text
+Evidence Ref Exists As String
+!=
+Evidence Resolved
+```
+
+Unresolved binding produces:
+
+```text
+UNKNOWN
+CLASSIFICATION_BINDING_INVALID
+```
 
 ## Runtime contract validation
 
-`evaluatePlanScopeShadowV1` accepts an unknown runtime value and resolves it through `parsePlanScopeGuardInputV1` before evaluation.
+`evaluatePlanScopeShadowV1` still accepts `unknown` and runs `parsePlanScopeGuardInputV1` before evaluation.
 
-Validation is fail-closed and includes:
+Validation includes strict root/nested keys, canonical `AgentTaskV1` parsing, identity/reference fields, enum values, bounded arrays, repository-relative target paths, strict timestamps, classification source bindings, provenance shape, and Action binding shape.
 
-- strict root/nested keys
-- AgentTaskV1 parsing
-- required identity/reference fields
-- enum values
-- bounded arrays
-- repository-relative affected target paths
-- strict timestamps
-- classification shape
-- source-binding shape
+Malformed input returns:
 
-Malformed input returns `PLAN-SCOPE-GUARD-REJECTED-V1 / REJECTED_CONTRACT` and does not fabricate a Scope Decision.
+```text
+PLAN-SCOPE-GUARD-REJECTED-V1
+REJECTED_CONTRACT
+```
+
+without fabricating a Scope Decision.
 
 ## Approval / Scope state separation
 
@@ -91,7 +173,7 @@ Approval UNKNOWN
 → APPROVAL_RESOLUTION_REQUIRED
 ```
 
-Prohibited conversions remain:
+The following remain prohibited:
 
 ```text
 Approval INVALID → OUT_OF_SCOPE
@@ -99,160 +181,161 @@ Approval UNKNOWN → Scope UNKNOWN
 NOT_EVALUATED → fabricated Scope Decision
 ```
 
-## Scope evidence binding
+## Canonical scope-state precedence
 
-`ScopeEvidenceClassificationV1` is evidence, not authority.
+Correction-2 replaces optimistic pairwise priority with an explicit precedence matrix.
 
-A classification that claims canonical inclusion/exclusion must bind to the actual canonical source:
-
-```text
-explicitIncluded
-→ sourceBindings.explicitInScope
-→ must resolve to PlanScopeSnapshotV1.explicitInScope
-```
+After contract, approval, evidence-binding, provenance, and dependency validation:
 
 ```text
-acceptanceRequired
-→ sourceBindings.acceptanceCriteria
-→ must resolve to AgentTaskV1.acceptanceCriteria
+1. Explicit exclusion + inclusion/material extension
+   → UNKNOWN / CONFLICTING_SCOPE
+
+2. Contradictory semantic states
+   → UNKNOWN / CONTRADICTORY_CLASSIFICATION
+
+3. Explicit exclusion alone
+   → OUT_OF_SCOPE
+
+4. materialPlanChangeRequired
+   → SCOPE_EXTENSION_REQUIRED
+
+5. Outside allowed path without material extension
+   → OUT_OF_SCOPE
+
+6. Current-plan inclusion
+   → IN_SCOPE
+
+7. Opportunistic/generalization/future/unplanned work
+   → OUT_OF_SCOPE
+
+8. Otherwise
+   → UNKNOWN
 ```
+
+Important invariant:
 
 ```text
-explicitExcluded
-→ sourceBindings.explicitOutOfScope
-→ must resolve to PlanScopeSnapshotV1.explicitOutOfScope
+materialPlanChangeRequired = true
++
+ordinary IN_SCOPE evidence
+→ must not silently become IN_SCOPE
 ```
 
-A necessary-dependency claim must bind to an existing Acceptance Criterion and carry technical-constraint and required-change evidence references.
+Therefore a Necessary Dependency that also requires a material Plan change is classified as `SCOPE_EXTENSION_REQUIRED`, not ordinary `IN_SCOPE`.
 
-Unresolved classification binding produces:
-
-```text
-UNKNOWN
-CLASSIFICATION_BINDING_INVALID
-```
-
-Worker justification by itself never creates canonical inclusion.
+A material extension combined with opportunistic, unrequested-generalization, or future-only classification fails closed as `UNKNOWN / CONTRADICTORY_CLASSIFICATION`.
 
 ## Actual path boundary evaluation
 
-The evaluator compares every `proposedAction.affectedTargets` value against existing `AgentTaskV1.allowedPaths` and `forbiddenPaths`.
+The evaluator compares every `proposedAction.affectedTargets` value against `AgentTaskV1.allowedPaths` and `forbiddenPaths`.
 
 ```text
-Target intersects forbiddenPaths
+Forbidden target
 +
-canonical inclusion claim
+canonical inclusion/material extension
 → UNKNOWN / CONFLICTING_SCOPE
 ```
 
 ```text
-Target outside allowedPaths
+Outside allowed path
 +
 materialPlanChangeRequired
 → SCOPE_EXTENSION_REQUIRED / PATH_OUTSIDE_ALLOWED_SCOPE
 ```
 
 ```text
-Target outside allowedPaths
-without approved extension evidence
+Outside allowed path
+without material extension
 → OUT_OF_SCOPE / PATH_OUTSIDE_ALLOWED_SCOPE
 ```
 
-Being inside an allowed path is only a boundary condition. It does not by itself prove semantic IN_SCOPE status.
-
-## Contradiction fail-closed
-
-Contradictory evidence is not resolved by priority order into an optimistic state.
-
-Examples:
-
-```text
-explicitIncluded
-+
-unrequestedGeneralization
-→ UNKNOWN / CONTRADICTORY_CLASSIFICATION
-```
-
-```text
-materialPlanChangeRequired
-+
-opportunisticWork
-→ UNKNOWN / CONTRADICTORY_CLASSIFICATION
-```
+Being inside an allowed path never proves semantic `IN_SCOPE` status by itself.
 
 ## Content-derived decision binding
 
-Correction-1 adds deterministic SHA-256 fingerprints over canonical JSON facts.
+The Scope Evaluation Record is bound to three canonical fingerprints:
 
-`planScopeFingerprint` binds the Scope Decision to:
+```text
+planScopeFingerprint
+approvalResolutionFingerprint
+proposedActionFingerprint
+```
 
-- task identity/repository/base revision
-- objective
-- allowed/forbidden paths
-- acceptance criteria
-- task constraints
-- Plan identity/version
-- Scope Snapshot identity
-- explicit in-scope/out-of-scope contents
+### Plan Scope fingerprint
 
-`proposedActionFingerprint` binds the decision to:
+Binds Task/Plan identity and content including objective, repository/base revision, path boundaries, acceptance criteria, constraints, Plan identity/version, Scope Snapshot identity, and explicit scope contents.
 
-- Proposed Action identity
-- action type
-- description
-- affected targets
-- justification
-- actor
-- classification values
-- classification evidence references
-- classification source bindings
+### Proposed Action fingerprint
 
-A prior decision is reusable only when both identity bindings and content-derived fingerprints still match.
+Binds Proposed Action content, classification, source bindings, and classification provenance.
+
+### Approval Resolution fingerprint
+
+Binds:
+
+```text
+approvalResolutionEvidenceId
+planIdentity
+planVersion
+canonicalApprovalContractRef
+canonicalApprovalResolverRef
+planApprovalDecisionRef
+planApprovalAuthorityRef
+approvalStateSemanticsRef
+resolutionResult
+reasonCode
+resolvedAt
+evidenceRefs
+supersededBy
+```
+
+Reuse requires both Approval Evidence ID and Approval Evidence fingerprint equality.
 
 Therefore:
 
 ```text
-Action content changed
+same Approval Evidence ID
 +
-Action Identity unchanged
-→ prior decision NOT REUSABLE
+VALID → INVALID
+→ prior Scope Decision NOT REUSABLE
 ```
 
 and:
 
 ```text
-Plan scope content changed
+same Approval Evidence ID
 +
-Scope Snapshot Identity unchanged
-→ prior decision NOT REUSABLE
+supersededBy changes
+→ prior Scope Decision NOT REUSABLE
 ```
 
 ## Synthetic fixture single source
 
-`docs/plan-scope-guard/fixtures/fixture-set-v1.json` is the canonical executable fixture registry.
+`docs/plan-scope-guard/fixtures/fixture-set-v1.json` remains the canonical executable fixture registry.
 
-The file uses schema:
+Schema:
 
-`PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V2`
-
-Vitest loads this registry directly and executes its patches/expected outcomes instead of maintaining a duplicate hand-written scenario list.
+`PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V3`
 
 Current fixture baseline:
 
 ```text
 Positive fixtures: 14
-Negative / fail-open fixtures: 11
-Total: 25
+Negative / fail-open fixtures: 17
+Total: 31
 ```
 
-Correction-specific coverage includes:
+Correction-2 adds coverage for:
 
-- forbidden target plus caller inclusion claim
-- Action content change with stable identity
-- Plan scope content change with stable snapshot identity
-- contradictory inclusion/generalization
-- contradictory extension/opportunistic work
-- malformed Approval evidence contract
+- stale Action provenance despite a valid scope-entry reference
+- unresolved Necessary Dependency evidence refs
+- material extension + unrequested generalization
+- material extension + Necessary Dependency precedence
+- Approval VALID → INVALID with stable evidence ID
+- Approval supersession with stable evidence ID
+
+Vitest loads the registry directly and executes all fixture patches and expected outcomes.
 
 All fixtures are synthetic. No customer production data, credentials, or personal information are used.
 
@@ -268,7 +351,7 @@ Slice A continues to export explicit `false` constants for:
 - Merge
 - Deploy
 
-Correction-1 does not change those boundaries.
+Correction-2 does not change these boundaries.
 
 ## Implementation files
 
@@ -291,21 +374,21 @@ migrations/**
 
 ## Verification state
 
-Local isolated verification performed while preparing Correction-1 established:
+Correction-2 preparation established:
 
 ```text
-TypeScript structural check of corrected component/test shape: PASS
-Synthetic fixture logic: 25 / 25 expected behavior confirmed
+Focused TypeScript structural compile: PASS
+Synthetic canonical fixture harness: 31 / 31 PASS
 ```
 
-These results are implementation-preparation evidence only. Exact-head repository `npm run typecheck`, `npm test`, and `npm run build` still require repository/CI execution evidence before Independent Implementation Re-Review can declare the implementation complete.
+These are focused correction evidence only. Repository-wide exact-head `npm run typecheck`, `npm test`, and `npm run build` still require repository/CI execution evidence before Slice A can be considered complete.
 
 ## Next gate
 
-After exact-head identity and repository verification evidence are established:
+After exact-head identity is fixed:
 
 ```text
 PLAN-SCOPE-GUARD-V1
 Slice A
-Independent Implementation Re-Review-1
+Independent Implementation Re-Review-2
 ```
