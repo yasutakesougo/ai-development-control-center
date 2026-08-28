@@ -15,7 +15,10 @@ import {
   type ApprovalResolutionEvidenceV1,
   type PlanScopeGuardResultV1,
   type PlanScopeSnapshotV1,
+  type ProposedActionTypeV1,
   type ProposedActionV1,
+  type ScopeActionBindingV1,
+  type ScopeClassificationProvenanceV1,
   type ScopeEvaluationInputV1,
   type ScopeEvaluationRecordV1,
   type ScopeEvidenceClassificationV1,
@@ -24,14 +27,26 @@ import {
 
 const BASE_SHA = "c15dbd60fe51bcb894dc555fee5defb859d3df5f";
 const EVALUATED_AT = "2026-08-28T12:02:00+09:00";
+const DEFAULT_EVIDENCE_REFS = [
+  "evidence://input/1",
+  "evidence://scope/1",
+  "evidence://classification/1",
+  "evidence://constraint/parser",
+  "evidence://change/parser",
+  "evidence://constraint/db",
+  "evidence://change/db",
+];
 
 type FixturePatch = {
   task?: Partial<AgentTaskV1>;
   plan?: Partial<PlanScopeSnapshotV1>;
   approval?: Partial<ApprovalResolutionEvidenceV1>;
-  action?: Partial<ProposedActionV1>;
-  classification?: Partial<ScopeEvidenceClassificationV1>;
+  action?: Partial<Omit<ProposedActionV1, "classification">>;
+  classification?: Partial<Omit<ScopeEvidenceClassificationV1, "sourceBindings" | "provenance">>;
   sourceBindings?: Partial<ScopeEvidenceSourceBindingsV1>;
+  provenance?: Partial<Omit<ScopeClassificationProvenanceV1, "actionBinding">>;
+  actionBinding?: Partial<ScopeActionBindingV1>;
+  inputEvidenceRefs?: string[];
 };
 
 type FixtureExpected = {
@@ -62,10 +77,7 @@ type FixtureSet = {
 };
 
 const fixtureSet = JSON.parse(
-  readFileSync(
-    new URL("../docs/plan-scope-guard/fixtures/fixture-set-v1.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("../docs/plan-scope-guard/fixtures/fixture-set-v1.json", import.meta.url), "utf8"),
 ) as FixtureSet;
 
 function task(overrides: Partial<AgentTaskV1> = {}): AgentTaskV1 {
@@ -117,20 +129,52 @@ function approval(overrides: Partial<ApprovalResolutionEvidenceV1> = {}): Approv
   };
 }
 
-function sourceBindings(
-  overrides: Partial<ScopeEvidenceSourceBindingsV1> = {},
-): ScopeEvidenceSourceBindingsV1 {
+function sourceBindings(overrides: Partial<ScopeEvidenceSourceBindingsV1> = {}): ScopeEvidenceSourceBindingsV1 {
+  return { explicitInScope: [], acceptanceCriteria: [], explicitOutOfScope: [], ...overrides };
+}
+
+function actionCore(overrides: Partial<Omit<ProposedActionV1, "classification">> = {}): Omit<ProposedActionV1, "classification"> {
   return {
-    explicitInScope: [],
-    acceptanceCriteria: [],
-    explicitOutOfScope: [],
+    proposedActionIdentity: "action-1",
+    actionType: "FILE_MODIFICATION" as ProposedActionTypeV1,
+    description: "Apply one bounded domain change.",
+    affectedTargets: ["src/domain/example.ts"],
+    proposedAt: "2026-08-28T12:01:00+09:00",
+    actor: "worker://synthetic",
     ...overrides,
   };
 }
 
+function provenance(
+  core: Omit<ProposedActionV1, "classification">,
+  overrides: Partial<Omit<ScopeClassificationProvenanceV1, "actionBinding">> = {},
+  actionBindingOverrides: Partial<ScopeActionBindingV1> = {},
+): ScopeClassificationProvenanceV1 {
+  const actionBinding: ScopeActionBindingV1 = {
+    proposedActionIdentity: core.proposedActionIdentity,
+    actionType: core.actionType,
+    description: core.description,
+    affectedTargets: [...core.affectedTargets],
+    actor: core.actor,
+    ...(core.justification !== undefined ? { justification: core.justification } : {}),
+    ...actionBindingOverrides,
+  };
+  return {
+    producer: "reviewer://synthetic",
+    method: "INDEPENDENT_REVIEW",
+    version: "1",
+    evidenceRefs: ["evidence://classification/1"],
+    ...overrides,
+    actionBinding,
+  };
+}
+
 function classification(
-  overrides: Partial<ScopeEvidenceClassificationV1> = {},
+  core: Omit<ProposedActionV1, "classification">,
+  overrides: Partial<Omit<ScopeEvidenceClassificationV1, "sourceBindings" | "provenance">> = {},
   bindingOverrides: Partial<ScopeEvidenceSourceBindingsV1> = {},
+  provenanceOverrides: Partial<Omit<ScopeClassificationProvenanceV1, "actionBinding">> = {},
+  actionBindingOverrides: Partial<ScopeActionBindingV1> = {},
 ): ScopeEvidenceClassificationV1 {
   return {
     explicitIncluded: false,
@@ -147,33 +191,27 @@ function classification(
     evidenceRefs: ["evidence://scope/1"],
     ...overrides,
     sourceBindings: sourceBindings(bindingOverrides),
-  };
-}
-
-function action(
-  overrides: Partial<ProposedActionV1> = {},
-  classificationOverrides: Partial<ScopeEvidenceClassificationV1> = {},
-  bindingOverrides: Partial<ScopeEvidenceSourceBindingsV1> = {},
-): ProposedActionV1 {
-  return {
-    proposedActionIdentity: "action-1",
-    actionType: "FILE_MODIFICATION",
-    description: "Apply one bounded domain change.",
-    affectedTargets: ["src/domain/example.ts"],
-    proposedAt: "2026-08-28T12:01:00+09:00",
-    actor: "worker://synthetic",
-    ...overrides,
-    classification: classification(classificationOverrides, bindingOverrides),
+    provenance: provenance(core, provenanceOverrides, actionBindingOverrides),
   };
 }
 
 function buildInput(patch: FixturePatch = {}): ScopeEvaluationInputV1 {
+  const core = actionCore(patch.action);
   return {
     task: task(patch.task),
     plan: plan(patch.plan),
     approval: approval(patch.approval),
-    proposedAction: action(patch.action, patch.classification, patch.sourceBindings),
-    evidenceRefs: ["evidence://input/1"],
+    proposedAction: {
+      ...core,
+      classification: classification(
+        core,
+        patch.classification,
+        patch.sourceBindings,
+        patch.provenance,
+        patch.actionBinding,
+      ),
+    },
+    evidenceRefs: patch.inputEvidenceRefs ?? DEFAULT_EVIDENCE_REFS,
     guardActor: "guard://shadow",
     evaluatedAt: EVALUATED_AT,
   };
@@ -187,19 +225,21 @@ function mergePatch(base: FixturePatch = {}, change: FixturePatch = {}): Fixture
     action: { ...base.action, ...change.action },
     classification: { ...base.classification, ...change.classification },
     sourceBindings: { ...base.sourceBindings, ...change.sourceBindings },
+    provenance: { ...base.provenance, ...change.provenance },
+    actionBinding: { ...base.actionBinding, ...change.actionBinding },
+    inputEvidenceRefs: change.inputEvidenceRefs ?? base.inputEvidenceRefs,
   };
 }
 
 function isRejected(result: PlanScopeGuardResultV1): boolean {
   return "resultType" in result && result.resultType === "CONTRACT_REJECTED";
 }
-
 function asEvaluation(result: PlanScopeGuardResultV1): ScopeEvaluationRecordV1 {
   expect(isRejected(result)).toBe(false);
   return result as ScopeEvaluationRecordV1;
 }
 
-describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-1", () => {
+describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-2", () => {
   it("keeps runtime and mutation surfaces disabled", () => {
     expect(PLAN_SCOPE_GUARD_RUNTIME_ENFORCEMENT_IMPLEMENTED).toBe(false);
     expect(PLAN_SCOPE_GUARD_WORKER_STOP_IMPLEMENTED).toBe(false);
@@ -211,24 +251,21 @@ describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-1", () => {
   });
 
   it("uses the JSON fixture registry as the canonical executable source", () => {
-    expect(fixtureSet.schemaVersion).toBe("PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V2");
+    expect(fixtureSet.schemaVersion).toBe("PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V3");
     expect(fixtureSet.syntheticOnly).toBe(true);
     expect(fixtureSet.canonicalSource).toBe(true);
     expect(fixtureSet.baseline).toBe(BASE_SHA);
-    expect(fixtureSet.fixtures).toHaveLength(25);
-    expect(new Set(fixtureSet.fixtures.map((fixture) => fixture.id)).size).toBe(25);
+    expect(fixtureSet.fixtures).toHaveLength(31);
+    expect(new Set(fixtureSet.fixtures.map((fixture) => fixture.id)).size).toBe(31);
   });
 
   for (const fixture of fixtureSet.fixtures) {
     it(`${fixture.id} ${fixture.scenario}`, async () => {
       const baseInput = buildInput(fixture.patch);
-
       if (fixture.expected.priorDecisionReusable !== undefined) {
         const first = asEvaluation(await evaluatePlanScopeShadowV1(baseInput));
         const changedInput = buildInput(mergePatch(fixture.patch, fixture.reuseMutation));
-        expect(await isScopeEvaluationReusableV1(first, changedInput)).toBe(
-          fixture.expected.priorDecisionReusable,
-        );
+        expect(await isScopeEvaluationReusableV1(first, changedInput)).toBe(fixture.expected.priorDecisionReusable);
         return;
       }
 
@@ -254,12 +291,11 @@ describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-1", () => {
         expect(evaluation.reasonCodes).toContain(fixture.expected.reasonCode);
       }
       if (fixture.expected.scopeDecisionPresent !== undefined) {
-        expect(Object.prototype.hasOwnProperty.call(evaluation, "scopeDecision")).toBe(
-          fixture.expected.scopeDecisionPresent,
-        );
+        expect(Object.prototype.hasOwnProperty.call(evaluation, "scopeDecision")).toBe(fixture.expected.scopeDecisionPresent);
       }
       expect(evaluation.decisionMode).toBe("SHADOW");
       expect(evaluation.planScopeFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(evaluation.approvalResolutionFingerprint).toMatch(/^[a-f0-9]{64}$/);
       expect(evaluation.proposedActionFingerprint).toMatch(/^[a-f0-9]{64}$/);
     });
   }
@@ -274,5 +310,12 @@ describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-1", () => {
     const value = { ...buildInput(), evaluatedAt: "2026-02-30T12:00:00Z" };
     expect(parsePlanScopeGuardInputV1(value).ok).toBe(false);
     expect(isRejected(await evaluatePlanScopeShadowV1(value))).toBe(true);
+  });
+
+  it("rejects self-produced classification provenance", async () => {
+    const value = buildInput({ provenance: { producer: "worker://synthetic" } });
+    const evaluation = asEvaluation(await evaluatePlanScopeShadowV1(value));
+    expect(evaluation.scopeDecision).toBe("UNKNOWN");
+    expect(evaluation.reasonCodes).toContain("CLASSIFICATION_PROVENANCE_INVALID");
   });
 });
