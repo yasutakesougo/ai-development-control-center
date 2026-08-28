@@ -1,10 +1,9 @@
 import { parseAgentTaskV1, type AgentTaskV1 } from "./agentTaskContract";
 import { canonicalJson } from "./decisionFingerprint";
 
-export const PLAN_SCOPE_GUARD_EVALUATOR_VERSION = "PLAN-SCOPE-GUARD-V1-SLICE-A.2" as const;
+export const PLAN_SCOPE_GUARD_EVALUATOR_VERSION = "PLAN-SCOPE-GUARD-V1-SLICE-A.3" as const;
 export const PLAN_SCOPE_GUARD_DECISION_MODE = "SHADOW" as const;
 
-/** Slice A is observation/evaluation only. */
 export const PLAN_SCOPE_GUARD_RUNTIME_ENFORCEMENT_IMPLEMENTED = false as const;
 export const PLAN_SCOPE_GUARD_WORKER_STOP_IMPLEMENTED = false as const;
 export const PLAN_SCOPE_GUARD_PLAN_MUTATION_IMPLEMENTED = false as const;
@@ -15,11 +14,7 @@ export const PLAN_SCOPE_GUARD_DEPLOY_IMPLEMENTED = false as const;
 
 export type ApprovalResolutionResultV1 = "VALID" | "INVALID" | "UNKNOWN";
 export type ScopeEvaluationStatusV1 = "EVALUATED" | "NOT_EVALUATED";
-export type ScopeDecisionV1 =
-  | "IN_SCOPE"
-  | "SCOPE_EXTENSION_REQUIRED"
-  | "OUT_OF_SCOPE"
-  | "UNKNOWN";
+export type ScopeDecisionV1 = "IN_SCOPE" | "SCOPE_EXTENSION_REQUIRED" | "OUT_OF_SCOPE" | "UNKNOWN";
 
 export type ScopeReasonCodeV1 =
   | "PLAN_EXPLICIT"
@@ -36,6 +31,7 @@ export type ScopeReasonCodeV1 =
   | "APPROVAL_RESOLUTION_REQUIRED"
   | "PATH_OUTSIDE_ALLOWED_SCOPE"
   | "CLASSIFICATION_BINDING_INVALID"
+  | "CLASSIFICATION_PROVENANCE_INVALID"
   | "CONTRADICTORY_CLASSIFICATION";
 
 export type ProposedActionTypeV1 =
@@ -47,6 +43,11 @@ export type ProposedActionTypeV1 =
   | "INFRASTRUCTURE_CHANGE"
   | "CONFIGURATION_CHANGE"
   | "OTHER";
+
+export type ScopeClassificationMethodV1 =
+  | "DETERMINISTIC_RULE"
+  | "INDEPENDENT_REVIEW"
+  | "SEMANTIC_CLASSIFIER";
 
 export interface PlanScopeSnapshotV1 {
   planId: string;
@@ -86,7 +87,24 @@ export interface ScopeEvidenceSourceBindingsV1 {
   necessaryDependency?: NecessaryDependencyBindingV1;
 }
 
-/** Classification is evidence only; sourceBindings must resolve against canonical inputs. */
+export interface ScopeActionBindingV1 {
+  proposedActionIdentity: string;
+  actionType: ProposedActionTypeV1;
+  description: string;
+  affectedTargets: string[];
+  justification?: string;
+  actor: string;
+}
+
+export interface ScopeClassificationProvenanceV1 {
+  producer: string;
+  method: ScopeClassificationMethodV1;
+  version: string;
+  evidenceRefs: string[];
+  actionBinding: ScopeActionBindingV1;
+}
+
+/** Classification is evidence, never execution or approval authority. */
 export interface ScopeEvidenceClassificationV1 {
   explicitIncluded: boolean;
   acceptanceRequired: boolean;
@@ -101,6 +119,7 @@ export interface ScopeEvidenceClassificationV1 {
   evidenceSufficient: boolean;
   evidenceRefs: string[];
   sourceBindings: ScopeEvidenceSourceBindingsV1;
+  provenance: ScopeClassificationProvenanceV1;
 }
 
 export interface ProposedActionV1 {
@@ -135,6 +154,7 @@ export interface ScopeEvaluationRecordV1 {
   planIdentity: string;
   planScopeFingerprint: string;
   approvalResolutionEvidenceRef: string;
+  approvalResolutionFingerprint: string;
   scopeSnapshotIdentity: string;
   proposedActionIdentity: string;
   proposedActionFingerprint: string;
@@ -166,13 +186,18 @@ const ACTION_KEYS = ["proposedActionIdentity", "actionType", "description", "aff
 const CLASSIFICATION_KEYS = [
   "explicitIncluded", "acceptanceRequired", "necessaryDependency", "necessaryDependencyChainComplete",
   "explicitExcluded", "opportunisticWork", "unrequestedGeneralization", "futureOnlyWork", "unplannedDependency",
-  "materialPlanChangeRequired", "evidenceSufficient", "evidenceRefs", "sourceBindings",
+  "materialPlanChangeRequired", "evidenceSufficient", "evidenceRefs", "sourceBindings", "provenance",
 ] as const;
 const SOURCE_BINDING_KEYS = ["explicitInScope", "acceptanceCriteria", "explicitOutOfScope", "necessaryDependency"] as const;
 const NECESSARY_BINDING_KEYS = ["acceptanceCriterion", "technicalConstraintRef", "requiredChangeRef"] as const;
+const PROVENANCE_KEYS = ["producer", "method", "version", "evidenceRefs", "actionBinding"] as const;
+const ACTION_BINDING_KEYS = ["proposedActionIdentity", "actionType", "description", "affectedTargets", "justification", "actor"] as const;
 const ACTION_TYPES: readonly ProposedActionTypeV1[] = [
   "FILE_MODIFICATION", "NEW_FILE", "DEPENDENCY_ADDITION", "REFACTOR", "ARCHITECTURE_CHANGE",
   "INFRASTRUCTURE_CHANGE", "CONFIGURATION_CHANGE", "OTHER",
+];
+const CLASSIFICATION_METHODS: readonly ScopeClassificationMethodV1[] = [
+  "DETERMINISTIC_RULE", "INDEPENDENT_REVIEW", "SEMANTIC_CLASSIFIER",
 ];
 const STRICT_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
@@ -212,13 +237,10 @@ function isStrictTimestamp(value: unknown): value is string {
   const second = Number(match[6]);
   const offsetHour = match[8] === "Z" ? 0 : Number(match[10]);
   const offsetMinute = match[8] === "Z" ? 0 : Number(match[11]);
-  return month >= 1 && month <= 12 &&
-    day >= 1 && day <= daysInMonth(year, month) &&
-    hour >= 0 && hour <= 23 &&
-    minute >= 0 && minute <= 59 &&
-    second >= 0 && second <= 59 &&
-    offsetHour >= 0 && offsetHour <= 23 &&
-    offsetMinute >= 0 && offsetMinute <= 59;
+  return year >= 1 && year <= 9999 && month >= 1 && month <= 12 &&
+    day >= 1 && day <= daysInMonth(year, month) && hour >= 0 && hour <= 23 &&
+    minute >= 0 && minute <= 59 && second >= 0 && second <= 59 &&
+    offsetHour >= 0 && offsetHour <= 23 && offsetMinute >= 0 && offsetMinute <= 59;
 }
 function normalizeRepoPath(value: string): string {
   return value.replace(/^\.\//, "").replace(/\/+$/, "");
@@ -233,6 +255,11 @@ function pathWithin(target: string, boundary: string): boolean {
   const t = normalizeRepoPath(target);
   const b = normalizeRepoPath(boundary);
   return t === b || t.startsWith(`${b}/`);
+}
+function sameStringSet(left: string[], right: string[]): boolean {
+  const a = [...left].map(normalizeRepoPath).sort();
+  const b = [...right].map(normalizeRepoPath).sort();
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 function reject(reasonMessage: string): PlanScopeGuardRejectedV1 {
   return { schemaVersion: "PLAN-SCOPE-GUARD-REJECTED-V1", resultType: "CONTRACT_REJECTED", reasonCode: "REJECTED_CONTRACT", reasonMessage };
@@ -270,16 +297,36 @@ function parseSourceBindings(value: unknown): ScopeEvidenceSourceBindingsV1 | nu
   }
   return value as unknown as ScopeEvidenceSourceBindingsV1;
 }
+function parseActionBinding(value: unknown): ScopeActionBindingV1 | null {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, ACTION_BINDING_KEYS)) return null;
+  const required = ACTION_BINDING_KEYS.filter((key) => key !== "justification");
+  if (!hasAllKeys(value, required)) return null;
+  if (![value.proposedActionIdentity, value.description, value.actor].every(isNonEmpty)) return null;
+  if (!(ACTION_TYPES as readonly unknown[]).includes(value.actionType)) return null;
+  if (!Array.isArray(value.affectedTargets) || value.affectedTargets.length < 1 || value.affectedTargets.length > 256 || !value.affectedTargets.every(isRepoPath)) return null;
+  if (value.justification !== undefined && !isNonEmpty(value.justification)) return null;
+  return value as unknown as ScopeActionBindingV1;
+}
+function parseProvenance(value: unknown): ScopeClassificationProvenanceV1 | null {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, PROVENANCE_KEYS) || !hasAllKeys(value, PROVENANCE_KEYS)) return null;
+  if (![value.producer, value.version].every(isNonEmpty)) return null;
+  if (!(CLASSIFICATION_METHODS as readonly unknown[]).includes(value.method)) return null;
+  if (!isStringArray(value.evidenceRefs, 128) || value.evidenceRefs.length < 1) return null;
+  const actionBinding = parseActionBinding(value.actionBinding);
+  if (!actionBinding) return null;
+  return { ...(value as unknown as Omit<ScopeClassificationProvenanceV1, "actionBinding">), actionBinding };
+}
 function parseClassification(value: unknown): ScopeEvidenceClassificationV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, CLASSIFICATION_KEYS) || !hasAllKeys(value, CLASSIFICATION_KEYS)) return null;
   for (const key of CLASSIFICATION_KEYS) {
-    if (["evidenceRefs", "sourceBindings"].includes(key)) continue;
+    if (["evidenceRefs", "sourceBindings", "provenance"].includes(key)) continue;
     if (!isBoolean(value[key])) return null;
   }
-  if (!isStringArray(value.evidenceRefs, 128)) return null;
+  if (!isStringArray(value.evidenceRefs, 128) || value.evidenceRefs.length < 1) return null;
   const sourceBindings = parseSourceBindings(value.sourceBindings);
-  if (!sourceBindings) return null;
-  return { ...(value as unknown as Omit<ScopeEvidenceClassificationV1, "sourceBindings">), sourceBindings };
+  const provenance = parseProvenance(value.provenance);
+  if (!sourceBindings || !provenance) return null;
+  return { ...(value as unknown as Omit<ScopeEvidenceClassificationV1, "sourceBindings" | "provenance">), sourceBindings, provenance };
 }
 function parseAction(value: unknown): ProposedActionV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ACTION_KEYS)) return null;
@@ -309,7 +356,7 @@ export function parsePlanScopeGuardInputV1(value: unknown):
   if (!approval) return { ok: false, reasonCode: "REJECTED_CONTRACT", reasonMessage: "ApprovalResolutionEvidenceV1 is malformed." };
   const proposedAction = parseAction(value.proposedAction);
   if (!proposedAction) return { ok: false, reasonCode: "REJECTED_CONTRACT", reasonMessage: "ProposedActionV1 is malformed." };
-  if (!isStringArray(value.evidenceRefs, 256)) return { ok: false, reasonCode: "REJECTED_CONTRACT", reasonMessage: "evidenceRefs must be a bounded non-empty-string array." };
+  if (!isStringArray(value.evidenceRefs, 256)) return { ok: false, reasonCode: "REJECTED_CONTRACT", reasonMessage: "evidenceRefs must be a bounded string array." };
   if (!isNonEmpty(value.guardActor) || !isStrictTimestamp(value.evaluatedAt)) return { ok: false, reasonCode: "REJECTED_CONTRACT", reasonMessage: "guardActor or evaluatedAt is malformed." };
   return { ok: true, input: { task: task.task, plan, approval, proposedAction, evidenceRefs: value.evidenceRefs, guardActor: value.guardActor, evaluatedAt: value.evaluatedAt } };
 }
@@ -343,6 +390,24 @@ export async function computePlanScopeFingerprintV1(input: ScopeEvaluationInputV
   });
 }
 
+export async function computeApprovalResolutionFingerprintV1(approval: ApprovalResolutionEvidenceV1): Promise<string> {
+  return sha256Canonical({
+    approvalResolutionEvidenceId: approval.approvalResolutionEvidenceId,
+    planIdentity: approval.planIdentity,
+    planVersion: approval.planVersion,
+    canonicalApprovalContractRef: approval.canonicalApprovalContractRef,
+    canonicalApprovalResolverRef: approval.canonicalApprovalResolverRef,
+    planApprovalDecisionRef: approval.planApprovalDecisionRef,
+    planApprovalAuthorityRef: approval.planApprovalAuthorityRef,
+    approvalStateSemanticsRef: approval.approvalStateSemanticsRef,
+    resolutionResult: approval.resolutionResult,
+    reasonCode: approval.reasonCode,
+    resolvedAt: approval.resolvedAt,
+    evidenceRefs: [...approval.evidenceRefs].sort(),
+    supersededBy: approval.supersededBy,
+  });
+}
+
 export async function computeProposedActionFingerprintV1(action: ProposedActionV1): Promise<string> {
   return sha256Canonical({
     proposedActionIdentity: action.proposedActionIdentity,
@@ -360,6 +425,14 @@ export async function computeProposedActionFingerprintV1(action: ProposedActionV
         explicitOutOfScope: [...action.classification.sourceBindings.explicitOutOfScope].sort(),
         necessaryDependency: action.classification.sourceBindings.necessaryDependency,
       },
+      provenance: {
+        ...action.classification.provenance,
+        evidenceRefs: [...action.classification.provenance.evidenceRefs].sort(),
+        actionBinding: {
+          ...action.classification.provenance.actionBinding,
+          affectedTargets: [...action.classification.provenance.actionBinding.affectedTargets].map(normalizeRepoPath).sort(),
+        },
+      },
     },
   });
 }
@@ -367,8 +440,11 @@ export async function computeProposedActionFingerprintV1(action: ProposedActionV
 function allBindingsResolve(values: string[], canonical: string[]): boolean {
   return values.every((value) => canonical.includes(value));
 }
+function evidenceRefsResolve(values: string[], canonicalEvidenceRefs: string[]): boolean {
+  return values.length > 0 && values.every((value) => canonicalEvidenceRefs.includes(value));
+}
 
-function bindingInvalid(input: ScopeEvaluationInputV1): boolean {
+function sourceBindingInvalid(input: ScopeEvaluationInputV1): boolean {
   const c = input.proposedAction.classification;
   const b = c.sourceBindings;
   if (c.explicitIncluded && (b.explicitInScope.length < 1 || !allBindingsResolve(b.explicitInScope, input.plan.explicitInScope))) return true;
@@ -377,8 +453,24 @@ function bindingInvalid(input: ScopeEvaluationInputV1): boolean {
   if (c.necessaryDependency) {
     const n = b.necessaryDependency;
     if (!n || !input.task.acceptanceCriteria.includes(n.acceptanceCriterion)) return true;
-    if (!isNonEmpty(n.technicalConstraintRef) || !isNonEmpty(n.requiredChangeRef)) return true;
+    if (!input.evidenceRefs.includes(n.technicalConstraintRef) || !input.evidenceRefs.includes(n.requiredChangeRef)) return true;
   }
+  return false;
+}
+
+function provenanceInvalid(input: ScopeEvaluationInputV1): boolean {
+  const action = input.proposedAction;
+  const p = action.classification.provenance;
+  const binding = p.actionBinding;
+  if (p.producer === action.actor) return true;
+  if (!evidenceRefsResolve(action.classification.evidenceRefs, input.evidenceRefs)) return true;
+  if (!evidenceRefsResolve(p.evidenceRefs, input.evidenceRefs)) return true;
+  if (binding.proposedActionIdentity !== action.proposedActionIdentity) return true;
+  if (binding.actionType !== action.actionType) return true;
+  if (binding.description !== action.description) return true;
+  if (binding.actor !== action.actor) return true;
+  if ((binding.justification ?? undefined) !== (action.justification ?? undefined)) return true;
+  if (!sameStringSet(binding.affectedTargets, action.affectedTargets)) return true;
   return false;
 }
 
@@ -387,7 +479,8 @@ function classificationContradictory(input: ScopeEvaluationInputV1): boolean {
   const positive = c.explicitIncluded || c.acceptanceRequired || c.necessaryDependency;
   const negative = c.opportunisticWork || c.unrequestedGeneralization || c.futureOnlyWork;
   if (positive && negative) return true;
-  if (c.materialPlanChangeRequired && c.opportunisticWork) return true;
+  if (c.materialPlanChangeRequired && negative) return true;
+  if (positive && c.unplannedDependency && !c.materialPlanChangeRequired) return true;
   if (c.necessaryDependencyChainComplete && !c.necessaryDependency) return true;
   return false;
 }
@@ -411,11 +504,18 @@ function approvalIneligible(input: ScopeEvaluationInputV1): ScopeReasonCodeV1 | 
 
 async function baseRecord(input: ScopeEvaluationInputV1): Promise<Omit<ScopeEvaluationRecordV1, "scopeEvaluationStatus" | "reasonCodes">> {
   const planScopeFingerprint = await computePlanScopeFingerprintV1(input);
+  const approvalResolutionFingerprint = await computeApprovalResolutionFingerprintV1(input.approval);
   const proposedActionFingerprint = await computeProposedActionFingerprintV1(input.proposedAction);
   return {
     schemaVersion: "PLAN-SCOPE-GUARD-SCOPE-EVALUATION-V1",
     evaluatorVersion: PLAN_SCOPE_GUARD_EVALUATOR_VERSION,
-    scopeEvaluationId: [PLAN_SCOPE_GUARD_EVALUATOR_VERSION, input.plan.planIdentity, input.plan.scopeSnapshotIdentity, input.approval.approvalResolutionEvidenceId, proposedActionFingerprint].join(":"),
+    scopeEvaluationId: [
+      PLAN_SCOPE_GUARD_EVALUATOR_VERSION,
+      input.plan.planIdentity,
+      input.plan.scopeSnapshotIdentity,
+      approvalResolutionFingerprint,
+      proposedActionFingerprint,
+    ].join(":"),
     decisionMode: PLAN_SCOPE_GUARD_DECISION_MODE,
     taskId: input.task.taskId,
     planId: input.plan.planId,
@@ -423,10 +523,11 @@ async function baseRecord(input: ScopeEvaluationInputV1): Promise<Omit<ScopeEval
     planIdentity: input.plan.planIdentity,
     planScopeFingerprint,
     approvalResolutionEvidenceRef: input.approval.approvalResolutionEvidenceId,
+    approvalResolutionFingerprint,
     scopeSnapshotIdentity: input.plan.scopeSnapshotIdentity,
     proposedActionIdentity: input.proposedAction.proposedActionIdentity,
     proposedActionFingerprint,
-    evidenceRefs: [...new Set([...input.evidenceRefs, ...input.proposedAction.classification.evidenceRefs])].sort(),
+    evidenceRefs: [...new Set([...input.evidenceRefs, ...input.proposedAction.classification.evidenceRefs, ...input.proposedAction.classification.provenance.evidenceRefs])].sort(),
     guardActor: input.guardActor,
     evaluatedAt: input.evaluatedAt,
   };
@@ -439,6 +540,17 @@ async function evaluated(input: ScopeEvaluationInputV1, scopeDecision: ScopeDeci
   return { ...(await baseRecord(input)), scopeEvaluationStatus: "EVALUATED", scopeDecision, reasonCodes };
 }
 
+/**
+ * Canonical precedence matrix after contract/provenance validation:
+ * 1. explicit exclusion conflicts with inclusion or material extension -> UNKNOWN
+ * 2. contradictory semantic states -> UNKNOWN
+ * 3. explicit exclusion alone -> OUT_OF_SCOPE
+ * 4. material extension -> SCOPE_EXTENSION_REQUIRED (never ordinary IN_SCOPE)
+ * 5. outside allowed path without authorized extension -> OUT_OF_SCOPE
+ * 6. current-plan inclusion -> IN_SCOPE
+ * 7. negative/unplanned work -> OUT_OF_SCOPE
+ * 8. otherwise -> UNKNOWN
+ */
 export async function evaluatePlanScopeShadowV1(raw: unknown): Promise<PlanScopeGuardResultV1> {
   const parsed = parsePlanScopeGuardInputV1(raw);
   if (!parsed.ok) return reject(parsed.reasonMessage);
@@ -447,28 +559,30 @@ export async function evaluatePlanScopeShadowV1(raw: unknown): Promise<PlanScope
   if (ineligibleReason) return notEvaluated(input, ineligibleReason);
 
   const c = input.proposedAction.classification;
-  if (!c.evidenceSufficient || c.evidenceRefs.length === 0) return evaluated(input, "UNKNOWN", ["INSUFFICIENT_EVIDENCE"]);
-  if (bindingInvalid(input)) return evaluated(input, "UNKNOWN", ["CLASSIFICATION_BINDING_INVALID"]);
-  if (classificationContradictory(input)) return evaluated(input, "UNKNOWN", ["CONTRADICTORY_CLASSIFICATION"]);
+  if (!c.evidenceSufficient) return evaluated(input, "UNKNOWN", ["INSUFFICIENT_EVIDENCE"]);
+  if (sourceBindingInvalid(input)) return evaluated(input, "UNKNOWN", ["CLASSIFICATION_BINDING_INVALID"]);
+  if (provenanceInvalid(input)) return evaluated(input, "UNKNOWN", ["CLASSIFICATION_PROVENANCE_INVALID"]);
   if (c.necessaryDependency && !c.necessaryDependencyChainComplete) return evaluated(input, "UNKNOWN", ["INSUFFICIENT_EVIDENCE"]);
+  if (classificationContradictory(input)) return evaluated(input, "UNKNOWN", ["CONTRADICTORY_CLASSIFICATION"]);
 
   const paths = pathFacts(input);
-  const canonicalIncluded = c.explicitIncluded || c.acceptanceRequired || c.necessaryDependency;
-  const canonicalExcluded = paths.anyForbidden || c.explicitExcluded;
-  if (canonicalExcluded && canonicalIncluded) return evaluated(input, "UNKNOWN", ["CONFLICTING_SCOPE"]);
-  if (canonicalExcluded) return evaluated(input, "OUT_OF_SCOPE", ["EXPLICITLY_EXCLUDED"]);
-  if (!paths.allAllowed) {
-    if (c.materialPlanChangeRequired) return evaluated(input, "SCOPE_EXTENSION_REQUIRED", ["PATH_OUTSIDE_ALLOWED_SCOPE"]);
-    return evaluated(input, "OUT_OF_SCOPE", ["PATH_OUTSIDE_ALLOWED_SCOPE"]);
+  const included = c.explicitIncluded || c.acceptanceRequired || c.necessaryDependency;
+  const negative = c.opportunisticWork || c.unrequestedGeneralization || c.futureOnlyWork;
+  const excluded = paths.anyForbidden || c.explicitExcluded;
+
+  if (excluded && (included || c.materialPlanChangeRequired)) return evaluated(input, "UNKNOWN", ["CONFLICTING_SCOPE"]);
+  if (excluded) return evaluated(input, "OUT_OF_SCOPE", ["EXPLICITLY_EXCLUDED"]);
+  if (c.materialPlanChangeRequired) {
+    return evaluated(input, "SCOPE_EXTENSION_REQUIRED", [paths.allAllowed ? "UNPLANNED_DEPENDENCY" : "PATH_OUTSIDE_ALLOWED_SCOPE"]);
   }
+  if (!paths.allAllowed) return evaluated(input, "OUT_OF_SCOPE", ["PATH_OUTSIDE_ALLOWED_SCOPE"]);
   if (c.explicitIncluded) return evaluated(input, "IN_SCOPE", ["PLAN_EXPLICIT"]);
   if (c.acceptanceRequired) return evaluated(input, "IN_SCOPE", ["AC_REQUIRED"]);
   if (c.necessaryDependency) return evaluated(input, "IN_SCOPE", ["NECESSARY_DEPENDENCY"]);
-  if (c.materialPlanChangeRequired) return evaluated(input, "SCOPE_EXTENSION_REQUIRED", ["UNPLANNED_DEPENDENCY"]);
   if (c.opportunisticWork) return evaluated(input, "OUT_OF_SCOPE", ["OPPORTUNISTIC_REFACTOR"]);
   if (c.unrequestedGeneralization) return evaluated(input, "OUT_OF_SCOPE", ["UNREQUESTED_GENERALIZATION"]);
   if (c.futureOnlyWork) return evaluated(input, "OUT_OF_SCOPE", ["FUTURE_ONLY_WORK"]);
-  if (c.unplannedDependency) return evaluated(input, "OUT_OF_SCOPE", ["UNPLANNED_DEPENDENCY"]);
+  if (c.unplannedDependency || negative) return evaluated(input, "OUT_OF_SCOPE", ["UNPLANNED_DEPENDENCY"]);
   return evaluated(input, "UNKNOWN", ["INSUFFICIENT_EVIDENCE"]);
 }
 
@@ -482,7 +596,8 @@ export async function isScopeEvaluationReusableV1(record: ScopeEvaluationRecordV
     record.planVersion === input.plan.planVersion &&
     record.scopeSnapshotIdentity === input.plan.scopeSnapshotIdentity &&
     record.approvalResolutionEvidenceRef === input.approval.approvalResolutionEvidenceId &&
-    record.proposedActionIdentity === input.proposedAction.proposedActionIdentity &&
     record.planScopeFingerprint === await computePlanScopeFingerprintV1(input) &&
+    record.approvalResolutionFingerprint === await computeApprovalResolutionFingerprintV1(input.approval) &&
+    record.proposedActionIdentity === input.proposedAction.proposedActionIdentity &&
     record.proposedActionFingerprint === await computeProposedActionFingerprintV1(input.proposedAction);
 }
