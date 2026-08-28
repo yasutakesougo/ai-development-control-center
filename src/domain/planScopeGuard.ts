@@ -174,7 +174,7 @@ const ACTION_TYPES: readonly ProposedActionTypeV1[] = [
   "FILE_MODIFICATION", "NEW_FILE", "DEPENDENCY_ADDITION", "REFACTOR", "ARCHITECTURE_CHANGE",
   "INFRASTRUCTURE_CHANGE", "CONFIGURATION_CHANGE", "OTHER",
 ];
-const STRICT_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+const STRICT_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -194,8 +194,31 @@ function isStringArray(value: unknown, max = 256): value is string[] {
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
 }
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+function daysInMonth(year: number, month: number): number {
+  return [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0;
+}
 function isStrictTimestamp(value: unknown): value is string {
-  return isNonEmpty(value) && STRICT_TIMESTAMP.test(value) && Number.isFinite(Date.parse(value));
+  if (!isNonEmpty(value)) return false;
+  const match = STRICT_TIMESTAMP.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = match[8] === "Z" ? 0 : Number(match[10]);
+  const offsetMinute = match[8] === "Z" ? 0 : Number(match[11]);
+  return month >= 1 && month <= 12 &&
+    day >= 1 && day <= daysInMonth(year, month) &&
+    hour >= 0 && hour <= 23 &&
+    minute >= 0 && minute <= 59 &&
+    second >= 0 && second <= 59 &&
+    offsetHour >= 0 && offsetHour <= 23 &&
+    offsetMinute >= 0 && offsetMinute <= 59;
 }
 function normalizeRepoPath(value: string): string {
   return value.replace(/^\.\//, "").replace(/\/+$/, "");
