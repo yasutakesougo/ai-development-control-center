@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { AgentTaskV1 } from "../src/domain/agentTaskContract";
 import {
@@ -10,15 +11,62 @@ import {
   PLAN_SCOPE_GUARD_WORKER_STOP_IMPLEMENTED,
   evaluatePlanScopeShadowV1,
   isScopeEvaluationReusableV1,
+  parsePlanScopeGuardInputV1,
   type ApprovalResolutionEvidenceV1,
+  type PlanScopeGuardResultV1,
   type PlanScopeSnapshotV1,
   type ProposedActionV1,
   type ScopeEvaluationInputV1,
+  type ScopeEvaluationRecordV1,
   type ScopeEvidenceClassificationV1,
+  type ScopeEvidenceSourceBindingsV1,
 } from "../src/domain/planScopeGuard";
 
 const BASE_SHA = "c15dbd60fe51bcb894dc555fee5defb859d3df5f";
 const EVALUATED_AT = "2026-08-28T12:02:00+09:00";
+
+type FixturePatch = {
+  task?: Partial<AgentTaskV1>;
+  plan?: Partial<PlanScopeSnapshotV1>;
+  approval?: Partial<ApprovalResolutionEvidenceV1>;
+  action?: Partial<ProposedActionV1>;
+  classification?: Partial<ScopeEvidenceClassificationV1>;
+  sourceBindings?: Partial<ScopeEvidenceSourceBindingsV1>;
+};
+
+type FixtureExpected = {
+  resultType?: "EVALUATION" | "CONTRACT_REJECTED";
+  scopeEvaluationStatus?: "EVALUATED" | "NOT_EVALUATED";
+  scopeDecision?: "IN_SCOPE" | "SCOPE_EXTENSION_REQUIRED" | "OUT_OF_SCOPE" | "UNKNOWN" | null;
+  forbiddenScopeDecision?: "IN_SCOPE" | "SCOPE_EXTENSION_REQUIRED" | "OUT_OF_SCOPE" | "UNKNOWN";
+  reasonCode?: string;
+  scopeDecisionPresent?: boolean;
+  priorDecisionReusable?: boolean;
+};
+
+type Fixture = {
+  id: string;
+  kind: "POSITIVE" | "NEGATIVE";
+  scenario: string;
+  patch?: FixturePatch;
+  expected: FixtureExpected;
+  reuseMutation?: FixturePatch;
+};
+
+type FixtureSet = {
+  schemaVersion: string;
+  syntheticOnly: boolean;
+  canonicalSource: boolean;
+  baseline: string;
+  fixtures: Fixture[];
+};
+
+const fixtureSet = JSON.parse(
+  readFileSync(
+    new URL("../docs/plan-scope-guard/fixtures/fixture-set-v1.json", import.meta.url),
+    "utf8",
+  ),
+) as FixtureSet;
 
 function task(overrides: Partial<AgentTaskV1> = {}): AgentTaskV1 {
   return {
@@ -26,10 +74,7 @@ function task(overrides: Partial<AgentTaskV1> = {}): AgentTaskV1 {
     taskId: "plan-scope-guard-v1-test",
     repository: "yasutakesougo/ai-development-control-center",
     baseRevision: BASE_SHA,
-    sourceIssue: {
-      repository: "yasutakesougo/ai-development-control-center",
-      number: 999,
-    },
+    sourceIssue: { repository: "yasutakesougo/ai-development-control-center", number: 999 },
     objective: "Implement one bounded change.",
     allowedPaths: ["src/domain"],
     forbiddenPaths: ["src/runtime"],
@@ -54,9 +99,7 @@ function plan(overrides: Partial<PlanScopeSnapshotV1> = {}): PlanScopeSnapshotV1
   };
 }
 
-function approval(
-  overrides: Partial<ApprovalResolutionEvidenceV1> = {},
-): ApprovalResolutionEvidenceV1 {
+function approval(overrides: Partial<ApprovalResolutionEvidenceV1> = {}): ApprovalResolutionEvidenceV1 {
   return {
     approvalResolutionEvidenceId: "approval-1",
     planIdentity: "plan-1-v1",
@@ -74,8 +117,20 @@ function approval(
   };
 }
 
+function sourceBindings(
+  overrides: Partial<ScopeEvidenceSourceBindingsV1> = {},
+): ScopeEvidenceSourceBindingsV1 {
+  return {
+    explicitInScope: [],
+    acceptanceCriteria: [],
+    explicitOutOfScope: [],
+    ...overrides,
+  };
+}
+
 function classification(
   overrides: Partial<ScopeEvidenceClassificationV1> = {},
+  bindingOverrides: Partial<ScopeEvidenceSourceBindingsV1> = {},
 ): ScopeEvidenceClassificationV1 {
   return {
     explicitIncluded: false,
@@ -91,10 +146,15 @@ function classification(
     evidenceSufficient: true,
     evidenceRefs: ["evidence://scope/1"],
     ...overrides,
+    sourceBindings: sourceBindings(bindingOverrides),
   };
 }
 
-function action(overrides: Partial<ProposedActionV1> = {}): ProposedActionV1 {
+function action(
+  overrides: Partial<ProposedActionV1> = {},
+  classificationOverrides: Partial<ScopeEvidenceClassificationV1> = {},
+  bindingOverrides: Partial<ScopeEvidenceSourceBindingsV1> = {},
+): ProposedActionV1 {
   return {
     proposedActionIdentity: "action-1",
     actionType: "FILE_MODIFICATION",
@@ -102,25 +162,44 @@ function action(overrides: Partial<ProposedActionV1> = {}): ProposedActionV1 {
     affectedTargets: ["src/domain/example.ts"],
     proposedAt: "2026-08-28T12:01:00+09:00",
     actor: "worker://synthetic",
-    classification: classification(),
     ...overrides,
+    classification: classification(classificationOverrides, bindingOverrides),
   };
 }
 
-function input(overrides: Partial<ScopeEvaluationInputV1> = {}): ScopeEvaluationInputV1 {
+function buildInput(patch: FixturePatch = {}): ScopeEvaluationInputV1 {
   return {
-    task: task(),
-    plan: plan(),
-    approval: approval(),
-    proposedAction: action(),
+    task: task(patch.task),
+    plan: plan(patch.plan),
+    approval: approval(patch.approval),
+    proposedAction: action(patch.action, patch.classification, patch.sourceBindings),
     evidenceRefs: ["evidence://input/1"],
     guardActor: "guard://shadow",
     evaluatedAt: EVALUATED_AT,
-    ...overrides,
   };
 }
 
-describe("PLAN-SCOPE-GUARD-V1 Slice A", () => {
+function mergePatch(base: FixturePatch = {}, change: FixturePatch = {}): FixturePatch {
+  return {
+    task: { ...base.task, ...change.task },
+    plan: { ...base.plan, ...change.plan },
+    approval: { ...base.approval, ...change.approval },
+    action: { ...base.action, ...change.action },
+    classification: { ...base.classification, ...change.classification },
+    sourceBindings: { ...base.sourceBindings, ...change.sourceBindings },
+  };
+}
+
+function isRejected(result: PlanScopeGuardResultV1): boolean {
+  return "resultType" in result && result.resultType === "CONTRACT_REJECTED";
+}
+
+function asEvaluation(result: PlanScopeGuardResultV1): ScopeEvaluationRecordV1 {
+  expect(isRejected(result)).toBe(false);
+  return result as ScopeEvaluationRecordV1;
+}
+
+describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-1", () => {
   it("keeps runtime and mutation surfaces disabled", () => {
     expect(PLAN_SCOPE_GUARD_RUNTIME_ENFORCEMENT_IMPLEMENTED).toBe(false);
     expect(PLAN_SCOPE_GUARD_WORKER_STOP_IMPLEMENTED).toBe(false);
@@ -131,214 +210,69 @@ describe("PLAN-SCOPE-GUARD-V1 Slice A", () => {
     expect(PLAN_SCOPE_GUARD_DEPLOY_IMPLEMENTED).toBe(false);
   });
 
-  it("FX-001 Explicit In-Scope → IN_SCOPE / PLAN_EXPLICIT", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ proposedAction: action({ classification: classification({ explicitIncluded: true }) }) }),
-    );
-    expect(result.scopeEvaluationStatus).toBe("EVALUATED");
-    expect(result.scopeDecision).toBe("IN_SCOPE");
-    expect(result.reasonCodes).toContain("PLAN_EXPLICIT");
-    expect(result.decisionMode).toBe("SHADOW");
+  it("uses the JSON fixture registry as the canonical executable source", () => {
+    expect(fixtureSet.schemaVersion).toBe("PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V2");
+    expect(fixtureSet.syntheticOnly).toBe(true);
+    expect(fixtureSet.canonicalSource).toBe(true);
+    expect(fixtureSet.baseline).toBe(BASE_SHA);
+    expect(fixtureSet.fixtures).toHaveLength(25);
+    expect(new Set(fixtureSet.fixtures.map((fixture) => fixture.id)).size).toBe(25);
   });
 
-  it("FX-002 Acceptance Required → IN_SCOPE / AC_REQUIRED", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ proposedAction: action({ classification: classification({ acceptanceRequired: true }) }) }),
-    );
-    expect(result.scopeDecision).toBe("IN_SCOPE");
-    expect(result.reasonCodes).toContain("AC_REQUIRED");
+  for (const fixture of fixtureSet.fixtures) {
+    it(`${fixture.id} ${fixture.scenario}`, async () => {
+      const baseInput = buildInput(fixture.patch);
+
+      if (fixture.expected.priorDecisionReusable !== undefined) {
+        const first = asEvaluation(await evaluatePlanScopeShadowV1(baseInput));
+        const changedInput = buildInput(mergePatch(fixture.patch, fixture.reuseMutation));
+        expect(await isScopeEvaluationReusableV1(first, changedInput)).toBe(
+          fixture.expected.priorDecisionReusable,
+        );
+        return;
+      }
+
+      const result = await evaluatePlanScopeShadowV1(baseInput);
+      if (fixture.expected.resultType === "CONTRACT_REJECTED") {
+        expect(isRejected(result)).toBe(true);
+        return;
+      }
+
+      const evaluation = asEvaluation(result);
+      if (fixture.expected.scopeEvaluationStatus !== undefined) {
+        expect(evaluation.scopeEvaluationStatus).toBe(fixture.expected.scopeEvaluationStatus);
+      }
+      if (fixture.expected.scopeDecision === null) {
+        expect(evaluation.scopeDecision).toBeUndefined();
+      } else if (fixture.expected.scopeDecision !== undefined) {
+        expect(evaluation.scopeDecision).toBe(fixture.expected.scopeDecision);
+      }
+      if (fixture.expected.forbiddenScopeDecision !== undefined) {
+        expect(evaluation.scopeDecision).not.toBe(fixture.expected.forbiddenScopeDecision);
+      }
+      if (fixture.expected.reasonCode !== undefined) {
+        expect(evaluation.reasonCodes).toContain(fixture.expected.reasonCode);
+      }
+      if (fixture.expected.scopeDecisionPresent !== undefined) {
+        expect(Object.prototype.hasOwnProperty.call(evaluation, "scopeDecision")).toBe(
+          fixture.expected.scopeDecisionPresent,
+        );
+      }
+      expect(evaluation.decisionMode).toBe("SHADOW");
+      expect(evaluation.planScopeFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(evaluation.proposedActionFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    });
+  }
+
+  it("rejects unknown root properties before scope evaluation", async () => {
+    const value = { ...buildInput(), unexpected: true };
+    expect(parsePlanScopeGuardInputV1(value).ok).toBe(false);
+    expect(isRejected(await evaluatePlanScopeShadowV1(value))).toBe(true);
   });
 
-  it("FX-003 Necessary Dependency → IN_SCOPE only with complete chain", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({
-        proposedAction: action({
-          classification: classification({
-            necessaryDependency: true,
-            necessaryDependencyChainComplete: true,
-          }),
-        }),
-      }),
-    );
-    expect(result.scopeDecision).toBe("IN_SCOPE");
-    expect(result.reasonCodes).toContain("NECESSARY_DEPENDENCY");
-  });
-
-  it("FX-004 Explicit Out-of-Scope → OUT_OF_SCOPE", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ proposedAction: action({ classification: classification({ explicitExcluded: true }) }) }),
-    );
-    expect(result.scopeDecision).toBe("OUT_OF_SCOPE");
-    expect(result.reasonCodes).toContain("EXPLICITLY_EXCLUDED");
-  });
-
-  it("FX-005 Necessary + Explicit Exclusion → UNKNOWN / CONFLICTING_SCOPE", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({
-        proposedAction: action({
-          classification: classification({
-            explicitExcluded: true,
-            necessaryDependency: true,
-            necessaryDependencyChainComplete: true,
-          }),
-        }),
-      }),
-    );
-    expect(result.scopeDecision).toBe("UNKNOWN");
-    expect(result.reasonCodes).toContain("CONFLICTING_SCOPE");
-  });
-
-  it("FX-006 Opportunistic Fix → OUT_OF_SCOPE", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ proposedAction: action({ classification: classification({ opportunisticWork: true }) }) }),
-    );
-    expect(result.scopeDecision).toBe("OUT_OF_SCOPE");
-    expect(result.reasonCodes).toContain("OPPORTUNISTIC_REFACTOR");
-  });
-
-  it("FX-007 Future-only Generalization → OUT_OF_SCOPE", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({
-        proposedAction: action({
-          classification: classification({ unrequestedGeneralization: true }),
-        }),
-      }),
-    );
-    expect(result.scopeDecision).toBe("OUT_OF_SCOPE");
-    expect(result.reasonCodes).toContain("UNREQUESTED_GENERALIZATION");
-  });
-
-  it("FX-008 Rational Scope Extension → SCOPE_EXTENSION_REQUIRED", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({
-        proposedAction: action({
-          classification: classification({
-            unplannedDependency: true,
-            materialPlanChangeRequired: true,
-          }),
-        }),
-      }),
-    );
-    expect(result.scopeDecision).toBe("SCOPE_EXTENSION_REQUIRED");
-    expect(result.reasonCodes).toContain("UNPLANNED_DEPENDENCY");
-  });
-
-  it("FX-009 Evidence Insufficient → UNKNOWN", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({
-        proposedAction: action({
-          classification: classification({ evidenceSufficient: false, evidenceRefs: [] }),
-        }),
-      }),
-    );
-    expect(result.scopeDecision).toBe("UNKNOWN");
-    expect(result.reasonCodes).toContain("INSUFFICIENT_EVIDENCE");
-  });
-
-  it("FX-010 Approval INVALID → NOT_EVALUATED and no scopeDecision", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ approval: approval({ resolutionResult: "INVALID" }) }),
-    );
-    expect(result.scopeEvaluationStatus).toBe("NOT_EVALUATED");
-    expect(result.scopeDecision).toBeUndefined();
-    expect(result.reasonCodes).toEqual(["PLAN_NOT_APPROVED"]);
-  });
-
-  it("FX-011 Approval UNKNOWN → NOT_EVALUATED and no scopeDecision", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ approval: approval({ resolutionResult: "UNKNOWN" }) }),
-    );
-    expect(result.scopeEvaluationStatus).toBe("NOT_EVALUATED");
-    expect(result.scopeDecision).toBeUndefined();
-    expect(result.reasonCodes).toEqual(["APPROVAL_RESOLUTION_REQUIRED"]);
-  });
-
-  it("FX-012 Action Identity Changed → prior decision not reusable", () => {
-    const base = input({ proposedAction: action({ classification: classification({ explicitIncluded: true }) }) });
-    const result = evaluatePlanScopeShadowV1(base);
-    const changed: ScopeEvaluationInputV1 = {
-      ...base,
-      proposedAction: { ...base.proposedAction, proposedActionIdentity: "action-2" },
-    };
-    expect(isScopeEvaluationReusableV1(result, changed)).toBe(false);
-  });
-
-  it("FX-013 Plan Identity Changed → prior decision not reusable", () => {
-    const base = input({ proposedAction: action({ classification: classification({ explicitIncluded: true }) }) });
-    const result = evaluatePlanScopeShadowV1(base);
-    const changed: ScopeEvaluationInputV1 = {
-      ...base,
-      plan: { ...base.plan, planIdentity: "plan-2-v1" },
-    };
-    expect(isScopeEvaluationReusableV1(result, changed)).toBe(false);
-  });
-
-  it("FX-014 Scope Snapshot Changed → prior decision not reusable", () => {
-    const base = input({ proposedAction: action({ classification: classification({ explicitIncluded: true }) }) });
-    const result = evaluatePlanScopeShadowV1(base);
-    const changed: ScopeEvaluationInputV1 = {
-      ...base,
-      plan: { ...base.plan, scopeSnapshotIdentity: "scope-2" },
-    };
-    expect(isScopeEvaluationReusableV1(result, changed)).toBe(false);
-  });
-
-  it("NG-001 rejects INVALID → OUT_OF_SCOPE fail-open conversion", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ approval: approval({ resolutionResult: "INVALID" }) }),
-    );
-    expect(result.scopeDecision).not.toBe("OUT_OF_SCOPE");
-    expect(result.scopeEvaluationStatus).toBe("NOT_EVALUATED");
-  });
-
-  it("NG-002 rejects Approval UNKNOWN → Scope UNKNOWN conversion", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ approval: approval({ resolutionResult: "UNKNOWN" }) }),
-    );
-    expect(result.scopeDecision).not.toBe("UNKNOWN");
-    expect(result.scopeEvaluationStatus).toBe("NOT_EVALUATED");
-  });
-
-  it("NG-003 rejects missing Approval Evidence as evaluable", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ approval: approval({ canonicalApprovalContractRef: "" }) }),
-    );
-    expect(result.scopeEvaluationStatus).toBe("NOT_EVALUATED");
-    expect(result.scopeDecision).toBeUndefined();
-  });
-
-  it("NG-004 rejects prior IN_SCOPE reuse after Action identity change", () => {
-    const base = input({ proposedAction: action({ classification: classification({ explicitIncluded: true }) }) });
-    const result = evaluatePlanScopeShadowV1(base);
-    expect(
-      isScopeEvaluationReusableV1(result, {
-        ...base,
-        proposedAction: { ...base.proposedAction, proposedActionIdentity: "changed-action" },
-      }),
-    ).toBe(false);
-  });
-
-  it("NG-005 rejects worker-style inclusion claim overriding explicit exclusion", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({
-        proposedAction: action({
-          justification: "This is required.",
-          classification: classification({
-            acceptanceRequired: true,
-            explicitExcluded: true,
-          }),
-        }),
-      }),
-    );
-    expect(result.scopeDecision).toBe("UNKNOWN");
-    expect(result.reasonCodes).toContain("CONFLICTING_SCOPE");
-  });
-
-  it("NG-006 never fabricates scopeDecision on NOT_EVALUATED", () => {
-    const result = evaluatePlanScopeShadowV1(
-      input({ approval: approval({ resolutionResult: "INVALID" }) }),
-    );
-    expect(result.scopeEvaluationStatus).toBe("NOT_EVALUATED");
-    expect(Object.prototype.hasOwnProperty.call(result, "scopeDecision")).toBe(false);
+  it("rejects malformed timestamps before scope evaluation", async () => {
+    const value = { ...buildInput(), evaluatedAt: "2026-02-30T12:00:00Z" };
+    expect(parsePlanScopeGuardInputV1(value).ok).toBe(false);
+    expect(isRejected(await evaluatePlanScopeShadowV1(value))).toBe(true);
   });
 });
