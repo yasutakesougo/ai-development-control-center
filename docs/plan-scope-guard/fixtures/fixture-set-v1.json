@@ -1,0 +1,148 @@
+{
+  "schemaVersion": "PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V1",
+  "syntheticOnly": true,
+  "baseline": "c15dbd60fe51bcb894dc555fee5defb859d3df5f",
+  "fixtures": [
+    {
+      "id": "FX-001",
+      "kind": "POSITIVE",
+      "scenario": "Explicit In-Scope",
+      "classificationOverrides": { "explicitIncluded": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "IN_SCOPE", "reasonCode": "PLAN_EXPLICIT" }
+    },
+    {
+      "id": "FX-002",
+      "kind": "POSITIVE",
+      "scenario": "Acceptance Required",
+      "classificationOverrides": { "acceptanceRequired": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "IN_SCOPE", "reasonCode": "AC_REQUIRED" }
+    },
+    {
+      "id": "FX-003",
+      "kind": "POSITIVE",
+      "scenario": "Necessary Dependency",
+      "classificationOverrides": { "necessaryDependency": true, "necessaryDependencyChainComplete": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "IN_SCOPE", "reasonCode": "NECESSARY_DEPENDENCY" }
+    },
+    {
+      "id": "FX-004",
+      "kind": "POSITIVE",
+      "scenario": "Explicit Out-of-Scope",
+      "classificationOverrides": { "explicitExcluded": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "OUT_OF_SCOPE", "reasonCode": "EXPLICITLY_EXCLUDED" }
+    },
+    {
+      "id": "FX-005",
+      "kind": "POSITIVE",
+      "scenario": "Necessary Dependency conflicts with Explicit Exclusion",
+      "classificationOverrides": { "explicitExcluded": true, "necessaryDependency": true, "necessaryDependencyChainComplete": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "UNKNOWN", "reasonCode": "CONFLICTING_SCOPE" }
+    },
+    {
+      "id": "FX-006",
+      "kind": "POSITIVE",
+      "scenario": "Opportunistic Fix",
+      "classificationOverrides": { "opportunisticWork": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "OUT_OF_SCOPE", "reasonCode": "OPPORTUNISTIC_REFACTOR" }
+    },
+    {
+      "id": "FX-007",
+      "kind": "POSITIVE",
+      "scenario": "Future-only Generalization",
+      "classificationOverrides": { "unrequestedGeneralization": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "OUT_OF_SCOPE", "reasonCode": "UNREQUESTED_GENERALIZATION" }
+    },
+    {
+      "id": "FX-008",
+      "kind": "POSITIVE",
+      "scenario": "Rational Scope Extension",
+      "classificationOverrides": { "unplannedDependency": true, "materialPlanChangeRequired": true },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "SCOPE_EXTENSION_REQUIRED", "reasonCode": "UNPLANNED_DEPENDENCY" }
+    },
+    {
+      "id": "FX-009",
+      "kind": "POSITIVE",
+      "scenario": "Evidence Insufficient",
+      "classificationOverrides": { "evidenceSufficient": false, "evidenceRefs": [] },
+      "expected": { "scopeEvaluationStatus": "EVALUATED", "scopeDecision": "UNKNOWN", "reasonCode": "INSUFFICIENT_EVIDENCE" }
+    },
+    {
+      "id": "FX-010",
+      "kind": "POSITIVE",
+      "scenario": "Approval INVALID",
+      "approvalOverrides": { "resolutionResult": "INVALID" },
+      "expected": { "scopeEvaluationStatus": "NOT_EVALUATED", "scopeDecision": null, "reasonCode": "PLAN_NOT_APPROVED" }
+    },
+    {
+      "id": "FX-011",
+      "kind": "POSITIVE",
+      "scenario": "Approval UNKNOWN",
+      "approvalOverrides": { "resolutionResult": "UNKNOWN" },
+      "expected": { "scopeEvaluationStatus": "NOT_EVALUATED", "scopeDecision": null, "reasonCode": "APPROVAL_RESOLUTION_REQUIRED" }
+    },
+    {
+      "id": "FX-012",
+      "kind": "POSITIVE",
+      "scenario": "Action Identity Changed",
+      "identityChange": { "proposedActionIdentity": "action-2" },
+      "expected": { "priorDecisionReusable": false }
+    },
+    {
+      "id": "FX-013",
+      "kind": "POSITIVE",
+      "scenario": "Plan Identity Changed",
+      "identityChange": { "planIdentity": "plan-2-v1" },
+      "expected": { "priorDecisionReusable": false }
+    },
+    {
+      "id": "FX-014",
+      "kind": "POSITIVE",
+      "scenario": "Scope Snapshot Changed",
+      "identityChange": { "scopeSnapshotIdentity": "scope-2" },
+      "expected": { "priorDecisionReusable": false }
+    },
+    {
+      "id": "NG-001",
+      "kind": "NEGATIVE",
+      "scenario": "Approval INVALID must not become OUT_OF_SCOPE",
+      "approvalOverrides": { "resolutionResult": "INVALID" },
+      "forbidden": { "scopeDecision": "OUT_OF_SCOPE" }
+    },
+    {
+      "id": "NG-002",
+      "kind": "NEGATIVE",
+      "scenario": "Approval UNKNOWN must not become Scope UNKNOWN",
+      "approvalOverrides": { "resolutionResult": "UNKNOWN" },
+      "forbidden": { "scopeDecision": "UNKNOWN" }
+    },
+    {
+      "id": "NG-003",
+      "kind": "NEGATIVE",
+      "scenario": "Missing Approval Evidence must not be evaluable",
+      "approvalOverrides": { "canonicalApprovalContractRef": "" },
+      "forbidden": { "scopeEvaluationStatus": "EVALUATED" }
+    },
+    {
+      "id": "NG-004",
+      "kind": "NEGATIVE",
+      "scenario": "Changed Action must not reuse prior IN_SCOPE decision",
+      "identityChange": { "proposedActionIdentity": "changed-action" },
+      "forbidden": { "priorDecisionReusable": true }
+    },
+    {
+      "id": "NG-005",
+      "kind": "NEGATIVE",
+      "scenario": "Worker justification must not override explicit exclusion",
+      "classificationOverrides": { "acceptanceRequired": true, "explicitExcluded": true },
+      "syntheticJustification": "This is required.",
+      "forbidden": { "scopeDecision": "IN_SCOPE" }
+    },
+    {
+      "id": "NG-006",
+      "kind": "NEGATIVE",
+      "scenario": "NOT_EVALUATED must not contain fabricated scopeDecision",
+      "approvalOverrides": { "resolutionResult": "INVALID" },
+      "forbidden": { "scopeDecisionPresent": true }
+    }
+  ]
+}
