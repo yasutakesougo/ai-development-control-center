@@ -23,10 +23,12 @@ import {
   type ScopeEvaluationRecordV1,
   type ScopeEvidenceClassificationV1,
   type ScopeEvidenceSourceBindingsV1,
+  type ScopeRelationRuleV1,
 } from "../src/domain/planScopeGuard";
 
 const BASE_SHA = "c15dbd60fe51bcb894dc555fee5defb859d3df5f";
 const EVALUATED_AT = "2026-08-28T12:02:00+09:00";
+const DEFAULT_DESCRIPTION = "Apply one bounded domain change.";
 const DEFAULT_EVIDENCE_REFS = [
   "evidence://input/1",
   "evidence://scope/1",
@@ -57,6 +59,7 @@ type FixtureExpected = {
   reasonCode?: string;
   scopeDecisionPresent?: boolean;
   priorDecisionReusable?: boolean;
+  newEvaluationIdDifferent?: boolean;
 };
 
 type Fixture = {
@@ -99,6 +102,64 @@ function task(overrides: Partial<AgentTaskV1> = {}): AgentTaskV1 {
   };
 }
 
+function defaultRelationRules(): ScopeRelationRuleV1[] {
+  const shared = {
+    actionTypes: ["FILE_MODIFICATION" as ProposedActionTypeV1],
+    actionDescriptions: [DEFAULT_DESCRIPTION],
+  };
+  return [
+    {
+      ruleId: "rule-in-domain",
+      relationKind: "EXPLICIT_IN_SCOPE",
+      sourceValue: "bounded change",
+      affectedPathPrefixes: ["src/domain"],
+      ...shared,
+    },
+    {
+      ruleId: "rule-in-runtime-conflict",
+      relationKind: "EXPLICIT_IN_SCOPE",
+      sourceValue: "bounded change",
+      affectedPathPrefixes: ["src/runtime"],
+      ...shared,
+    },
+    {
+      ruleId: "rule-ac-domain",
+      relationKind: "AC_REQUIRED",
+      sourceValue: "Required behavior works.",
+      affectedPathPrefixes: ["src/domain"],
+      ...shared,
+    },
+    {
+      ruleId: "rule-ac-runtime-conflict",
+      relationKind: "AC_REQUIRED",
+      sourceValue: "Required behavior works.",
+      affectedPathPrefixes: ["src/runtime"],
+      ...shared,
+    },
+    {
+      ruleId: "rule-dependency-domain",
+      relationKind: "NECESSARY_DEPENDENCY",
+      sourceValue: "Required behavior works.",
+      affectedPathPrefixes: ["src/domain"],
+      ...shared,
+    },
+    {
+      ruleId: "rule-dependency-runtime-conflict",
+      relationKind: "NECESSARY_DEPENDENCY",
+      sourceValue: "Required behavior works.",
+      affectedPathPrefixes: ["src/runtime"],
+      ...shared,
+    },
+    {
+      ruleId: "rule-out-runtime",
+      relationKind: "EXPLICIT_OUT_OF_SCOPE",
+      sourceValue: "runtime mutation",
+      affectedPathPrefixes: ["src/runtime"],
+      ...shared,
+    },
+  ];
+}
+
 function plan(overrides: Partial<PlanScopeSnapshotV1> = {}): PlanScopeSnapshotV1 {
   return {
     planId: "plan-1",
@@ -107,6 +168,7 @@ function plan(overrides: Partial<PlanScopeSnapshotV1> = {}): PlanScopeSnapshotV1
     scopeSnapshotIdentity: "scope-1",
     explicitInScope: ["bounded change"],
     explicitOutOfScope: ["runtime mutation"],
+    scopeRelationRules: defaultRelationRules(),
     ...overrides,
   };
 }
@@ -136,8 +198,8 @@ function sourceBindings(overrides: Partial<ScopeEvidenceSourceBindingsV1> = {}):
 function actionCore(overrides: Partial<Omit<ProposedActionV1, "classification">> = {}): Omit<ProposedActionV1, "classification"> {
   return {
     proposedActionIdentity: "action-1",
-    actionType: "FILE_MODIFICATION" as ProposedActionTypeV1,
-    description: "Apply one bounded domain change.",
+    actionType: "FILE_MODIFICATION",
+    description: DEFAULT_DESCRIPTION,
     affectedTargets: ["src/domain/example.ts"],
     proposedAt: "2026-08-28T12:01:00+09:00",
     actor: "worker://synthetic",
@@ -239,7 +301,7 @@ function asEvaluation(result: PlanScopeGuardResultV1): ScopeEvaluationRecordV1 {
   return result as ScopeEvaluationRecordV1;
 }
 
-describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-2", () => {
+describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-3", () => {
   it("keeps runtime and mutation surfaces disabled", () => {
     expect(PLAN_SCOPE_GUARD_RUNTIME_ENFORCEMENT_IMPLEMENTED).toBe(false);
     expect(PLAN_SCOPE_GUARD_WORKER_STOP_IMPLEMENTED).toBe(false);
@@ -251,21 +313,30 @@ describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-2", () => {
   });
 
   it("uses the JSON fixture registry as the canonical executable source", () => {
-    expect(fixtureSet.schemaVersion).toBe("PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V3");
+    expect(fixtureSet.schemaVersion).toBe("PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V4");
     expect(fixtureSet.syntheticOnly).toBe(true);
     expect(fixtureSet.canonicalSource).toBe(true);
     expect(fixtureSet.baseline).toBe(BASE_SHA);
-    expect(fixtureSet.fixtures).toHaveLength(31);
-    expect(new Set(fixtureSet.fixtures.map((fixture) => fixture.id)).size).toBe(31);
+    expect(fixtureSet.fixtures).toHaveLength(33);
+    expect(new Set(fixtureSet.fixtures.map((fixture) => fixture.id)).size).toBe(33);
   });
 
   for (const fixture of fixtureSet.fixtures) {
     it(`${fixture.id} ${fixture.scenario}`, async () => {
       const baseInput = buildInput(fixture.patch);
-      if (fixture.expected.priorDecisionReusable !== undefined) {
+      const needsReuseCheck = fixture.expected.priorDecisionReusable !== undefined;
+      const needsNewIdCheck = fixture.expected.newEvaluationIdDifferent !== undefined;
+
+      if (needsReuseCheck || needsNewIdCheck) {
         const first = asEvaluation(await evaluatePlanScopeShadowV1(baseInput));
         const changedInput = buildInput(mergePatch(fixture.patch, fixture.reuseMutation));
-        expect(await isScopeEvaluationReusableV1(first, changedInput)).toBe(fixture.expected.priorDecisionReusable);
+        if (needsReuseCheck) {
+          expect(await isScopeEvaluationReusableV1(first, changedInput)).toBe(fixture.expected.priorDecisionReusable);
+        }
+        if (needsNewIdCheck) {
+          const second = asEvaluation(await evaluatePlanScopeShadowV1(changedInput));
+          expect(second.scopeEvaluationId !== first.scopeEvaluationId).toBe(fixture.expected.newEvaluationIdDifferent);
+        }
         return;
       }
 
@@ -297,6 +368,7 @@ describe("PLAN-SCOPE-GUARD-V1 Slice A Correction-2", () => {
       expect(evaluation.planScopeFingerprint).toMatch(/^[a-f0-9]{64}$/);
       expect(evaluation.approvalResolutionFingerprint).toMatch(/^[a-f0-9]{64}$/);
       expect(evaluation.proposedActionFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(evaluation.scopeEvaluationId).toContain(evaluation.planScopeFingerprint);
     });
   }
 
