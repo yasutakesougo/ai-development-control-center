@@ -5,6 +5,7 @@
 - Definition: LOCKED
 - Implementation Start: GO
 - Slice: A — READ-ONLY / Shadow Evaluation
+- Implementation Correction: Correction-1
 - Repository baseline: `c15dbd60fe51bcb894dc555fee5defb859d3df5f`
 - Runtime Enforcement: NOT AUTHORIZED
 - Worker Intervention: NOT AUTHORIZED
@@ -16,32 +17,66 @@
 
 Slice A evaluates whether a proposed implementation action remains within an approved plan without changing the worker execution path.
 
-The component is observation/evaluation only:
-
 ```text
 READ
-→ normalize evidence
-→ check canonical approval eligibility
+→ validate contracts
+→ verify approval eligibility
+→ bind Plan / Task / Action evidence
 → evaluate scope
 → emit SHADOW evidence
 ```
 
 A shadow result never grants or denies execution authority.
 
+## Implementation Correction-1
+
+Independent Implementation Review-1 identified four issues:
+
+1. final decisions relied too heavily on caller-provided classification flags;
+2. reuse checks bound identity strings but not underlying Plan / Action content;
+3. the public evaluation path lacked strict runtime contract validation and contradiction fail-closed behavior;
+4. the JSON fixture registry and executable Vitest cases were separately maintained.
+
+Correction-1 addresses each issue without expanding the authorized Slice A write boundary.
+
 ## Existing contract reuse
 
-`AgentTaskV1` remains the task contract. The guard reuses its objective, path boundaries, acceptance criteria, constraints, and repository binding instead of creating a second task model.
+`AgentTaskV1` remains the canonical task contract. The Scope Guard uses the existing task parser and reuses:
 
-Slice A adds only the scope-control facts not owned by `AgentTaskV1`:
+- objective
+- allowedPaths
+- forbiddenPaths
+- acceptanceCriteria
+- constraints
+- repository/base revision binding
+
+The Scope Guard adds only facts not owned by `AgentTaskV1`:
 
 - immutable Plan identity/version and Scope Snapshot identity
 - Canonical Approval Resolution Evidence
-- Proposed Action identity and evidence classification
+- Proposed Action identity/content
+- evidence classifications with canonical source bindings
 - Shadow Scope Evaluation Record
 
-## State separation
+## Runtime contract validation
 
-Approval Resolution and Scope Decision are distinct state spaces.
+`evaluatePlanScopeShadowV1` accepts an unknown runtime value and resolves it through `parsePlanScopeGuardInputV1` before evaluation.
+
+Validation is fail-closed and includes:
+
+- strict root/nested keys
+- AgentTaskV1 parsing
+- required identity/reference fields
+- enum values
+- bounded arrays
+- repository-relative affected target paths
+- strict timestamps
+- classification shape
+- source-binding shape
+
+Malformed input returns `PLAN-SCOPE-GUARD-REJECTED-V1 / REJECTED_CONTRACT` and does not fabricate a Scope Decision.
+
+## Approval / Scope state separation
 
 ```text
 Approval VALID
@@ -56,7 +91,7 @@ Approval UNKNOWN
 → APPROVAL_RESOLUTION_REQUIRED
 ```
 
-The following conversions are prohibited:
+Prohibited conversions remain:
 
 ```text
 Approval INVALID → OUT_OF_SCOPE
@@ -64,57 +99,166 @@ Approval UNKNOWN → Scope UNKNOWN
 NOT_EVALUATED → fabricated Scope Decision
 ```
 
-Scope decisions, when evaluation is eligible, are:
+## Scope evidence binding
 
-- `IN_SCOPE`
-- `SCOPE_EXTENSION_REQUIRED`
-- `OUT_OF_SCOPE`
-- `UNKNOWN`
+`ScopeEvidenceClassificationV1` is evidence, not authority.
 
-## Evidence classification boundary
+A classification that claims canonical inclusion/exclusion must bind to the actual canonical source:
 
-`ScopeEvidenceClassificationV1` is input evidence, not authority. Slice A intentionally does not infer final scope from keywords in worker prose.
+```text
+explicitIncluded
+→ sourceBindings.explicitInScope
+→ must resolve to PlanScopeSnapshotV1.explicitInScope
+```
 
-Final decision resolution is deterministic over the evidence flags. A future classifier may produce candidate evidence, but it does not acquire execution or scope-approval authority by doing so.
+```text
+acceptanceRequired
+→ sourceBindings.acceptanceCriteria
+→ must resolve to AgentTaskV1.acceptanceCriteria
+```
 
-The guard requires fail-closed behavior when evidence is insufficient.
+```text
+explicitExcluded
+→ sourceBindings.explicitOutOfScope
+→ must resolve to PlanScopeSnapshotV1.explicitOutOfScope
+```
 
-## Necessary dependency
+A necessary-dependency claim must bind to an existing Acceptance Criterion and carry technical-constraint and required-change evidence references.
 
-A necessary dependency may support `IN_SCOPE` only when its dependency chain is established. An incomplete chain produces `UNKNOWN / INSUFFICIENT_EVIDENCE`.
-
-If a necessary or acceptance-required action also conflicts with an explicit exclusion, the result is:
+Unresolved classification binding produces:
 
 ```text
 UNKNOWN
-CONFLICTING_SCOPE
+CLASSIFICATION_BINDING_INVALID
 ```
 
-The explicit exclusion is not silently overridden.
+Worker justification by itself never creates canonical inclusion.
 
-## Scope extension
+## Actual path boundary evaluation
 
-A material plan change that is reasonably required but not approved in the current plan produces a shadow `SCOPE_EXTENSION_REQUIRED` decision.
+The evaluator compares every `proposedAction.affectedTargets` value against existing `AgentTaskV1.allowedPaths` and `forbiddenPaths`.
 
-Slice A does not create an amendment request and does not mutate the plan.
+```text
+Target intersects forbiddenPaths
++
+canonical inclusion claim
+→ UNKNOWN / CONFLICTING_SCOPE
+```
 
-## Identity binding and reuse
+```text
+Target outside allowedPaths
++
+materialPlanChangeRequired
+→ SCOPE_EXTENSION_REQUIRED / PATH_OUTSIDE_ALLOWED_SCOPE
+```
 
-A prior decision is reusable only when all of the following still match:
+```text
+Target outside allowedPaths
+without approved extension evidence
+→ OUT_OF_SCOPE / PATH_OUTSIDE_ALLOWED_SCOPE
+```
 
-- evaluator version
-- task identity
-- plan identity
-- plan version
-- scope snapshot identity
-- approval resolution evidence identity
-- proposed action identity
+Being inside an allowed path is only a boundary condition. It does not by itself prove semantic IN_SCOPE status.
 
-A changed plan, scope snapshot, approval evidence, or proposed action requires a new evaluation.
+## Contradiction fail-closed
+
+Contradictory evidence is not resolved by priority order into an optimistic state.
+
+Examples:
+
+```text
+explicitIncluded
++
+unrequestedGeneralization
+→ UNKNOWN / CONTRADICTORY_CLASSIFICATION
+```
+
+```text
+materialPlanChangeRequired
++
+opportunisticWork
+→ UNKNOWN / CONTRADICTORY_CLASSIFICATION
+```
+
+## Content-derived decision binding
+
+Correction-1 adds deterministic SHA-256 fingerprints over canonical JSON facts.
+
+`planScopeFingerprint` binds the Scope Decision to:
+
+- task identity/repository/base revision
+- objective
+- allowed/forbidden paths
+- acceptance criteria
+- task constraints
+- Plan identity/version
+- Scope Snapshot identity
+- explicit in-scope/out-of-scope contents
+
+`proposedActionFingerprint` binds the decision to:
+
+- Proposed Action identity
+- action type
+- description
+- affected targets
+- justification
+- actor
+- classification values
+- classification evidence references
+- classification source bindings
+
+A prior decision is reusable only when both identity bindings and content-derived fingerprints still match.
+
+Therefore:
+
+```text
+Action content changed
++
+Action Identity unchanged
+→ prior decision NOT REUSABLE
+```
+
+and:
+
+```text
+Plan scope content changed
++
+Scope Snapshot Identity unchanged
+→ prior decision NOT REUSABLE
+```
+
+## Synthetic fixture single source
+
+`docs/plan-scope-guard/fixtures/fixture-set-v1.json` is the canonical executable fixture registry.
+
+The file uses schema:
+
+`PLAN-SCOPE-GUARD-SYNTHETIC-FIXTURE-SET-V2`
+
+Vitest loads this registry directly and executes its patches/expected outcomes instead of maintaining a duplicate hand-written scenario list.
+
+Current fixture baseline:
+
+```text
+Positive fixtures: 14
+Negative / fail-open fixtures: 11
+Total: 25
+```
+
+Correction-specific coverage includes:
+
+- forbidden target plus caller inclusion claim
+- Action content change with stable identity
+- Plan scope content change with stable snapshot identity
+- contradictory inclusion/generalization
+- contradictory extension/opportunistic work
+- malformed Approval evidence contract
+
+All fixtures are synthetic. No customer production data, credentials, or personal information are used.
 
 ## Disabled capability evidence
 
-Slice A exports explicit `false` constants for prohibited surfaces:
+Slice A continues to export explicit `false` constants for:
 
 - runtime enforcement
 - worker stop
@@ -124,40 +268,7 @@ Slice A exports explicit `false` constants for prohibited surfaces:
 - Merge
 - Deploy
 
-Tests assert these values remain disabled.
-
-## Synthetic acceptance fixtures
-
-Synthetic fixtures are stored in `docs/plan-scope-guard/fixtures/fixture-set-v1.json`.
-
-The baseline set contains:
-
-```text
-Positive fixtures: 14
-Negative fail-open fixtures: 6
-Total: 20
-```
-
-No customer production data, credentials, or personal information are used.
-
-Positive scenarios cover:
-
-1. explicit in-scope
-2. acceptance-required action
-3. verified necessary dependency
-4. explicit exclusion
-5. necessary dependency vs explicit exclusion conflict
-6. opportunistic fix
-7. unrequested generalization
-8. rational scope extension
-9. insufficient evidence
-10. approval INVALID
-11. approval UNKNOWN
-12. changed action identity
-13. changed plan identity
-14. changed scope snapshot identity
-
-Negative scenarios cover prohibited fail-open conversions and stale decision reuse.
+Correction-1 does not change those boundaries.
 
 ## Implementation files
 
@@ -168,7 +279,7 @@ docs/plan-scope-guard/plan-scope-guard-v1.md
 docs/plan-scope-guard/fixtures/fixture-set-v1.json
 ```
 
-No Slice A change is required under:
+No Slice A change is authorized or required under:
 
 ```text
 src/worker/**
@@ -178,24 +289,23 @@ migrations/**
 .github/workflows/**
 ```
 
-## Acceptance target
+## Verification state
 
-The Slice A acceptance target is:
+Local isolated verification performed while preparing Correction-1 established:
 
 ```text
-FX-001..FX-014: expected behavior confirmed
-NG-001..NG-006: fail-open behavior rejected
-Total: 20 / 20
+TypeScript structural check of corrected component/test shape: PASS
+Synthetic fixture logic: 25 / 25 expected behavior confirmed
 ```
 
-Test success is implementation evidence only. It does not authorize Ready, Merge, Deploy, Runtime Enforcement, or Worker Intervention.
+These results are implementation-preparation evidence only. Exact-head repository `npm run typecheck`, `npm test`, and `npm run build` still require repository/CI execution evidence before Independent Implementation Re-Review can declare the implementation complete.
 
 ## Next gate
 
-After exact-head implementation evidence is available:
+After exact-head identity and repository verification evidence are established:
 
 ```text
 PLAN-SCOPE-GUARD-V1
 Slice A
-Independent Implementation Review-1
+Independent Implementation Re-Review-1
 ```
