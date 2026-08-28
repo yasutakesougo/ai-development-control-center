@@ -1,7 +1,7 @@
 import { parseAgentTaskV1, type AgentTaskV1 } from "./agentTaskContract";
 import { canonicalJson } from "./decisionFingerprint";
 
-export const PLAN_SCOPE_GUARD_EVALUATOR_VERSION = "PLAN-SCOPE-GUARD-V1-SLICE-A.3" as const;
+export const PLAN_SCOPE_GUARD_EVALUATOR_VERSION = "PLAN-SCOPE-GUARD-V1-SLICE-A.4" as const;
 export const PLAN_SCOPE_GUARD_DECISION_MODE = "SHADOW" as const;
 
 export const PLAN_SCOPE_GUARD_RUNTIME_ENFORCEMENT_IMPLEMENTED = false as const;
@@ -32,6 +32,7 @@ export type ScopeReasonCodeV1 =
   | "PATH_OUTSIDE_ALLOWED_SCOPE"
   | "CLASSIFICATION_BINDING_INVALID"
   | "CLASSIFICATION_PROVENANCE_INVALID"
+  | "SCOPE_RELATION_UNRESOLVED"
   | "CONTRADICTORY_CLASSIFICATION";
 
 export type ProposedActionTypeV1 =
@@ -49,6 +50,26 @@ export type ScopeClassificationMethodV1 =
   | "INDEPENDENT_REVIEW"
   | "SEMANTIC_CLASSIFIER";
 
+export type ScopeRelationKindV1 =
+  | "EXPLICIT_IN_SCOPE"
+  | "AC_REQUIRED"
+  | "EXPLICIT_OUT_OF_SCOPE"
+  | "NECESSARY_DEPENDENCY";
+
+/**
+ * Canonical, approved-plan relation rule.  Slice A deliberately uses exact
+ * action descriptions plus deterministic action/path selectors rather than
+ * trusting a caller's semantic boolean alone.
+ */
+export interface ScopeRelationRuleV1 {
+  ruleId: string;
+  relationKind: ScopeRelationKindV1;
+  sourceValue: string;
+  actionTypes: ProposedActionTypeV1[];
+  affectedPathPrefixes: string[];
+  actionDescriptions: string[];
+}
+
 export interface PlanScopeSnapshotV1 {
   planId: string;
   planVersion: string;
@@ -56,6 +77,7 @@ export interface PlanScopeSnapshotV1 {
   scopeSnapshotIdentity: string;
   explicitInScope: string[];
   explicitOutOfScope: string[];
+  scopeRelationRules: ScopeRelationRuleV1[];
 }
 
 export interface ApprovalResolutionEvidenceV1 {
@@ -176,7 +198,8 @@ export interface PlanScopeGuardRejectedV1 {
 export type PlanScopeGuardResultV1 = ScopeEvaluationRecordV1 | PlanScopeGuardRejectedV1;
 
 const ROOT_KEYS = ["task", "plan", "approval", "proposedAction", "evidenceRefs", "guardActor", "evaluatedAt"] as const;
-const PLAN_KEYS = ["planId", "planVersion", "planIdentity", "scopeSnapshotIdentity", "explicitInScope", "explicitOutOfScope"] as const;
+const PLAN_KEYS = ["planId", "planVersion", "planIdentity", "scopeSnapshotIdentity", "explicitInScope", "explicitOutOfScope", "scopeRelationRules"] as const;
+const RELATION_RULE_KEYS = ["ruleId", "relationKind", "sourceValue", "actionTypes", "affectedPathPrefixes", "actionDescriptions"] as const;
 const APPROVAL_KEYS = [
   "approvalResolutionEvidenceId", "planIdentity", "planVersion", "canonicalApprovalContractRef",
   "canonicalApprovalResolverRef", "planApprovalDecisionRef", "planApprovalAuthorityRef",
@@ -199,6 +222,9 @@ const ACTION_TYPES: readonly ProposedActionTypeV1[] = [
 const CLASSIFICATION_METHODS: readonly ScopeClassificationMethodV1[] = [
   "DETERMINISTIC_RULE", "INDEPENDENT_REVIEW", "SEMANTIC_CLASSIFIER",
 ];
+const RELATION_KINDS: readonly ScopeRelationKindV1[] = [
+  "EXPLICIT_IN_SCOPE", "AC_REQUIRED", "EXPLICIT_OUT_OF_SCOPE", "NECESSARY_DEPENDENCY",
+];
 const STRICT_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -215,6 +241,9 @@ function isNonEmpty(value: unknown): value is string {
 }
 function isStringArray(value: unknown, max = 256): value is string[] {
   return Array.isArray(value) && value.length <= max && value.every(isNonEmpty);
+}
+function isNonEmptyStringArray(value: unknown, max = 256): value is string[] {
+  return isStringArray(value, max) && value.length > 0;
 }
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
@@ -256,7 +285,7 @@ function pathWithin(target: string, boundary: string): boolean {
   const b = normalizeRepoPath(boundary);
   return t === b || t.startsWith(`${b}/`);
 }
-function sameStringSet(left: string[], right: string[]): boolean {
+function samePathSet(left: string[], right: string[]): boolean {
   const a = [...left].map(normalizeRepoPath).sort();
   const b = [...right].map(normalizeRepoPath).sort();
   return a.length === b.length && a.every((value, index) => value === b[index]);
@@ -265,12 +294,30 @@ function reject(reasonMessage: string): PlanScopeGuardRejectedV1 {
   return { schemaVersion: "PLAN-SCOPE-GUARD-REJECTED-V1", resultType: "CONTRACT_REJECTED", reasonCode: "REJECTED_CONTRACT", reasonMessage };
 }
 
+function parseRelationRule(value: unknown): ScopeRelationRuleV1 | null {
+  if (!isPlainObject(value) || !hasOnlyKeys(value, RELATION_RULE_KEYS) || !hasAllKeys(value, RELATION_RULE_KEYS)) return null;
+  if (![value.ruleId, value.sourceValue].every(isNonEmpty)) return null;
+  if (!(RELATION_KINDS as readonly unknown[]).includes(value.relationKind)) return null;
+  if (!Array.isArray(value.actionTypes) || value.actionTypes.length < 1 || value.actionTypes.length > ACTION_TYPES.length ||
+      !value.actionTypes.every((item) => (ACTION_TYPES as readonly unknown[]).includes(item))) return null;
+  if (!Array.isArray(value.affectedPathPrefixes) || value.affectedPathPrefixes.length < 1 || value.affectedPathPrefixes.length > 256 ||
+      !value.affectedPathPrefixes.every(isRepoPath)) return null;
+  if (!isNonEmptyStringArray(value.actionDescriptions, 64)) return null;
+  return value as unknown as ScopeRelationRuleV1;
+}
+
 function parsePlan(value: unknown): PlanScopeSnapshotV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, PLAN_KEYS) || !hasAllKeys(value, PLAN_KEYS)) return null;
   if (![value.planId, value.planVersion, value.planIdentity, value.scopeSnapshotIdentity].every(isNonEmpty)) return null;
   if (!isStringArray(value.explicitInScope, 128) || !isStringArray(value.explicitOutOfScope, 128)) return null;
-  return value as unknown as PlanScopeSnapshotV1;
+  if (!Array.isArray(value.scopeRelationRules) || value.scopeRelationRules.length < 1 || value.scopeRelationRules.length > 512) return null;
+  const scopeRelationRules = value.scopeRelationRules.map(parseRelationRule);
+  if (scopeRelationRules.some((rule) => rule === null)) return null;
+  const ids = scopeRelationRules.map((rule) => rule!.ruleId);
+  if (new Set(ids).size !== ids.length) return null;
+  return { ...(value as unknown as Omit<PlanScopeSnapshotV1, "scopeRelationRules">), scopeRelationRules: scopeRelationRules as ScopeRelationRuleV1[] };
 }
+
 function parseApproval(value: unknown): ApprovalResolutionEvidenceV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, APPROVAL_KEYS)) return null;
   const required = APPROVAL_KEYS.filter((key) => key !== "supersededBy");
@@ -286,6 +333,7 @@ function parseApproval(value: unknown): ApprovalResolutionEvidenceV1 | null {
   if (value.supersededBy !== undefined && !isNonEmpty(value.supersededBy)) return null;
   return value as unknown as ApprovalResolutionEvidenceV1;
 }
+
 function parseSourceBindings(value: unknown): ScopeEvidenceSourceBindingsV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, SOURCE_BINDING_KEYS)) return null;
   if (!hasAllKeys(value, ["explicitInScope", "acceptanceCriteria", "explicitOutOfScope"])) return null;
@@ -297,6 +345,7 @@ function parseSourceBindings(value: unknown): ScopeEvidenceSourceBindingsV1 | nu
   }
   return value as unknown as ScopeEvidenceSourceBindingsV1;
 }
+
 function parseActionBinding(value: unknown): ScopeActionBindingV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ACTION_BINDING_KEYS)) return null;
   const required = ACTION_BINDING_KEYS.filter((key) => key !== "justification");
@@ -307,27 +356,30 @@ function parseActionBinding(value: unknown): ScopeActionBindingV1 | null {
   if (value.justification !== undefined && !isNonEmpty(value.justification)) return null;
   return value as unknown as ScopeActionBindingV1;
 }
+
 function parseProvenance(value: unknown): ScopeClassificationProvenanceV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, PROVENANCE_KEYS) || !hasAllKeys(value, PROVENANCE_KEYS)) return null;
   if (![value.producer, value.version].every(isNonEmpty)) return null;
   if (!(CLASSIFICATION_METHODS as readonly unknown[]).includes(value.method)) return null;
-  if (!isStringArray(value.evidenceRefs, 128) || value.evidenceRefs.length < 1) return null;
+  if (!isNonEmptyStringArray(value.evidenceRefs, 128)) return null;
   const actionBinding = parseActionBinding(value.actionBinding);
   if (!actionBinding) return null;
   return { ...(value as unknown as Omit<ScopeClassificationProvenanceV1, "actionBinding">), actionBinding };
 }
+
 function parseClassification(value: unknown): ScopeEvidenceClassificationV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, CLASSIFICATION_KEYS) || !hasAllKeys(value, CLASSIFICATION_KEYS)) return null;
   for (const key of CLASSIFICATION_KEYS) {
     if (["evidenceRefs", "sourceBindings", "provenance"].includes(key)) continue;
     if (!isBoolean(value[key])) return null;
   }
-  if (!isStringArray(value.evidenceRefs, 128) || value.evidenceRefs.length < 1) return null;
+  if (!isNonEmptyStringArray(value.evidenceRefs, 128)) return null;
   const sourceBindings = parseSourceBindings(value.sourceBindings);
   const provenance = parseProvenance(value.provenance);
   if (!sourceBindings || !provenance) return null;
   return { ...(value as unknown as Omit<ScopeEvidenceClassificationV1, "sourceBindings" | "provenance">), sourceBindings, provenance };
 }
+
 function parseAction(value: unknown): ProposedActionV1 | null {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ACTION_KEYS)) return null;
   const required = ACTION_KEYS.filter((key) => key !== "justification");
@@ -386,6 +438,14 @@ export async function computePlanScopeFingerprintV1(input: ScopeEvaluationInputV
       scopeSnapshotIdentity: input.plan.scopeSnapshotIdentity,
       explicitInScope: [...input.plan.explicitInScope].sort(),
       explicitOutOfScope: [...input.plan.explicitOutOfScope].sort(),
+      scopeRelationRules: [...input.plan.scopeRelationRules]
+        .map((rule) => ({
+          ...rule,
+          actionTypes: [...rule.actionTypes].sort(),
+          affectedPathPrefixes: [...rule.affectedPathPrefixes].map(normalizeRepoPath).sort(),
+          actionDescriptions: [...rule.actionDescriptions].sort(),
+        }))
+        .sort((a, b) => a.ruleId.localeCompare(b.ruleId)),
     },
   });
 }
@@ -470,7 +530,37 @@ function provenanceInvalid(input: ScopeEvaluationInputV1): boolean {
   if (binding.description !== action.description) return true;
   if (binding.actor !== action.actor) return true;
   if ((binding.justification ?? undefined) !== (action.justification ?? undefined)) return true;
-  if (!sameStringSet(binding.affectedTargets, action.affectedTargets)) return true;
+  if (!samePathSet(binding.affectedTargets, action.affectedTargets)) return true;
+  return false;
+}
+
+function relationRuleMatchesAction(rule: ScopeRelationRuleV1, action: ProposedActionV1): boolean {
+  if (!rule.actionTypes.includes(action.actionType)) return false;
+  if (!rule.actionDescriptions.includes(action.description)) return false;
+  return action.affectedTargets.every((target) =>
+    rule.affectedPathPrefixes.some((prefix) => pathWithin(target, prefix)),
+  );
+}
+
+function relationExists(input: ScopeEvaluationInputV1, relationKind: ScopeRelationKindV1, sourceValue: string): boolean {
+  return input.plan.scopeRelationRules.some((rule) =>
+    rule.relationKind === relationKind &&
+    rule.sourceValue === sourceValue &&
+    relationRuleMatchesAction(rule, input.proposedAction),
+  );
+}
+
+/** Machine-verifiable Action -> canonical Plan/AC relation. */
+function semanticRelationInvalid(input: ScopeEvaluationInputV1): boolean {
+  const c = input.proposedAction.classification;
+  const b = c.sourceBindings;
+  if (c.explicitIncluded && !b.explicitInScope.every((value) => relationExists(input, "EXPLICIT_IN_SCOPE", value))) return true;
+  if (c.acceptanceRequired && !b.acceptanceCriteria.every((value) => relationExists(input, "AC_REQUIRED", value))) return true;
+  if (c.explicitExcluded && !b.explicitOutOfScope.every((value) => relationExists(input, "EXPLICIT_OUT_OF_SCOPE", value))) return true;
+  if (c.necessaryDependency) {
+    const n = b.necessaryDependency;
+    if (!n || !relationExists(input, "NECESSARY_DEPENDENCY", n.acceptanceCriterion)) return true;
+  }
   return false;
 }
 
@@ -511,8 +601,7 @@ async function baseRecord(input: ScopeEvaluationInputV1): Promise<Omit<ScopeEval
     evaluatorVersion: PLAN_SCOPE_GUARD_EVALUATOR_VERSION,
     scopeEvaluationId: [
       PLAN_SCOPE_GUARD_EVALUATOR_VERSION,
-      input.plan.planIdentity,
-      input.plan.scopeSnapshotIdentity,
+      planScopeFingerprint,
       approvalResolutionFingerprint,
       proposedActionFingerprint,
     ].join(":"),
@@ -527,7 +616,11 @@ async function baseRecord(input: ScopeEvaluationInputV1): Promise<Omit<ScopeEval
     scopeSnapshotIdentity: input.plan.scopeSnapshotIdentity,
     proposedActionIdentity: input.proposedAction.proposedActionIdentity,
     proposedActionFingerprint,
-    evidenceRefs: [...new Set([...input.evidenceRefs, ...input.proposedAction.classification.evidenceRefs, ...input.proposedAction.classification.provenance.evidenceRefs])].sort(),
+    evidenceRefs: [...new Set([
+      ...input.evidenceRefs,
+      ...input.proposedAction.classification.evidenceRefs,
+      ...input.proposedAction.classification.provenance.evidenceRefs,
+    ])].sort(),
     guardActor: input.guardActor,
     evaluatedAt: input.evaluatedAt,
   };
@@ -540,17 +633,7 @@ async function evaluated(input: ScopeEvaluationInputV1, scopeDecision: ScopeDeci
   return { ...(await baseRecord(input)), scopeEvaluationStatus: "EVALUATED", scopeDecision, reasonCodes };
 }
 
-/**
- * Canonical precedence matrix after contract/provenance validation:
- * 1. explicit exclusion conflicts with inclusion or material extension -> UNKNOWN
- * 2. contradictory semantic states -> UNKNOWN
- * 3. explicit exclusion alone -> OUT_OF_SCOPE
- * 4. material extension -> SCOPE_EXTENSION_REQUIRED (never ordinary IN_SCOPE)
- * 5. outside allowed path without authorized extension -> OUT_OF_SCOPE
- * 6. current-plan inclusion -> IN_SCOPE
- * 7. negative/unplanned work -> OUT_OF_SCOPE
- * 8. otherwise -> UNKNOWN
- */
+/** Canonical precedence after contract, approval, provenance and relation validation. */
 export async function evaluatePlanScopeShadowV1(raw: unknown): Promise<PlanScopeGuardResultV1> {
   const parsed = parsePlanScopeGuardInputV1(raw);
   if (!parsed.ok) return reject(parsed.reasonMessage);
@@ -562,6 +645,7 @@ export async function evaluatePlanScopeShadowV1(raw: unknown): Promise<PlanScope
   if (!c.evidenceSufficient) return evaluated(input, "UNKNOWN", ["INSUFFICIENT_EVIDENCE"]);
   if (sourceBindingInvalid(input)) return evaluated(input, "UNKNOWN", ["CLASSIFICATION_BINDING_INVALID"]);
   if (provenanceInvalid(input)) return evaluated(input, "UNKNOWN", ["CLASSIFICATION_PROVENANCE_INVALID"]);
+  if (semanticRelationInvalid(input)) return evaluated(input, "UNKNOWN", ["SCOPE_RELATION_UNRESOLVED"]);
   if (c.necessaryDependency && !c.necessaryDependencyChainComplete) return evaluated(input, "UNKNOWN", ["INSUFFICIENT_EVIDENCE"]);
   if (classificationContradictory(input)) return evaluated(input, "UNKNOWN", ["CONTRADICTORY_CLASSIFICATION"]);
 
