@@ -32,6 +32,10 @@ const base = (overrides: Partial<EvaluationInput>): EvaluationInput => ({
   snapshot,
   observedState: {},
   expectedOrReferencedState: {},
+  stateSourceBinding: {
+    observedStateSource: "Current Repository State",
+    expectedOrReferencedStateSource: "Current Repository State",
+  },
   evidenceRefs: [],
   sourcePrecedenceUsed: ["Current Repository State"],
   ...overrides,
@@ -99,6 +103,7 @@ describe("portfolio maintenance manager slice A", () => {
       base({
         class: "BROKEN_REFERENCE",
         observedState: { lookupCompleted: "yes", targetFound: false },
+        stateSourceBinding: { observedStateSource: "Current Repository State" },
         evidenceRefs: evidence("reference-identity", "deterministic-lookup"),
       }),
       base({
@@ -155,6 +160,105 @@ describe("portfolio maintenance manager slice A", () => {
     });
   });
 
+  it("treats object insertion order as canonically equal", () => {
+    const result = evaluateMaintenance(
+      base({
+        class: "STALE_STATE",
+        observedState: { state: { alpha: 1, nested: { left: true, right: false } } },
+        expectedOrReferencedState: { state: { nested: { right: false, left: true }, alpha: 1 } },
+        evidenceRefs: evidence("current-state-identity", "live-state", "mismatch-comparison"),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "NO_FINDING",
+      verificationState: "VERIFIED",
+      dispositionState: "DISMISSED",
+      reason: "DETECTION_CONDITION_NOT_MET",
+    });
+  });
+
+  it("fails closed when state values are not bound to source identities", () => {
+    const result = evaluateMaintenance(
+      base({
+        class: "STALE_STATE",
+        observedState: { state: "OPEN" },
+        expectedOrReferencedState: { state: "CLOSED" },
+        stateSourceBinding: undefined,
+        evidenceRefs: evidence("current-state-identity", "live-state", "mismatch-comparison"),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "INCONCLUSIVE",
+      reason: "SOURCE_VALUE_BINDING_INVALID",
+      dispositionState: "HOLD",
+      autoMutationAllowed: false,
+    });
+  });
+
+  it("fails closed when expected state comes from a lower-priority source", () => {
+    const result = evaluateMaintenance(
+      base({
+        class: "AUTHORITY_DRIFT",
+        observedState: { authority: "READY_GO" },
+        expectedOrReferencedState: { authority: "NOT_AUTHORIZED" },
+        sourcePrecedenceUsed: [
+          "Current Repository State",
+          "Historical Review / Correction Evidence",
+        ],
+        stateSourceBinding: {
+          observedStateSource: "Current Repository State",
+          expectedOrReferencedStateSource: "Historical Review / Correction Evidence",
+        },
+        evidenceRefs: evidence(
+          "authority-record-identity",
+          "gate-identity",
+          "current-authority-conflict",
+        ),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "INCONCLUSIVE",
+      reason: "SOURCE_VALUE_BINDING_INVALID",
+      dispositionState: "HOLD",
+      autoMutationAllowed: false,
+    });
+  });
+
+  it("accepts explicit binding when expected state is from an equal-or-higher priority source", () => {
+    const result = evaluateMaintenance(
+      base({
+        class: "AUTHORITY_DRIFT",
+        observedState: { authority: "READY_GO" },
+        expectedOrReferencedState: { authority: "NOT_AUTHORIZED" },
+        sourcePrecedenceUsed: [
+          "Current Authority / Current Decision",
+          "Historical Review / Correction Evidence",
+        ],
+        stateSourceBinding: {
+          observedStateSource: "Historical Review / Correction Evidence",
+          expectedOrReferencedStateSource: "Current Authority / Current Decision",
+        },
+        evidenceRefs: evidence(
+          "authority-record-identity",
+          "gate-identity",
+          "current-authority-conflict",
+        ),
+      }),
+    );
+
+    expect(result.kind).toBe("CANDIDATE");
+    if (result.kind === "CANDIDATE") {
+      expect(result.candidate.stateSourceBinding).toEqual({
+        observedStateSource: "Historical Review / Correction Evidence",
+        expectedOrReferencedStateSource: "Current Authority / Current Decision",
+      });
+      expect(result.candidate.autoMutationAllowed).toBe(false);
+    }
+  });
+
   it("creates a verified stale-state candidate without mutation authority", () => {
     const result = evaluateMaintenance(
       base({
@@ -185,6 +289,7 @@ describe("portfolio maintenance manager slice A", () => {
       base({
         class: "BROKEN_REFERENCE",
         observedState: { lookupCompleted: true, targetFound: true },
+        stateSourceBinding: { observedStateSource: "Current Repository State" },
         evidenceRefs: evidence("reference-identity", "deterministic-lookup"),
       }),
     );
