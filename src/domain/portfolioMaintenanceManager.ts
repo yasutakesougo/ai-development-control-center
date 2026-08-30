@@ -82,6 +82,11 @@ export interface AuthorityRequirement {
   state: "REQUIRED" | "UNKNOWN";
 }
 
+export interface StateSourceBinding {
+  observedStateSource: SourcePrecedence;
+  expectedOrReferencedStateSource?: SourcePrecedence;
+}
+
 export interface MaintenanceCandidate {
   candidateId: string;
   class: DetectionClass;
@@ -89,6 +94,7 @@ export interface MaintenanceCandidate {
   snapshot: ObservationSnapshot;
   observedState: Record<string, unknown>;
   expectedOrReferencedState: Record<string, unknown>;
+  stateSourceBinding: StateSourceBinding;
   decisionBasis: string;
   requiredEvidence: string[];
   evidenceRefs: EvidenceReference[];
@@ -123,7 +129,8 @@ export interface InconclusiveResult {
     | "REQUIRED_EVIDENCE_MISSING"
     | "REQUIRED_STATE_MISSING_OR_INVALID"
     | "SOURCE_CONFLICT_UNRESOLVED"
-    | "SOURCE_PRECEDENCE_INVALID";
+    | "SOURCE_PRECEDENCE_INVALID"
+    | "SOURCE_VALUE_BINDING_INVALID";
   missingEvidence: string[];
 }
 
@@ -149,6 +156,7 @@ export interface EvaluationInput {
   snapshot: ObservationSnapshot;
   observedState: Record<string, unknown>;
   expectedOrReferencedState: Record<string, unknown>;
+  stateSourceBinding?: StateSourceBinding;
   evidenceRefs: EvidenceReference[];
   sourcePrecedenceUsed: SourcePrecedence[];
   sourceConflictUnresolved?: boolean;
@@ -165,8 +173,25 @@ type EvidenceRule = {
 const evidenceIds = (input: EvaluationInput): Set<string> =>
   new Set(input.evidenceRefs.map((ref) => ref.id));
 
-const deepEqual = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const deepEqual = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) return true;
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    return left.every((item, index) => deepEqual(item, right[index]));
+  }
+
+  if (!isRecord(left) || !isRecord(right)) return false;
+
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  if (!leftKeys.every((key, index) => key === rightKeys[index])) return false;
+  return leftKeys.every((key) => deepEqual(left[key], right[key]));
+};
 
 const value = (record: Record<string, unknown>, key: string): unknown => record[key];
 
@@ -214,6 +239,24 @@ const hasValidSourcePrecedence = (sources: readonly SourcePrecedence[]): boolean
     previousIndex = index;
   }
   return true;
+};
+
+const hasValidSourceValueBinding = (input: EvaluationInput): boolean => {
+  const binding = input.stateSourceBinding;
+  if (!binding) return false;
+
+  if (!input.sourcePrecedenceUsed.includes(binding.observedStateSource)) return false;
+
+  if (input.class === "BROKEN_REFERENCE") {
+    return binding.expectedOrReferencedStateSource === undefined;
+  }
+
+  const expectedSource = binding.expectedOrReferencedStateSource;
+  if (!expectedSource || !input.sourcePrecedenceUsed.includes(expectedSource)) return false;
+
+  const observedIndex = SOURCE_PRECEDENCE.indexOf(binding.observedStateSource);
+  const expectedIndex = SOURCE_PRECEDENCE.indexOf(expectedSource);
+  return expectedIndex <= observedIndex;
 };
 
 const rules: Record<ImplementedDetectionClass, EvidenceRule> = {
@@ -296,6 +339,7 @@ export function evaluateMaintenance(input: EvaluationInput): EvaluationResult {
   }
 
   if (!hasValidSourcePrecedence(input.sourcePrecedenceUsed)) return hold(input.class, "SOURCE_PRECEDENCE_INVALID");
+  if (!hasValidSourceValueBinding(input)) return hold(input.class, "SOURCE_VALUE_BINDING_INVALID");
   if (input.sourceConflictUnresolved === true) return hold(input.class, "SOURCE_CONFLICT_UNRESOLVED");
 
   if (!rule.evaluate(input)) {
@@ -318,6 +362,7 @@ export function evaluateMaintenance(input: EvaluationInput): EvaluationResult {
       snapshot: input.snapshot,
       observedState: input.observedState,
       expectedOrReferencedState: input.expectedOrReferencedState,
+      stateSourceBinding: input.stateSourceBinding!,
       decisionBasis: rule.decisionBasis,
       requiredEvidence: [...rule.requiredEvidence],
       evidenceRefs: input.evidenceRefs,
