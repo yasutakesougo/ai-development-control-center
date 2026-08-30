@@ -682,9 +682,8 @@ function refsAreConsistent(input: CoordinationProgressionInputV1): boolean {
   return true;
 }
 
-export function parseCoordinationProgressionInputV1(
+function parseCoordinationProgressionEnvelopeV1(
   raw: unknown,
-  binding?: CoordinationPlanBindingV1,
 ): CoordinationParseResultV1<CoordinationProgressionInputV1> {
   if (!isPlainObject(raw) || !hasExactKeys(raw, PROGRESSION_INPUT_KEYS)) {
     return { ok: false, reason: "REJECTED_SCHEMA" };
@@ -713,41 +712,68 @@ export function parseCoordinationProgressionInputV1(
   if (raw.acceptedCancellationRequest !== null) {
     const parsedCancellation = parseCoordinationCancellationRequestV1(
       raw.acceptedCancellationRequest,
-      binding,
     );
     if (!parsedCancellation.ok) return parsedCancellation;
     cancellation = parsedCancellation.value;
   }
 
-  const input: CoordinationProgressionInputV1 = {
-    schemaVersion: MULTI_AGENT_COORDINATION_PROGRESSION_INPUT_SCHEMA,
-    coordinationId: raw.coordinationId,
-    coordinationPlanFingerprint: raw.coordinationPlanFingerprint,
-    taskId: raw.taskId,
-    authorizationObservation: raw.authorizationObservation,
-    executionObservation: raw.executionObservation,
-    resultValidationObservation: raw.resultValidationObservation,
-    executionAuthorizationRef: raw.executionAuthorizationRef as string | null,
-    executionAttemptId: raw.executionAttemptId as string | null,
-    executionOutcomeRef: raw.executionOutcomeRef as string | null,
-    resultValidationRef: raw.resultValidationRef as string | null,
-    dependencyEvaluation: raw.dependencyEvaluation,
-    resourceConcurrencyEvaluation: raw.resourceConcurrencyEvaluation,
-    acceptedCancellationRequest: cancellation,
+  return {
+    ok: true,
+    value: {
+      schemaVersion: MULTI_AGENT_COORDINATION_PROGRESSION_INPUT_SCHEMA,
+      coordinationId: raw.coordinationId,
+      coordinationPlanFingerprint: raw.coordinationPlanFingerprint,
+      taskId: raw.taskId,
+      authorizationObservation: raw.authorizationObservation,
+      executionObservation: raw.executionObservation,
+      resultValidationObservation: raw.resultValidationObservation,
+      executionAuthorizationRef: raw.executionAuthorizationRef as string | null,
+      executionAttemptId: raw.executionAttemptId as string | null,
+      executionOutcomeRef: raw.executionOutcomeRef as string | null,
+      resultValidationRef: raw.resultValidationRef as string | null,
+      dependencyEvaluation: raw.dependencyEvaluation,
+      resourceConcurrencyEvaluation: raw.resourceConcurrencyEvaluation,
+      acceptedCancellationRequest: cancellation,
+    },
   };
+}
+
+function progressionPlanTaskBindingIsValid(
+  input: CoordinationProgressionInputV1,
+  binding: CoordinationPlanBindingV1,
+): boolean {
+  return (
+    bindingMatches(binding, input.coordinationId, input.coordinationPlanFingerprint) &&
+    binding.plan.taskRefs.some((task) => task.taskId === input.taskId)
+  );
+}
+
+function progressionCancellationBindingIsValid(
+  input: CoordinationProgressionInputV1,
+  binding: CoordinationPlanBindingV1,
+): boolean {
+  if (input.acceptedCancellationRequest === null) return true;
+  const parsed = parseCoordinationCancellationRequestV1(
+    input.acceptedCancellationRequest,
+    binding,
+  );
+  if (!parsed.ok) return false;
+  return parsed.value.targetScope !== "TASK" || parsed.value.targetTaskId === input.taskId;
+}
+
+export function parseCoordinationProgressionInputV1(
+  raw: unknown,
+  binding?: CoordinationPlanBindingV1,
+): CoordinationParseResultV1<CoordinationProgressionInputV1> {
+  const parsed = parseCoordinationProgressionEnvelopeV1(raw);
+  if (!parsed.ok) return parsed;
+  const input = parsed.value;
 
   if (binding) {
-    if (!bindingMatches(binding, input.coordinationId, input.coordinationPlanFingerprint)) {
+    if (!progressionPlanTaskBindingIsValid(input, binding)) {
       return { ok: false, reason: "REJECTED_BINDING" };
     }
-    if (!binding.plan.taskRefs.some((task) => task.taskId === input.taskId)) {
-      return { ok: false, reason: "REJECTED_BINDING" };
-    }
-    if (
-      cancellation &&
-      cancellation.targetScope === "TASK" &&
-      cancellation.targetTaskId !== input.taskId
-    ) {
+    if (!progressionCancellationBindingIsValid(input, binding)) {
       return { ok: false, reason: "REJECTED_BINDING" };
     }
   }
@@ -784,8 +810,9 @@ function progressionDecision(
   };
 }
 
-function observationContradictionDecision(raw: unknown): CoordinationProgressionDecisionV1 {
-  const input = raw as CoordinationProgressionInputV1;
+function observationContradictionDecision(
+  input: CoordinationProgressionInputV1,
+): CoordinationProgressionDecisionV1 {
   return progressionDecision(input, "UNKNOWN", "OBSERVATION_CONTRADICTION");
 }
 
@@ -795,23 +822,38 @@ export function evaluateCoordinationProgressionV1(
 ):
   | { ok: true; decision: CoordinationProgressionDecisionV1 }
   | { ok: false; reason: "REJECTED_SCHEMA" } {
-  const structurallyBound = parseCoordinationProgressionInputV1(raw);
-  if (!structurallyBound.ok) {
-    if (structurallyBound.reason === "REJECTED_SCHEMA") {
-      return { ok: false, reason: "REJECTED_SCHEMA" };
-    }
-    return { ok: true, decision: observationContradictionDecision(raw) };
+  const parsedEnvelope = parseCoordinationProgressionEnvelopeV1(raw);
+  if (!parsedEnvelope.ok) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  const input = parsedEnvelope.value;
+
+  if (!progressionPlanTaskBindingIsValid(input, binding)) {
+    return { ok: true, decision: observationContradictionDecision(input) };
+  }
+  if (!refsAreConsistent(input)) {
+    return { ok: true, decision: observationContradictionDecision(input) };
+  }
+  if (
+    !authorizationExecutionCombinationIsValid(
+      input.authorizationObservation,
+      input.executionObservation,
+    )
+  ) {
+    return { ok: true, decision: observationContradictionDecision(input) };
+  }
+  if (
+    !executionResultCombinationIsValid(
+      input.executionObservation,
+      input.resultValidationObservation,
+    )
+  ) {
+    return { ok: true, decision: observationContradictionDecision(input) };
+  }
+  if (!progressionCancellationBindingIsValid(input, binding)) {
+    return { ok: true, decision: observationContradictionDecision(input) };
   }
 
-  const parsed = parseCoordinationProgressionInputV1(raw, binding);
-  if (!parsed.ok) {
-    if (parsed.reason === "REJECTED_SCHEMA") {
-      return { ok: false, reason: "REJECTED_SCHEMA" };
-    }
-    return { ok: true, decision: observationContradictionDecision(raw) };
-  }
-
-  const input = parsed.value;
   const decision = (
     status: CoordinationProgressionStatusV1,
     reason: CoordinationProgressionReasonV1,
