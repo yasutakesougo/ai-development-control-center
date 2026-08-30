@@ -5,16 +5,17 @@ Target:
 MAC-IMPL-SLICE-C / Implementation Scope Correction-3
 
 Reviewed exact correction commit:
-`aecc9f945d73571b14f4741652e540d1d07e2b7d`
+`16ec862e6037f5c778e871fae586e6e25e68de18`
 
 Prior scope head:
 `a36d4f77514948dce0b3aa7d590ecb98fe0bbff4`
 
-Trigger finding:
-Slice B progression input admitted `WAITING_HUMAN_GATE` with a non-null `executionAuthorizationRef`, while Slice C Correction-2 requires the shared-state snapshot representation to have that field null.
+Trigger findings:
+1. Slice B progression input admitted `WAITING_HUMAN_GATE` with a non-null `executionAuthorizationRef`, while Slice C Correction-2 requires the shared-state snapshot representation to have that field null.
+2. Exact progression-decision semantic correspondence could not be verified from only a ref + fingerprint while external lookup is prohibited.
 
 Prior new P0 / P1 / P2:
-0 / 1 / 0
+0 / 2 / 0
 
 ## Review result
 
@@ -22,7 +23,7 @@ Verdict:
 PASS / REVIEW-CLEARED
 
 Prior finding closure:
-1 / 1 CLOSED
+2 / 2 CLOSED
 
 New P0 / P1 / P2:
 0 / 0 / 0
@@ -37,11 +38,9 @@ CoordinationProgressionDecisionV1
 CoordinationSharedStateSnapshotV1
 ```
 
-This removes the invalid field-for-field mirroring assumption that created the pre-implementation conflict.
+This removes the invalid field-for-field mirroring assumption while preserving existing Slice A/B parser and evaluator outcomes.
 
-The resolution is consistent with the existing scope requirement that Slice C must not change Slice A/B parser or evaluator outcomes.
-
-Existing Slice B behavior, including the B26 HUMAN_GATE_WAIT evaluation path, remains unchanged by Slice C.
+Existing Slice B behavior, including B26 HUMAN_GATE_WAIT, remains unchanged by Slice C.
 
 ## Closure — WAITING_HUMAN_GATE remains non-authorized in Slice C
 
@@ -55,25 +54,42 @@ executionOutcomeRef = MUST_BE_NULL
 resultValidationRef = MUST_BE_NULL
 ```
 
-Therefore the correction does not weaken the Human Gate boundary and does not launder a Slice B observation reference into execution Authority.
+The correction does not launder an observation reference into execution Authority.
 
-## Closure — exact progression decision binding
+## Closure — exact progression decision is locally verifiable
 
-Correction-3 fixes the mapping rule:
+Correction-3 now requires each task state to carry:
 
 ```text
-Slice B raw input fields are not copied wholesale.
-Slice C progression state is admitted together with:
-- progressionDecisionRef
-- progressionDecisionFingerprint
-- coordinationProgressionStatus
+progressionDecision
+progressionDecisionRef
+progressionDecisionFingerprint
+coordinationProgressionStatus
 ```
 
-This preserves the rule that Slice C does not re-run or redefine Slice B progression semantics.
+The fingerprint algorithm is fixed to SHA-256 over:
+
+```text
+MAC_PROGRESSION_DECISION_V1\n<canonical-json>
+```
+
+The validator can therefore verify locally, without external lookup:
+
+```text
+decision schema
+coordinationId
+coordinationPlanFingerprint
+taskId
+status
+fingerprint
+non-empty provenance ref
+```
+
+Any mismatch fails closed.
+
+This does not re-run Slice B and creates no Authority.
 
 ## Closure — implementation changed area remains closed
-
-No implementation scope widening was introduced.
 
 Implementation mutation remains exactly:
 
@@ -86,9 +102,7 @@ No persistence, dispatch, Provider/Harness/Runner invocation, external mutation,
 
 ## Acceptance review
 
-Correction-3 adds explicit regression/semantic coverage C37-C42.
-
-Required properties are now testable without changing existing Slice B behavior:
+Correction-3 now defines regression/semantic coverage through C47, including:
 
 ```text
 B26 unchanged
@@ -96,8 +110,12 @@ Slice C HUMAN_GATE + executionAuthorizationRef -> reject
 Slice C HUMAN_GATE + null executionAuthorizationRef -> admit when otherwise coherent
 raw Slice B input ref not auto-copied
 humanDecisionRef cannot substitute for execution authorization
-progression decision identity remains independently required
+progression decision identity independently required
+progression fingerprint mismatch -> reject
+progression decision task/coordination/plan/status mismatch -> reject
 ```
+
+All reviewed requirements are implementable within the exact two-file implementation boundary.
 
 ## Authority result
 
