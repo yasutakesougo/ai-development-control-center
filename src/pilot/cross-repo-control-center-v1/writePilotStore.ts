@@ -1,40 +1,53 @@
 import type { D1DatabaseLike } from '../../worker/ledger/ledgerStore';
 import type { PilotEffectRecord, PilotLeaseRecord } from './types';
 
+type LeaseRow = {
+  logical_mutation_id: string;
+  owner_id: string;
+  fence: number;
+  expires_at: string;
+};
+
+function rowToLease(row: LeaseRow): PilotLeaseRecord {
+  return {
+    logicalMutationId: row.logical_mutation_id,
+    ownerId: row.owner_id,
+    fence: row.fence,
+    expiresAt: row.expires_at,
+  };
+}
+
+/**
+ * Atomically acquire or replace an expired lease.
+ *
+ * The INSERT ... ON CONFLICT ... DO UPDATE ... WHERE ... RETURNING statement is
+ * the arbitration point. Concurrent contenders cannot both observe success:
+ * only the statement that inserts the missing row or updates the row while its
+ * stored expiry is <= observedAt returns a lease. A second contender sees the
+ * already-renewed non-expired row and RETURNING yields no row.
+ *
+ * `observedAt` is caller-bound evidence time; this function does not silently
+ * source wall-clock time internally.
+ */
 export async function acquirePilotLease(
   db: D1DatabaseLike,
-  input: { logicalMutationId: string; ownerId: string; expiresAt: string },
+  input: { logicalMutationId: string; ownerId: string; observedAt: string; expiresAt: string },
 ): Promise<PilotLeaseRecord | null> {
-  const current = await db
-    .prepare(
-      `SELECT logical_mutation_id, owner_id, fence, expires_at
-       FROM cross_repo_write_pilot_leases
-       WHERE logical_mutation_id = ?`,
-    )
-    .bind(input.logicalMutationId)
-    .first<{ logical_mutation_id: string; owner_id: string; fence: number; expires_at: string }>();
-
-  if (current && current.expires_at > new Date().toISOString()) return null;
-  const nextFence = (current?.fence ?? 0) + 1;
-
-  await db
+  const row = await db
     .prepare(
       `INSERT INTO cross_repo_write_pilot_leases (logical_mutation_id, owner_id, fence, expires_at)
-       VALUES (?, ?, ?, ?)
+       VALUES (?, ?, 1, ?)
        ON CONFLICT(logical_mutation_id) DO UPDATE SET
          owner_id = excluded.owner_id,
-         fence = excluded.fence,
-         expires_at = excluded.expires_at`,
+         fence = cross_repo_write_pilot_leases.fence + 1,
+         expires_at = excluded.expires_at
+       WHERE cross_repo_write_pilot_leases.expires_at <= ?
+       RETURNING logical_mutation_id, owner_id, fence, expires_at`,
     )
-    .bind(input.logicalMutationId, input.ownerId, nextFence, input.expiresAt)
-    .run();
+    .bind(input.logicalMutationId, input.ownerId, input.expiresAt, input.observedAt)
+    .first<LeaseRow>();
 
-  return {
-    logicalMutationId: input.logicalMutationId,
-    ownerId: input.ownerId,
-    fence: nextFence,
-    expiresAt: input.expiresAt,
-  };
+  return row ? rowToLease(row) : null;
 }
 
 export async function readPilotLease(db: D1DatabaseLike, logicalMutationId: string): Promise<PilotLeaseRecord | null> {
@@ -45,26 +58,28 @@ export async function readPilotLease(db: D1DatabaseLike, logicalMutationId: stri
        WHERE logical_mutation_id = ?`,
     )
     .bind(logicalMutationId)
-    .first<{ logical_mutation_id: string; owner_id: string; fence: number; expires_at: string }>();
-  return row
-    ? { logicalMutationId: row.logical_mutation_id, ownerId: row.owner_id, fence: row.fence, expiresAt: row.expires_at }
-    : null;
+    .first<LeaseRow>();
+  return row ? rowToLease(row) : null;
 }
 
+/**
+ * Release succeeds only for the exact current owner+fence identity.
+ * The single DELETE predicate is the arbitration point; stale fences cannot
+ * delete a newer owner's lease.
+ */
 export async function releasePilotLease(
   db: D1DatabaseLike,
   input: { logicalMutationId: string; ownerId: string; fence: number },
 ): Promise<boolean> {
-  const current = await readPilotLease(db, input.logicalMutationId);
-  if (!current || current.ownerId !== input.ownerId || current.fence !== input.fence) return false;
-  await db
+  const row = await db
     .prepare(
       `DELETE FROM cross_repo_write_pilot_leases
-       WHERE logical_mutation_id = ? AND owner_id = ? AND fence = ?`,
+       WHERE logical_mutation_id = ? AND owner_id = ? AND fence = ?
+       RETURNING logical_mutation_id, owner_id, fence, expires_at`,
     )
     .bind(input.logicalMutationId, input.ownerId, input.fence)
-    .run();
-  return true;
+    .first<LeaseRow>();
+  return row !== null;
 }
 
 export async function appendPilotEffect(db: D1DatabaseLike, record: PilotEffectRecord): Promise<void> {
