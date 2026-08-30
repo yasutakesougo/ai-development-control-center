@@ -10,12 +10,13 @@ Prior exact scope head:
 `a36d4f77514948dce0b3aa7d590ecb98fe0bbff4`
 
 Trigger:
-Pre-implementation finding recorded after Independent Scope Re-Review-1.
+Pre-implementation findings recorded after Independent Scope Re-Review-1.
 
-Finding:
-Slice B progression input validation and existing B26 test admit `WAITING_HUMAN_GATE` only with a non-null `executionAuthorizationRef`, while Slice C Correction-2 requires the shared-state snapshot representation of `WAITING_HUMAN_GATE` to have `executionAuthorizationRef = null`.
+Findings:
+1. Slice B progression input validation and existing B26 test admit `WAITING_HUMAN_GATE` only with a non-null `executionAuthorizationRef`, while Slice C Correction-2 requires the shared-state snapshot representation of `WAITING_HUMAN_GATE` to have `executionAuthorizationRef = null`.
+2. Correction-2 requires progression status / task / coordination mismatches against the exact progression decision identity to fail closed, but `progressionDecisionRef + progressionDecisionFingerprint` alone does not provide enough local material to verify semantic correspondence when external lookup is prohibited.
 
-This document resolves that conflict without changing Slice A/B parser or evaluator behavior.
+This document resolves both conflicts without changing Slice A/B parser or evaluator behavior.
 
 ## C3-1 — Separate observation input from shared-state snapshot semantics
 
@@ -85,6 +86,7 @@ Slice C binds progression using:
 ```text
 progressionDecisionRef
 progressionDecisionFingerprint
+progressionDecision
 coordinationProgressionStatus
 ```
 
@@ -127,6 +129,11 @@ C39 Slice C WAITING_HUMAN_GATE with executionAuthorizationRef == null -> PASS wh
 C40 Slice B input reference is not automatically copied into Slice C snapshot
 C41 humanDecisionRef does not substitute for executionAuthorizationRef in READY/RUNNING/FAILED/SUCCEEDED states
 C42 bound progression decision identity is required independently of snapshot executionAuthorizationRef
+C43 progressionDecisionFingerprint mismatch against supplied progressionDecision -> REJECT
+C44 progressionDecision taskId mismatch -> REJECT
+C45 progressionDecision coordinationId mismatch -> REJECT
+C46 progressionDecision coordinationPlanFingerprint mismatch -> REJECT
+C47 progressionDecision status mismatch -> REJECT
 ```
 
 ## C3-7 — Changed-area boundary
@@ -141,6 +148,45 @@ test/multiAgentCoordination.test.ts
 ```
 
 No persistence, dispatch, Provider, Harness, Runner, Action Gateway, GitHub product mutation, Ready, Merge, Deploy, or LIVE WRITE capability is authorized.
+
+## C3-8 — Exact local progression-decision verification material
+
+Because Slice C is prohibited from performing network/database lookup, exact progression binding MUST be verifiable from material present in the snapshot itself.
+
+`CoordinationTaskStateBindingV1` SHALL therefore include the complete canonical Slice B decision object:
+
+```ts
+progressionDecision: CoordinationProgressionDecisionV1;
+progressionDecisionRef: string;
+progressionDecisionFingerprint: string;
+```
+
+`progressionDecisionRef` remains provenance only.
+
+`progressionDecisionFingerprint` is computed deterministically from the complete canonical `CoordinationProgressionDecisionV1` object using:
+
+```text
+MAC_PROGRESSION_DECISION_V1\n<canonical-json>
+```
+
+with SHA-256 and the repository's existing canonical JSON / cryptographic primitive.
+
+The Slice C validator MUST verify all of the following without external lookup:
+
+```text
+progressionDecision parses under existing Slice B decision contract
+progressionDecision.coordinationId == snapshot.coordinationId
+progressionDecision.coordinationPlanFingerprint == snapshot.coordinationPlanFingerprint
+progressionDecision.taskId == taskState.taskId
+progressionDecision.coordinationProgressionStatus == taskState.coordinationProgressionStatus
+computed progression decision fingerprint == progressionDecisionFingerprint
+progressionDecisionRef is non-empty
+```
+
+Any mismatch MUST be rejected.
+
+This embedded decision object is validation material only.
+It does not create Authority and does not re-run or reinterpret Slice B.
 
 ## Gate effect
 
