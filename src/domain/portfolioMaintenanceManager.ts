@@ -121,6 +121,7 @@ export interface InconclusiveResult {
   autoMutationAllowed: false;
   reason:
     | "REQUIRED_EVIDENCE_MISSING"
+    | "REQUIRED_STATE_MISSING_OR_INVALID"
     | "SOURCE_CONFLICT_UNRESOLVED"
     | "SOURCE_PRECEDENCE_INVALID";
   missingEvidence: string[];
@@ -168,6 +169,41 @@ const deepEqual = (left: unknown, right: unknown): boolean =>
   JSON.stringify(left) === JSON.stringify(right);
 
 const value = (record: Record<string, unknown>, key: string): unknown => record[key];
+
+const hasOwnDefined = (record: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(record, key) && record[key] !== undefined;
+
+const missingRequiredStateFacts = (input: EvaluationInput): string[] => {
+  switch (input.class) {
+    case "STALE_STATE":
+      return [
+        ...(hasOwnDefined(input.observedState, "state") ? [] : ["observedState.state"]),
+        ...(hasOwnDefined(input.expectedOrReferencedState, "state") ? [] : ["expectedOrReferencedState.state"]),
+      ];
+    case "AUTHORITY_DRIFT":
+      return [
+        ...(hasOwnDefined(input.observedState, "authority") ? [] : ["observedState.authority"]),
+        ...(hasOwnDefined(input.expectedOrReferencedState, "authority") ? [] : ["expectedOrReferencedState.authority"]),
+      ];
+    case "BROKEN_REFERENCE":
+      return [
+        ...(typeof value(input.observedState, "lookupCompleted") === "boolean" ? [] : ["observedState.lookupCompleted"]),
+        ...(typeof value(input.observedState, "targetFound") === "boolean" ? [] : ["observedState.targetFound"]),
+      ];
+    case "UNRESOLVED_HOLD":
+      return [
+        ...(typeof value(input.observedState, "holdActive") === "boolean" ? [] : ["observedState.holdActive"]),
+        ...(typeof value(input.expectedOrReferencedState, "blockerResolved") === "boolean" ? [] : ["expectedOrReferencedState.blockerResolved"]),
+      ];
+    case "ROADMAP_DRIFT":
+      return [
+        ...(Array.isArray(value(input.observedState, "sequence")) ? [] : ["observedState.sequence"]),
+        ...(Array.isArray(value(input.expectedOrReferencedState, "sequence")) ? [] : ["expectedOrReferencedState.sequence"]),
+      ];
+    default:
+      return [];
+  }
+};
 
 const hasValidSourcePrecedence = (sources: readonly SourcePrecedence[]): boolean => {
   if (sources.length === 0) return false;
@@ -253,6 +289,12 @@ export function evaluateMaintenance(input: EvaluationInput): EvaluationResult {
   const ids = evidenceIds(input);
   const missingEvidence = rule.requiredEvidence.filter((id) => !ids.has(id));
   if (missingEvidence.length > 0) return hold(input.class, "REQUIRED_EVIDENCE_MISSING", missingEvidence);
+
+  const missingStateFacts = missingRequiredStateFacts(input);
+  if (missingStateFacts.length > 0) {
+    return hold(input.class, "REQUIRED_STATE_MISSING_OR_INVALID", missingStateFacts);
+  }
+
   if (!hasValidSourcePrecedence(input.sourcePrecedenceUsed)) return hold(input.class, "SOURCE_PRECEDENCE_INVALID");
   if (input.sourceConflictUnresolved === true) return hold(input.class, "SOURCE_CONFLICT_UNRESOLVED");
 
