@@ -24,9 +24,19 @@ export const IMPLEMENTED_DETECTION_CLASSES = [
   "ROADMAP_DRIFT",
 ] as const satisfies readonly DetectionClass[];
 
-export type ImplementedDetectionClass =
-  (typeof IMPLEMENTED_DETECTION_CLASSES)[number];
+export type ImplementedDetectionClass = (typeof IMPLEMENTED_DETECTION_CLASSES)[number];
 
+export const SOURCE_PRECEDENCE = [
+  "Current Authority / Current Decision",
+  "Locked Canonical Definition",
+  "Current Repository State",
+  "Verified Evidence",
+  "Knowledge Registry",
+  "Historical Review / Correction Evidence",
+  "External Intelligence",
+] as const;
+
+export type SourcePrecedence = (typeof SOURCE_PRECEDENCE)[number];
 export type VerificationState = "UNVERIFIED" | "VERIFIED" | "INCONCLUSIVE";
 export type DispositionState = "OPEN" | "HOLD" | "DISMISSED" | "SUPERSEDED";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
@@ -82,7 +92,7 @@ export interface MaintenanceCandidate {
   decisionBasis: string;
   requiredEvidence: string[];
   evidenceRefs: EvidenceReference[];
-  sourcePrecedenceUsed: string[];
+  sourcePrecedenceUsed: SourcePrecedence[];
   confidence: Confidence;
   risk: Risk;
   verificationState: VerificationState;
@@ -109,7 +119,10 @@ export interface InconclusiveResult {
   dispositionState: "HOLD";
   authorityRequired: [{ gate: "UNKNOWN"; state: "UNKNOWN" }];
   autoMutationAllowed: false;
-  reason: "REQUIRED_EVIDENCE_MISSING" | "SOURCE_CONFLICT_UNRESOLVED";
+  reason:
+    | "REQUIRED_EVIDENCE_MISSING"
+    | "SOURCE_CONFLICT_UNRESOLVED"
+    | "SOURCE_PRECEDENCE_INVALID";
   missingEvidence: string[];
 }
 
@@ -119,7 +132,7 @@ export interface NoFindingResult {
   verificationState: "VERIFIED";
   dispositionState: "DISMISSED";
   autoMutationAllowed: false;
-  reason: string;
+  reason: "DETECTION_CONDITION_NOT_MET";
 }
 
 export type EvaluationResult =
@@ -136,7 +149,7 @@ export interface EvaluationInput {
   observedState: Record<string, unknown>;
   expectedOrReferencedState: Record<string, unknown>;
   evidenceRefs: EvidenceReference[];
-  sourcePrecedenceUsed: string[];
+  sourcePrecedenceUsed: SourcePrecedence[];
   sourceConflictUnresolved?: boolean;
 }
 
@@ -151,12 +164,21 @@ type EvidenceRule = {
 const evidenceIds = (input: EvaluationInput): Set<string> =>
   new Set(input.evidenceRefs.map((ref) => ref.id));
 
-const hasAll = (input: EvaluationInput, required: readonly string[]): boolean => {
-  const ids = evidenceIds(input);
-  return required.every((id) => ids.has(id));
-};
+const deepEqual = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left) === JSON.stringify(right);
 
 const value = (record: Record<string, unknown>, key: string): unknown => record[key];
+
+const hasValidSourcePrecedence = (sources: readonly SourcePrecedence[]): boolean => {
+  if (sources.length === 0) return false;
+  let previousIndex = -1;
+  for (const source of sources) {
+    const index = SOURCE_PRECEDENCE.indexOf(source);
+    if (index < 0 || index <= previousIndex) return false;
+    previousIndex = index;
+  }
+  return true;
+};
 
 const rules: Record<ImplementedDetectionClass, EvidenceRule> = {
   STALE_STATE: {
@@ -164,14 +186,14 @@ const rules: Record<ImplementedDetectionClass, EvidenceRule> = {
     risk: "MEDIUM",
     decisionBasis: "Current-state identity differs from higher/equal priority live state with explicit mismatch evidence.",
     proposedAction: "Propose current-state reconciliation; do not rewrite automatically.",
-    evaluate: (input) => value(input.observedState, "state") !== value(input.expectedOrReferencedState, "state"),
+    evaluate: (input) => !deepEqual(value(input.observedState, "state"), value(input.expectedOrReferencedState, "state")),
   },
   AUTHORITY_DRIFT: {
     requiredEvidence: ["authority-record-identity", "gate-identity", "current-authority-conflict"],
     risk: "HIGH",
     decisionBasis: "Recorded authority conflicts with Current Authority / Current Decision for the same gate.",
     proposedAction: "Propose authority reconciliation; require explicit human authority for mutation.",
-    evaluate: (input) => value(input.observedState, "authority") !== value(input.expectedOrReferencedState, "authority"),
+    evaluate: (input) => !deepEqual(value(input.observedState, "authority"), value(input.expectedOrReferencedState, "authority")),
   },
   BROKEN_REFERENCE: {
     requiredEvidence: ["reference-identity", "deterministic-lookup"],
@@ -192,60 +214,49 @@ const rules: Record<ImplementedDetectionClass, EvidenceRule> = {
     risk: "MEDIUM",
     decisionBasis: "Current blocker/dependency/completed-gate evidence conflicts with recorded roadmap sequencing.",
     proposedAction: "Propose course correction only; do not rewrite roadmap or grant sequencing authority.",
-    evaluate: (input) => value(input.observedState, "sequence") !== value(input.expectedOrReferencedState, "sequence"),
+    evaluate: (input) => !deepEqual(value(input.observedState, "sequence"), value(input.expectedOrReferencedState, "sequence")),
   },
 };
 
 const isImplemented = (detectionClass: DetectionClass): detectionClass is ImplementedDetectionClass =>
   (IMPLEMENTED_DETECTION_CLASSES as readonly DetectionClass[]).includes(detectionClass);
 
-const notImplemented = (
-  detectionClass: Exclude<DetectionClass, ImplementedDetectionClass>,
-): NotImplementedResult => ({
-  kind: "NOT_IMPLEMENTED",
+const hold = (
+  detectionClass: ImplementedDetectionClass,
+  reason: InconclusiveResult["reason"],
+  missingEvidence: string[] = [],
+): InconclusiveResult => ({
+  kind: "INCONCLUSIVE",
   class: detectionClass,
   verificationState: "INCONCLUSIVE",
   dispositionState: "HOLD",
   authorityRequired: [{ gate: "UNKNOWN", state: "UNKNOWN" }],
   autoMutationAllowed: false,
-  reason: "SLICE_A_NOT_IMPLEMENTED",
+  reason,
+  missingEvidence,
 });
 
 export function evaluateMaintenance(input: EvaluationInput): EvaluationResult {
   if (!isImplemented(input.class)) {
-    return notImplemented(input.class);
+    return {
+      kind: "NOT_IMPLEMENTED",
+      class: input.class,
+      verificationState: "INCONCLUSIVE",
+      dispositionState: "HOLD",
+      authorityRequired: [{ gate: "UNKNOWN", state: "UNKNOWN" }],
+      autoMutationAllowed: false,
+      reason: "SLICE_A_NOT_IMPLEMENTED",
+    };
   }
 
   const rule = rules[input.class];
-  const missingEvidence = rule.requiredEvidence.filter((id) => !evidenceIds(input).has(id));
+  const ids = evidenceIds(input);
+  const missingEvidence = rule.requiredEvidence.filter((id) => !ids.has(id));
+  if (missingEvidence.length > 0) return hold(input.class, "REQUIRED_EVIDENCE_MISSING", missingEvidence);
+  if (!hasValidSourcePrecedence(input.sourcePrecedenceUsed)) return hold(input.class, "SOURCE_PRECEDENCE_INVALID");
+  if (input.sourceConflictUnresolved === true) return hold(input.class, "SOURCE_CONFLICT_UNRESOLVED");
 
-  if (missingEvidence.length > 0) {
-    return {
-      kind: "INCONCLUSIVE",
-      class: input.class,
-      verificationState: "INCONCLUSIVE",
-      dispositionState: "HOLD",
-      authorityRequired: [{ gate: "UNKNOWN", state: "UNKNOWN" }],
-      autoMutationAllowed: false,
-      reason: "REQUIRED_EVIDENCE_MISSING",
-      missingEvidence,
-    };
-  }
-
-  if (input.sourceConflictUnresolved === true) {
-    return {
-      kind: "INCONCLUSIVE",
-      class: input.class,
-      verificationState: "INCONCLUSIVE",
-      dispositionState: "HOLD",
-      authorityRequired: [{ gate: "UNKNOWN", state: "UNKNOWN" }],
-      autoMutationAllowed: false,
-      reason: "SOURCE_CONFLICT_UNRESOLVED",
-      missingEvidence: [],
-    };
-  }
-
-  if (!hasAll(input, rule.requiredEvidence) || !rule.evaluate(input)) {
+  if (!rule.evaluate(input)) {
     return {
       kind: "NO_FINDING",
       class: input.class,
