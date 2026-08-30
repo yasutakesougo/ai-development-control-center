@@ -5,8 +5,17 @@ import {
   buildProposalEnvelope,
   buildWriteIntentProposal,
   calculateRate,
+  evaluateDiffObservation,
+  evaluatePilotWritePolicy,
+  isRepositorySafetyEligible,
 } from '../../../src/pilot/cross-repo-control-center-v1/kernel';
-import type { PilotBaselinePlan, TargetSnapshot } from '../../../src/pilot/cross-repo-control-center-v1/types';
+import type {
+  DiffPolicy,
+  PilotBaselinePlan,
+  PilotWriteAuthority,
+  RepositorySafetyObservation,
+  TargetSnapshot,
+} from '../../../src/pilot/cross-repo-control-center-v1/types';
 
 const target: TargetSnapshot = {
   repositoryFullName: 'yasutakesougo/severe-behavior-support-spfx',
@@ -23,6 +32,40 @@ const baseline: PilotBaselinePlan = {
   deterministicSelection: 'all qualifying work items in fixed window',
   sourceRefs: ['repo://issues?window=2026-08'],
   missingDataState: 'NOT_MEASURED',
+};
+
+const safetyPass: RepositorySafetyObservation = {
+  pullRequestRequired: true,
+  conversationResolutionRequired: true,
+  forcePushDisabled: true,
+  deletionDisabled: true,
+  credentialNonAdmin: true,
+  credentialNotBypassActor: true,
+  draftPrOnlyPepActive: true,
+  targetIdentityCurrent: true,
+};
+
+const diffPolicy: DiffPolicy = {
+  allowedPaths: ['docs/pilot'],
+  forbiddenPaths: ['docs/pilot/forbidden'],
+  maxFilesChanged: 2,
+  maxAdditions: 50,
+  maxDeletions: 10,
+  allowBinary: false,
+  allowRenames: false,
+  expectedCommitCount: 1,
+};
+
+const authority: PilotWriteAuthority = {
+  authorityClass: 'DRAFT_PR_WRITE_AUTHORITY',
+  humanGoRef: 'human-go://pilot-write-1',
+  current: true,
+  repositoryFullName: target.repositoryFullName,
+  ref: 'refs/heads/pilot/example',
+  expectedSha: target.baseCommitSha,
+  logicalMutationId: 'lm-001',
+  attemptGeneration: 0,
+  allowedPaths: ['docs/pilot'],
 };
 
 describe('CRCCP-SLICE-A', () => {
@@ -60,5 +103,103 @@ describe('CRCCP-SLICE-A', () => {
   it('does not coerce zero-denominator rates to zero', () => {
     expect(calculateRate(0, 0)).toBe('NOT_COMPUTABLE');
     expect(calculateRate(1, 4)).toBe(0.25);
+  });
+});
+
+describe('CONTROL-CENTER-CROSS-REPO-WRITE-PILOT-V1', () => {
+  it('requires every repository-safety fact to be positive PASS', () => {
+    expect(isRepositorySafetyEligible(safetyPass)).toBe(true);
+    expect(isRepositorySafetyEligible({ ...safetyPass, credentialNotBypassActor: null })).toBe(false);
+    expect(isRepositorySafetyEligible({ ...safetyPass, pullRequestRequired: false })).toBe(false);
+  });
+
+  it('denies a first mutation without explicit DRAFT_PR_WRITE authority', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'CREATE_FILE', authority: null, safety: safetyPass, diffPolicy, effectState: null,
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref,
+      observedSha: target.baseCommitSha, requestedPaths: ['docs/pilot/a.md'], leaseValid: true,
+    })).toEqual({ decision: 'DENY', reason: 'MISSING_AUTHORITY' });
+  });
+
+  it('fails closed on target SHA drift', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'CREATE_FILE', authority, safety: safetyPass, diffPolicy, effectState: null,
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref,
+      observedSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', requestedPaths: ['docs/pilot/a.md'], leaseValid: true,
+    })).toEqual({ decision: 'HOLD', reason: 'TARGET_BINDING_MISMATCH' });
+  });
+
+  it('does not allow RETRY authority to bootstrap an initial mutation', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'CREATE_FILE', authority: { ...authority, authorityClass: 'RETRY_AUTHORITY' }, safety: safetyPass,
+      diffPolicy, effectState: null, observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref,
+      observedSha: target.baseCommitSha, requestedPaths: ['docs/pilot/a.md'], leaseValid: true,
+    })).toEqual({ decision: 'DENY', reason: 'RETRY_REQUIRES_EFFECT_NOT_APPLIED' });
+  });
+
+  it('allows RETRY only after EFFECT_NOT_APPLIED with a valid lease', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'UPDATE_FILE', authority: { ...authority, authorityClass: 'RETRY_AUTHORITY', attemptGeneration: 1 }, safety: safetyPass,
+      diffPolicy, effectState: 'EFFECT_NOT_APPLIED', observedRepositoryFullName: target.repositoryFullName,
+      observedRef: authority.ref, observedSha: target.baseCommitSha, requestedPaths: ['docs/pilot/a.md'], leaseValid: true,
+    })).toEqual({ decision: 'ALLOW', reason: 'AUTHORIZED' });
+  });
+
+  it('prohibits duplicate mutation after EFFECT_APPLIED', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'UPDATE_FILE', authority, safety: safetyPass, diffPolicy, effectState: 'EFFECT_APPLIED',
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref, observedSha: target.baseCommitSha,
+      requestedPaths: ['docs/pilot/a.md'], leaseValid: true,
+    })).toEqual({ decision: 'DUPLICATE_MUTATION_PROHIBITED', reason: 'DUPLICATE_EFFECT_ALREADY_APPLIED' });
+  });
+
+  it('requires reconciliation for UNKNOWN effect state', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'UPDATE_FILE', authority, safety: safetyPass, diffPolicy, effectState: 'UNKNOWN',
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref, observedSha: target.baseCommitSha,
+      requestedPaths: ['docs/pilot/a.md'], leaseValid: true,
+    })).toEqual({ decision: 'RECONCILIATION_REQUIRED', reason: 'EFFECT_STATE_REQUIRES_RECONCILIATION' });
+  });
+
+  it('denies paths outside the Human-GO-bound allowlist', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'CREATE_FILE', authority, safety: safetyPass, diffPolicy, effectState: null,
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref, observedSha: target.baseCommitSha,
+      requestedPaths: ['src/index.ts'], leaseValid: true,
+    })).toEqual({ decision: 'DENY', reason: 'PATH_NOT_ALLOWLISTED' });
+  });
+
+  it('requires a current fence/lease for mutating operations', () => {
+    expect(evaluatePilotWritePolicy({
+      operation: 'CREATE_DRAFT_PR', authority, safety: safetyPass, diffPolicy, effectState: null,
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref, observedSha: target.baseCommitSha,
+      requestedPaths: [], leaseValid: null,
+    })).toEqual({ decision: 'STALE_LEASE_REJECTED', reason: 'LEASE_REQUIRED' });
+  });
+
+  it('holds unexpected diff paths and numeric churn', () => {
+    expect(evaluateDiffObservation(diffPolicy, {
+      changedPaths: ['docs/pilot/a.md'], additions: 5, deletions: 1, binaryPresent: false, renamePresent: false, commitCount: 1,
+    })).toBe('PASS');
+    expect(evaluateDiffObservation(diffPolicy, {
+      changedPaths: ['src/index.ts'], additions: 5, deletions: 1, binaryPresent: false, renamePresent: false, commitCount: 1,
+    })).toBe('HOLD');
+    expect(evaluateDiffObservation(diffPolicy, {
+      changedPaths: ['docs/pilot/a.md'], additions: 51, deletions: 1, binaryPresent: false, renamePresent: false, commitCount: 1,
+    })).toBe('HOLD');
+  });
+
+  it('keeps RECONCILE authority read-only', () => {
+    const reconcileAuthority = { ...authority, authorityClass: 'RECONCILE_AUTHORITY' as const };
+    expect(evaluatePilotWritePolicy({
+      operation: 'RECONCILE', authority: reconcileAuthority, safety: safetyPass, diffPolicy, effectState: 'UNKNOWN',
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref, observedSha: target.baseCommitSha,
+      requestedPaths: [], leaseValid: null,
+    })).toEqual({ decision: 'ALLOW', reason: 'AUTHORIZED' });
+    expect(evaluatePilotWritePolicy({
+      operation: 'CREATE_FILE', authority: reconcileAuthority, safety: safetyPass, diffPolicy, effectState: null,
+      observedRepositoryFullName: target.repositoryFullName, observedRef: authority.ref, observedSha: target.baseCommitSha,
+      requestedPaths: ['docs/pilot/a.md'], leaseValid: true,
+    })).toEqual({ decision: 'DENY', reason: 'AUTHORITY_CLASS_MISMATCH' });
   });
 });
