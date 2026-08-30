@@ -86,6 +86,52 @@ describe("portfolio maintenance manager slice A", () => {
     }
   });
 
+  it("holds when class-specific state facts are absent or invalid", () => {
+    const cases: EvaluationInput[] = [
+      base({
+        class: "STALE_STATE",
+        evidenceRefs: evidence("current-state-identity", "live-state", "mismatch-comparison"),
+      }),
+      base({
+        class: "AUTHORITY_DRIFT",
+        evidenceRefs: evidence("authority-record-identity", "gate-identity", "current-authority-conflict"),
+      }),
+      base({
+        class: "BROKEN_REFERENCE",
+        observedState: { lookupCompleted: "yes", targetFound: false },
+        evidenceRefs: evidence("reference-identity", "deterministic-lookup"),
+      }),
+      base({
+        class: "UNRESOLVED_HOLD",
+        observedState: { holdActive: true },
+        expectedOrReferencedState: { blockerResolved: "yes" },
+        evidenceRefs: evidence(
+          "hold-decision-identity",
+          "original-blocker-identity",
+          "blocker-resolution-evidence",
+        ),
+      }),
+      base({
+        class: "ROADMAP_DRIFT",
+        observedState: { sequence: "A,B" },
+        expectedOrReferencedState: { sequence: ["A", "B"] },
+        evidenceRefs: evidence("roadmap-identity", "current-gate-evidence", "sequencing-mismatch"),
+      }),
+    ];
+
+    for (const input of cases) {
+      const result = evaluateMaintenance(input);
+      expect(result).toMatchObject({
+        kind: "INCONCLUSIVE",
+        class: input.class,
+        verificationState: "INCONCLUSIVE",
+        dispositionState: "HOLD",
+        reason: "REQUIRED_STATE_MISSING_OR_INVALID",
+        autoMutationAllowed: false,
+      });
+    }
+  });
+
   it("holds unresolved source conflicts even with complete evidence", () => {
     const result = evaluateMaintenance(
       base({
