@@ -23,8 +23,8 @@ export const MULTI_AGENT_COORDINATION_SOURCE_ID_MAX = 128 as const;
 export const MULTI_AGENT_COORDINATION_CONCURRENCY_MAX = 32 as const;
 export const MULTI_AGENT_COORDINATION_TIMESTAMP_MAX = 64 as const;
 
-/** Slice A is contract-only. These flags are deliberate fail-closed evidence. */
-export const MULTI_AGENT_COORDINATION_PROGRESSION_EVALUATOR_IMPLEMENTED = false as const;
+/** Slice B implements only the pure progression evaluator. Execution surfaces remain disabled. */
+export const MULTI_AGENT_COORDINATION_PROGRESSION_EVALUATOR_IMPLEMENTED = true as const;
 export const MULTI_AGENT_COORDINATION_EXECUTION_IMPLEMENTED = false as const;
 export const MULTI_AGENT_COORDINATION_PROVIDER_INVOCATION_IMPLEMENTED = false as const;
 export const MULTI_AGENT_COORDINATION_HARNESS_INVOCATION_IMPLEMENTED = false as const;
@@ -767,6 +767,156 @@ export function parseCoordinationProgressionInputV1(
   }
 
   return { ok: true, value: input };
+}
+
+function progressionDecision(
+  input: Pick<CoordinationProgressionInputV1, "coordinationId" | "coordinationPlanFingerprint" | "taskId">,
+  coordinationProgressionStatus: CoordinationProgressionStatusV1,
+  coordinationProgressionReason: CoordinationProgressionReasonV1,
+): CoordinationProgressionDecisionV1 {
+  return {
+    schemaVersion: MULTI_AGENT_COORDINATION_PROGRESSION_DECISION_SCHEMA,
+    coordinationId: input.coordinationId,
+    coordinationPlanFingerprint: input.coordinationPlanFingerprint,
+    taskId: input.taskId,
+    coordinationProgressionStatus,
+    coordinationProgressionReason,
+  };
+}
+
+function observationContradictionDecision(raw: unknown): CoordinationProgressionDecisionV1 {
+  const input = raw as CoordinationProgressionInputV1;
+  return progressionDecision(input, "UNKNOWN", "OBSERVATION_CONTRADICTION");
+}
+
+export function evaluateCoordinationProgressionV1(
+  raw: unknown,
+  binding: CoordinationPlanBindingV1,
+):
+  | { ok: true; decision: CoordinationProgressionDecisionV1 }
+  | { ok: false; reason: "REJECTED_SCHEMA" } {
+  const structurallyBound = parseCoordinationProgressionInputV1(raw);
+  if (!structurallyBound.ok) {
+    if (structurallyBound.reason === "REJECTED_SCHEMA") {
+      return { ok: false, reason: "REJECTED_SCHEMA" };
+    }
+    return { ok: true, decision: observationContradictionDecision(raw) };
+  }
+
+  const parsed = parseCoordinationProgressionInputV1(raw, binding);
+  if (!parsed.ok) {
+    if (parsed.reason === "REJECTED_SCHEMA") {
+      return { ok: false, reason: "REJECTED_SCHEMA" };
+    }
+    return { ok: true, decision: observationContradictionDecision(raw) };
+  }
+
+  const input = parsed.value;
+  const decision = (
+    status: CoordinationProgressionStatusV1,
+    reason: CoordinationProgressionReasonV1,
+  ) => ({ ok: true as const, decision: progressionDecision(input, status, reason) });
+
+  if (input.executionObservation === "EXECUTION_UNKNOWN") {
+    return decision("UNKNOWN", "EXECUTION_UNKNOWN");
+  }
+  if (
+    input.executionObservation === "EXECUTION_SUCCEEDED" &&
+    input.resultValidationObservation === "RESULT_UNKNOWN"
+  ) {
+    return decision("UNKNOWN", "RESULT_UNKNOWN");
+  }
+  if (input.executionObservation === "EXECUTION_FAILED") {
+    return decision("FAILED", "EXECUTION_FAILED");
+  }
+  if (
+    input.executionObservation === "EXECUTION_SUCCEEDED" &&
+    input.resultValidationObservation === "RESULT_INVALID"
+  ) {
+    return decision("FAILED", "RESULT_INVALID");
+  }
+  if (
+    input.executionObservation === "EXECUTION_SUCCEEDED" &&
+    input.resultValidationObservation === "RESULT_VALID"
+  ) {
+    return decision("SUCCEEDED", "EXECUTION_AND_RESULT_VALID");
+  }
+  if (
+    input.executionObservation === "EXECUTION_SUCCEEDED" &&
+    input.resultValidationObservation === "NOT_REQUIRED"
+  ) {
+    return decision("SUCCEEDED", "EXECUTION_VALIDATION_NOT_REQUIRED");
+  }
+  if (
+    input.executionObservation === "EXECUTION_SUCCEEDED" &&
+    input.resultValidationObservation === "NOT_EVALUATED"
+  ) {
+    return decision("RUNNING", "RESULT_VALIDATION_PENDING");
+  }
+  if (input.executionObservation === "RUNNING") {
+    return decision("RUNNING", "EXECUTION_RUNNING");
+  }
+  if (
+    input.authorizationObservation === "DENIED" &&
+    input.executionObservation === "NOT_INVOKED"
+  ) {
+    return decision("NOT_EXECUTED", "AUTHORIZATION_DENIED");
+  }
+  if (
+    input.acceptedCancellationRequest !== null &&
+    input.executionObservation === "NOT_INVOKED" &&
+    input.authorizationObservation !== "DENIED"
+  ) {
+    return decision("CANCELLED", "CANCELLATION_ACCEPTED");
+  }
+  if (input.dependencyEvaluation === "BLOCKED") {
+    return decision("HOLD", "DEPENDENCY_BLOCKED");
+  }
+  if (
+    input.authorizationObservation === "HOLD" &&
+    input.executionObservation === "NOT_INVOKED"
+  ) {
+    return decision("HOLD", "AUTHORIZATION_HOLD");
+  }
+  if (
+    input.authorizationObservation === "UNKNOWN" &&
+    input.executionObservation === "NOT_INVOKED"
+  ) {
+    return decision("HOLD", "AUTHORIZATION_UNKNOWN");
+  }
+  if (input.dependencyEvaluation === "PENDING") {
+    return decision("WAITING_DEPENDENCY", "DEPENDENCY_PENDING");
+  }
+  if (input.resourceConcurrencyEvaluation === "WAIT") {
+    return decision("WAITING_RESOURCE", "RESOURCE_WAIT");
+  }
+  if (
+    input.authorizationObservation === "WAITING_HUMAN_GATE" &&
+    input.executionObservation === "NOT_INVOKED"
+  ) {
+    return decision("WAITING_HUMAN_GATE", "HUMAN_GATE_WAIT");
+  }
+  if (
+    input.authorizationObservation === "AUTHORIZED" &&
+    input.executionObservation === "NOT_INVOKED" &&
+    input.dependencyEvaluation === "SATISFIED" &&
+    input.resourceConcurrencyEvaluation === "PASS"
+  ) {
+    return decision("READY", "AUTHORIZED_NOT_INVOKED");
+  }
+  if (
+    input.authorizationObservation === "NOT_EVALUATED" &&
+    input.executionObservation === "NOT_INVOKED" &&
+    input.dependencyEvaluation === "SATISFIED" &&
+    input.resourceConcurrencyEvaluation === "PASS"
+  ) {
+    return decision("READY", "READY_FOR_AUTHORIZATION");
+  }
+  if (input.dependencyEvaluation === null && input.resourceConcurrencyEvaluation === null) {
+    return decision("PLANNED", "PLAN_ADMITTED");
+  }
+
+  return decision("UNKNOWN", "OBSERVATION_CONTRADICTION");
 }
 
 export function parseCoordinationProgressionDecisionV1(
