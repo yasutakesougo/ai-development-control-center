@@ -63,7 +63,12 @@ const fallback: HumanAction = {
 };
 
 export interface AppProps {
+  /**
+   * Optional STATUS-OVERLAY document for read-only display.
+   * The UI never observes GitHub/workflow itself — callers supply the document.
+   */
   statusOverlay?: StatusOverlayDocument | null;
+  /** Runtime wiring phase; defaults to disabled when omitted. */
   statusOverlayPhase?: StatusOverlayRuntimePhase;
   statusOverlayUnavailableReason?: string | null;
 }
@@ -149,6 +154,7 @@ export function App({
   function handleSelectIntent(intent: ApprovalIntent) {
     const result = selectApprovalIntent(approvalAllowed, intent, localFingerprint);
     setIntentDraft(result.draft);
+    // A fresh choice starts a fresh submission context (a later press generates a new key).
     setSubmission({ phase: "IDLE" });
   }
 
@@ -170,6 +176,7 @@ export function App({
   }
 
   function handleRetry() {
+    // Blind retry after an unknown result reuses the SAME idempotency key.
     const attempt = retryableAttempt(submission);
     if (!attempt) return;
     void submitAttempt(attempt);
@@ -213,11 +220,15 @@ export function App({
       )}
 
       {statusOverlayPhase === "unavailable" && (
-        <section className="status-overlay-card tone-unknown" data-testid="status-overlay-unavailable">
+        <section
+          className="status-overlay-card tone-unknown"
+          data-testid="status-overlay-unavailable"
+        >
           <p className="eyebrow">STATUS-OVERLAY-V1</p>
           <h2>Status overlay unavailable</h2>
           <p className="status-overlay-note">
-            {statusOverlayUnavailableReason ?? "STATUS-OVERLAY could not be loaded. This is not NO_ACTION."}
+            {statusOverlayUnavailableReason ??
+              "STATUS-OVERLAY could not be loaded. This is not NO_ACTION."}
           </p>
         </section>
       )}
@@ -265,7 +276,11 @@ export function App({
                   Draft={item.draft ? "YES" : "NO"}, CI={item.ci}, Review={item.review}, Merge={item.mergeState},{" "}
                   HumanDecision={item.humanDecision} ({item.humanDecisionSource})
                   {item.sourceRefs.length > 0 && (
-                    <ul>{item.sourceRefs.map((ref) => <li key={ref}>{ref}</li>)}</ul>
+                    <ul>
+                      {item.sourceRefs.map((ref) => (
+                        <li key={ref}>{ref}</li>
+                      ))}
+                    </ul>
                   )}
                 </li>
               ))}
