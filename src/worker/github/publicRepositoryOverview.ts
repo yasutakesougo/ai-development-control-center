@@ -150,6 +150,7 @@ async function observeOpenPullRequests(
   fetchImpl: PublicGitHubFetch,
 ): Promise<OpenPullObservation> {
   const pulls: PublicRepositoryOpenPullRequest[] = [];
+  let count = 0;
 
   for (let page = 1; page <= MAX_OPEN_PR_PAGES; page += 1) {
     const response = await publicGitHubGet(
@@ -159,6 +160,7 @@ async function observeOpenPullRequests(
     if (!response.ok) return { count: null, pulls: null };
 
     const pagePulls = (await response.json()) as PullResponse[];
+    count += pagePulls.length;
     for (const pull of pagePulls) {
       if (typeof pull.number !== "number" || typeof pull.title !== "string") continue;
       pulls.push({
@@ -169,7 +171,7 @@ async function observeOpenPullRequests(
       });
     }
 
-    if (pagePulls.length < 100) return { count: pulls.length, pulls };
+    if (pagePulls.length < 100) return { count, pulls };
   }
 
   // The tenth page was full, so an exact total was not proven within the reviewed bound.
