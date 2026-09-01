@@ -42,11 +42,19 @@ export async function observePublicRepositorySummary(
   const observedAt = new Date().toISOString();
   const epochId = `${repository}:${observedAt}`;
 
-  const repoResponse = await publicGitHubGet(`/repos/${repository}`, fetchImpl);
-  if (!repoResponse.ok) return null;
+  let repo: RepositoryResponse;
+  try {
+    const repoResponse = await publicGitHubGet(`/repos/${repository}`, fetchImpl);
+    if (!repoResponse.ok) return null;
+    repo = (await repoResponse.json()) as RepositoryResponse;
+  } catch {
+    return null;
+  }
 
-  const repo = (await repoResponse.json()) as RepositoryResponse;
-  if (!isCurrentlyPublic(repo) || !repo.default_branch) return null;
+  if (!isCurrentlyPublic(repo)) return null;
+  if (!repo.default_branch) {
+    return buildSummary(repository, epochId, observedAt, "MISSING", null, null);
+  }
 
   try {
     const [branchResponse, openPrCount] = await Promise.all([
@@ -57,14 +65,17 @@ export async function observePublicRepositorySummary(
       observeExactOpenPullRequestCount(repository, fetchImpl),
     ]);
 
-    if (!branchResponse.ok) return null;
-    const branch = (await branchResponse.json()) as CommitResponse;
+    if (!branchResponse.ok) {
+      return buildSummary(repository, epochId, observedAt, "ERROR", null, openPrCount);
+    }
 
+    const branch = (await branchResponse.json()) as CommitResponse;
     if (!branch.sha) {
       return buildSummary(repository, epochId, observedAt, "MISSING", null, openPrCount);
     }
 
-    return buildSummary(repository, epochId, observedAt, "CONFIRMED", branch.sha, openPrCount);
+    const evidenceState: EvidenceState = openPrCount === null ? "MISSING" : "CONFIRMED";
+    return buildSummary(repository, epochId, observedAt, evidenceState, branch.sha, openPrCount);
   } catch {
     return buildSummary(repository, epochId, observedAt, "ERROR", null, null);
   }
