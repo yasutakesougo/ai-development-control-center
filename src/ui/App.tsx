@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildApprovalIntentFingerprint,
   isApprovalIntentUiAllowed,
@@ -85,6 +85,7 @@ export function App({
   const [loading, setLoading] = useState(true);
   const [overviewLoading, setOverviewLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestId = useRef(0);
   const [intentDraft, setIntentDraft] = useState<ApprovalIntentDraft | null>(null);
   const [submission, setSubmission] = useState<LedgerSubmissionState>({ phase: "IDLE" });
   const [history, setHistory] = useState<LedgerHistoryResult | null>(null);
@@ -125,10 +126,13 @@ export function App({
   }, [loadStatus, loadHistory, loadRepositoryOverview]);
 
   async function handleSelectRepository(repository: string) {
+    const requestId = detailRequestId.current + 1;
+    detailRequestId.current = requestId;
     setSelectedRepository(repository);
     setRepositoryDetail(null);
     setDetailLoading(true);
     const detail = await fetchRepositoryDetail(repository);
+    if (detailRequestId.current !== requestId) return;
     setRepositoryDetail(detail?.repository === repository ? detail : null);
     setDetailLoading(false);
   }
