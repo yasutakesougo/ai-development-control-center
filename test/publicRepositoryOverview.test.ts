@@ -18,7 +18,7 @@ function json(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
-function publicRepo(fullName = repository) {
+function publicRepo(fullName: string = repository) {
   return {
     full_name: fullName,
     private: false,
@@ -215,8 +215,9 @@ describe("PUBLIC-ONLY repository overview", () => {
 
     expect(response.status).toBe(404);
     expect(calls).toBe(1);
-    expect(JSON.stringify(await response.json())).not.toContain(selected);
-    expect(JSON.stringify(await response.json())).not.toContain(repository);
+    const body = JSON.stringify(await response.json());
+    expect(body).not.toContain(selected);
+    expect(body).not.toContain(repository);
   });
 
   it("fleet summary never fans out to per-PR CI, review, or status endpoints", async () => {
