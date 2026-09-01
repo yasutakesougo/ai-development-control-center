@@ -13,6 +13,15 @@ function json(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
+function publicRepo(fullName = repository) {
+  return {
+    full_name: fullName,
+    private: false,
+    visibility: "public",
+    default_branch: "main",
+  };
+}
+
 describe("PUBLIC-ONLY repository overview", () => {
   it("uses the explicit allowlist only", () => {
     expect(isPublicOverviewRepository(repository)).toBe(true);
@@ -26,7 +35,7 @@ describe("PUBLIC-ONLY repository overview", () => {
       const url = String(input);
       if (url.includes("/commits/")) return json({ sha: "abc123" });
       if (url.includes("/pulls?")) return json([]);
-      return json({ private: false, visibility: "public", default_branch: "main" });
+      return json(publicRepo());
     };
 
     const result = await observePublicRepositorySummary(repository, fetchImpl);
@@ -41,7 +50,18 @@ describe("PUBLIC-ONLY repository overview", () => {
     let calls = 0;
     const result = await observePublicRepositorySummary(repository, async () => {
       calls += 1;
-      return json({ private: true, visibility: "private", default_branch: "main" });
+      return json({ full_name: repository, private: true, visibility: "private", default_branch: "main" });
+    });
+
+    expect(result).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it("suppresses redirect/rename metadata that does not prove the exact configured repository", async () => {
+    let calls = 0;
+    const result = await observePublicRepositorySummary(repository, async () => {
+      calls += 1;
+      return json(publicRepo("yasutakesougo/renamed-repository"));
     });
 
     expect(result).toBeNull();
@@ -53,7 +73,7 @@ describe("PUBLIC-ONLY repository overview", () => {
       const url = String(input);
       if (url.includes("/commits/")) return json({}, 503);
       if (url.includes("/pulls?")) return json([]);
-      return json({ private: false, visibility: "public", default_branch: "main" });
+      return json(publicRepo());
     };
 
     const result = await observePublicRepositorySummary(repository, fetchImpl);
@@ -68,7 +88,7 @@ describe("PUBLIC-ONLY repository overview", () => {
       const url = String(input);
       if (url.includes("/commits/")) return json({ sha: "abc123" });
       if (url.includes("/pulls?")) return json({}, 403);
-      return json({ private: false, visibility: "public", default_branch: "main" });
+      return json(publicRepo());
     };
 
     const result = await observePublicRepositorySummary(repository, fetchImpl);
@@ -85,7 +105,7 @@ describe("PUBLIC-ONLY repository overview", () => {
       if (url.includes("/commits/")) return json({ sha: "abc123" });
       if (url.includes("&page=1")) return json(firstPage);
       if (url.includes("&page=2")) return json([{ number: 101 }]);
-      return json({ private: false, visibility: "public", default_branch: "main" });
+      return json(publicRepo());
     };
 
     const result = await observePublicRepositorySummary(repository, fetchImpl);
@@ -98,11 +118,17 @@ describe("PUBLIC-ONLY repository overview", () => {
     const fetchImpl: PublicGitHubFetch = async (input) => {
       const url = String(input);
       if (url.includes("welfare-regulatory-update-teams") && !url.includes("/commits/") && !url.includes("/pulls?")) {
-        return json({ private: true, visibility: "private", default_branch: "main" });
+        return json({
+          full_name: "yasutakesougo/welfare-regulatory-update-teams",
+          private: true,
+          visibility: "private",
+          default_branch: "main",
+        });
       }
       if (url.includes("/commits/")) return json({ sha: "abc123" });
       if (url.includes("/pulls?")) return json([]);
-      return json({ private: false, visibility: "public", default_branch: "main" });
+      const match = url.match(/\/repos\/([^?]+)/);
+      return json(publicRepo(match?.[1] ?? repository));
     };
 
     const response = await handleRepositoryOverviewGet(fetchImpl);
