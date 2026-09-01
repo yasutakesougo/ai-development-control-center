@@ -83,8 +83,8 @@ describe("PUBLIC-ONLY repository overview", () => {
     const fetchImpl: PublicGitHubFetch = async (input) => {
       const url = String(input);
       if (url.includes("/commits/")) return json({ sha: "abc123" });
-      if (url.includes("page=1")) return json(firstPage);
-      if (url.includes("page=2")) return json([{ number: 101 }]);
+      if (url.includes("&page=1")) return json(firstPage);
+      if (url.includes("&page=2")) return json([{ number: 101 }]);
       return json({ private: false, visibility: "public", default_branch: "main" });
     };
 
