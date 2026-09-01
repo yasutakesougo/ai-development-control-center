@@ -190,6 +190,9 @@ export function App({
     <main className="shell">
       <section className={`action-card status-${action.status.toLowerCase()}`}>
         <p className="eyebrow">今日あなたがやること</p>
+        <p className="action-card-scope" data-testid="action-card-repository-scope">
+          Repository: {loading ? "確認中" : shortRepo(data?.developmentStatus.repository)}
+        </p>
         <h1>{loading ? "確認中です" : action.title}</h1>
         <p className="instruction">{loading ? "GitHubの状態を確認しています。" : action.instruction}</p>
         {!loading && <p className="reason">{action.reason}</p>}
