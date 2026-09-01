@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_OPEN_PR_PAGES,
   PUBLIC_OVERVIEW_REPOSITORIES,
   isPublicOverviewRepository,
+  observePublicRepositoryDetail,
   observePublicRepositorySummary,
   type PublicGitHubFetch,
 } from "../src/worker/github/publicRepositoryOverview";
-import { handleRepositoryOverviewGet } from "../src/worker/repositoryOverviewApi";
+import {
+  handleRepositoryDetailGet,
+  handleRepositoryOverviewGet,
+} from "../src/worker/repositoryOverviewApi";
 
 const repository = PUBLIC_OVERVIEW_REPOSITORIES[0];
 
@@ -117,12 +122,12 @@ describe("PUBLIC-ONLY repository overview", () => {
   });
 
   it("paginates open pull requests before returning a numeric count", async () => {
-    const firstPage = Array.from({ length: 100 }, (_, index) => ({ number: index + 1 }));
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ number: index + 1, title: `PR ${index + 1}` }));
     const fetchImpl: PublicGitHubFetch = async (input) => {
       const url = String(input);
       if (url.includes("/commits/")) return json({ sha: "abc123" });
       if (url.includes("&page=1")) return json(firstPage);
-      if (url.includes("&page=2")) return json([{ number: 101 }]);
+      if (url.includes("&page=2")) return json([{ number: 101, title: "PR 101" }]);
       return json(publicRepo());
     };
 
@@ -130,6 +135,72 @@ describe("PUBLIC-ONLY repository overview", () => {
 
     expect(result?.openPrCount).toBe(101);
     expect(result?.evidenceState).toBe("CONFIRMED");
+  });
+
+  it("stops at the reviewed ten-page cap and returns UNKNOWN when the terminal page is not proven", async () => {
+    let pullCalls = 0;
+    const fullPage = Array.from({ length: 100 }, (_, index) => ({ number: index + 1, title: `PR ${index + 1}` }));
+    const fetchImpl: PublicGitHubFetch = async (input) => {
+      const url = String(input);
+      if (url.includes("/commits/")) return json({ sha: "abc123" });
+      if (url.includes("/pulls?")) {
+        pullCalls += 1;
+        return json(fullPage);
+      }
+      return json(publicRepo());
+    };
+
+    const result = await observePublicRepositorySummary(repository, fetchImpl);
+
+    expect(MAX_OPEN_PR_PAGES).toBe(10);
+    expect(pullCalls).toBe(10);
+    expect(result?.openPrCount).toBeNull();
+    expect(result?.evidenceState).toBe("MISSING");
+  });
+
+  it("rejects an unconfigured detail selector before any GitHub fetch", async () => {
+    let calls = 0;
+    const request = new Request("https://control.example/api/repositories/detail?repository=yasutakesougo/private-repo");
+    const response = await handleRepositoryDetailGet(request, async () => {
+      calls += 1;
+      return json({});
+    });
+
+    expect(response.status).toBe(404);
+    expect(calls).toBe(0);
+    expect(await response.json()).toEqual({ error: "Not Found" });
+  });
+
+  it("returns selected repository detail from one bounded public observation", async () => {
+    const seen: Headers[] = [];
+    const fetchImpl: PublicGitHubFetch = async (input, init) => {
+      seen.push(new Headers(init?.headers));
+      const url = String(input);
+      if (url.includes("/commits/")) return json({ sha: "abc123" });
+      if (url.includes("/pulls?")) {
+        return json([{ number: 7, title: "Selected detail", draft: true, html_url: "https://github.com/example/pr/7" }]);
+      }
+      return json(publicRepo());
+    };
+
+    const detail = await observePublicRepositoryDetail(repository, fetchImpl);
+
+    expect(detail?.repository).toBe(repository);
+    expect(detail?.currentMain).toBe("abc123");
+    expect(detail?.openPrCount).toBe(1);
+    expect(detail?.openPullRequests?.[0]).toMatchObject({ number: 7, title: "Selected detail", draft: true });
+    expect(detail?.epochId.startsWith(`${repository}:`)).toBe(true);
+    for (const headers of seen) expect(headers.has("Authorization")).toBe(false);
+  });
+
+  it("does not disclose repository identity when selected detail is no longer PUBLIC", async () => {
+    const request = new Request(`https://control.example/api/repositories/detail?repository=${encodeURIComponent(repository)}`);
+    const response = await handleRepositoryDetailGet(request, async () =>
+      json({ full_name: repository, private: true, visibility: "private", default_branch: "main" }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(JSON.stringify(await response.json())).not.toContain(repository);
   });
 
   it("isolates a suppressed target from other repository results", async () => {
