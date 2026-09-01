@@ -14,12 +14,34 @@ export type RepositoryOverviewData = {
   suppressedCount: number;
 };
 
+export type RepositoryOverviewPullRequest = {
+  number: number;
+  title: string;
+  draft: boolean;
+  htmlUrl: string | null;
+};
+
+export type RepositoryOverviewDetailData = RepositoryOverviewItem & {
+  openPullRequests: RepositoryOverviewPullRequest[] | null;
+};
+
 export interface RepositoryOverviewPanelProps {
   loading: boolean;
   data: RepositoryOverviewData | null;
+  selectedRepository?: string | null;
+  detailLoading?: boolean;
+  detail?: RepositoryOverviewDetailData | null;
+  onSelectRepository?: (repository: string) => void;
 }
 
-export function RepositoryOverviewPanel({ loading, data }: RepositoryOverviewPanelProps) {
+export function RepositoryOverviewPanel({
+  loading,
+  data,
+  selectedRepository = null,
+  detailLoading = false,
+  detail = null,
+  onSelectRepository,
+}: RepositoryOverviewPanelProps) {
   return (
     <section className="repository-overview-card" aria-labelledby="repository-overview-title">
       <div className="repository-overview-header">
@@ -46,35 +68,54 @@ export function RepositoryOverviewPanel({ loading, data }: RepositoryOverviewPan
 
       {!loading && data && data.repositories.length > 0 && (
         <ul className="repository-overview-list">
-          {data.repositories.map((item) => (
-            <li key={item.repository} className={`repository-overview-row evidence-${item.evidenceState.toLowerCase()}`}>
-              <div className="repository-overview-primary">
-                <a
-                  className="repository-overview-name"
-                  href={`https://github.com/${item.repository}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {shortRepo(item.repository)}
-                </a>
-                <span className="repository-overview-state">{item.evidenceState}</span>
-              </div>
-              <dl className="repository-overview-facts">
-                <div>
-                  <dt>Main</dt>
-                  <dd>{shortSha(item.currentMain)}</dd>
+          {data.repositories.map((item) => {
+            const selected = selectedRepository === item.repository;
+            return (
+              <li
+                key={item.repository}
+                className={`repository-overview-row evidence-${item.evidenceState.toLowerCase()}`}
+              >
+                <div className="repository-overview-primary">
+                  <a
+                    className="repository-overview-name"
+                    href={`https://github.com/${item.repository}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {shortRepo(item.repository)}
+                  </a>
+                  <span className="repository-overview-state">{item.evidenceState}</span>
                 </div>
-                <div>
-                  <dt>Open PR</dt>
-                  <dd>{item.openPrCount === null ? "UNKNOWN" : item.openPrCount}</dd>
-                </div>
-                <div>
-                  <dt>Observed</dt>
-                  <dd>{formatObservedAt(item.observedAt)}</dd>
-                </div>
-              </dl>
-            </li>
-          ))}
+                <dl className="repository-overview-facts">
+                  <div>
+                    <dt>Main</dt>
+                    <dd>{shortSha(item.currentMain)}</dd>
+                  </div>
+                  <div>
+                    <dt>Open PR</dt>
+                    <dd>{item.openPrCount === null ? "UNKNOWN" : item.openPrCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Observed</dt>
+                    <dd>{formatObservedAt(item.observedAt)}</dd>
+                  </div>
+                </dl>
+                {onSelectRepository && (
+                  <button
+                    type="button"
+                    className="repository-overview-detail-button"
+                    onClick={() => onSelectRepository(item.repository)}
+                    aria-expanded={selected}
+                  >
+                    {selected ? "詳細を更新" : "詳細を見る"}
+                  </button>
+                )}
+                {selected && (
+                  <RepositoryDetail detailLoading={detailLoading} detail={detail} />
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -84,6 +125,55 @@ export function RepositoryOverviewPanel({ loading, data }: RepositoryOverviewPan
         </p>
       )}
     </section>
+  );
+}
+
+function RepositoryDetail({
+  detailLoading,
+  detail,
+}: {
+  detailLoading: boolean;
+  detail: RepositoryOverviewDetailData | null;
+}) {
+  if (detailLoading) {
+    return <p className="repository-overview-detail-status">詳細を確認しています。</p>;
+  }
+  if (!detail) {
+    return (
+      <p className="repository-overview-detail-status">
+        現在、安全に表示できる詳細情報を取得できませんでした。
+      </p>
+    );
+  }
+
+  return (
+    <div className="repository-overview-detail" data-testid="repository-overview-detail">
+      <p className="repository-overview-detail-meta">
+        Detail epoch: {detail.epochId.slice(-12)}
+      </p>
+      {detail.openPullRequests === null && (
+        <p className="repository-overview-detail-status">Open PR detail: UNKNOWN</p>
+      )}
+      {detail.openPullRequests?.length === 0 && (
+        <p className="repository-overview-detail-status">Open PR: 0</p>
+      )}
+      {detail.openPullRequests && detail.openPullRequests.length > 0 && (
+        <ul className="repository-overview-pr-list">
+          {detail.openPullRequests.map((pull) => (
+            <li key={pull.number}>
+              {pull.htmlUrl ? (
+                <a href={pull.htmlUrl} target="_blank" rel="noreferrer">
+                  PR #{pull.number} — {pull.title}
+                </a>
+              ) : (
+                <span>PR #{pull.number} — {pull.title}</span>
+              )}
+              {pull.draft && <span className="repository-overview-draft">DRAFT</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
