@@ -150,12 +150,13 @@ describe("PUBLIC-ONLY repository overview", () => {
       return json(publicRepo());
     };
 
-    const result = await observePublicRepositorySummary(repository, fetchImpl);
+    const detail = await observePublicRepositoryDetail(repository, fetchImpl);
 
     expect(MAX_OPEN_PR_PAGES).toBe(10);
     expect(pullCalls).toBe(10);
-    expect(result?.openPrCount).toBeNull();
-    expect(result?.evidenceState).toBe("MISSING");
+    expect(detail?.openPrCount).toBeNull();
+    expect(detail?.openPullRequests).toBeNull();
+    expect(detail?.evidenceState).toBe("MISSING");
   });
 
   it("rejects an unconfigured detail selector before any GitHub fetch", async () => {
@@ -201,6 +202,41 @@ describe("PUBLIC-ONLY repository overview", () => {
 
     expect(response.status).toBe(404);
     expect(JSON.stringify(await response.json())).not.toContain(repository);
+  });
+
+  it("rejects cross-repository detail metadata instead of rebinding it to the selected repository", async () => {
+    const selected = PUBLIC_OVERVIEW_REPOSITORIES[1];
+    const request = new Request(`https://control.example/api/repositories/detail?repository=${encodeURIComponent(selected)}`);
+    let calls = 0;
+    const response = await handleRepositoryDetailGet(request, async () => {
+      calls += 1;
+      return json(publicRepo(repository));
+    });
+
+    expect(response.status).toBe(404);
+    expect(calls).toBe(1);
+    expect(JSON.stringify(await response.json())).not.toContain(selected);
+    expect(JSON.stringify(await response.json())).not.toContain(repository);
+  });
+
+  it("fleet summary never fans out to per-PR CI, review, or status endpoints", async () => {
+    const urls: string[] = [];
+    const fetchImpl: PublicGitHubFetch = async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/commits/")) return json({ sha: "abc123" });
+      if (url.includes("/pulls?")) return json([]);
+      const match = url.match(/\/repos\/([^?]+)/);
+      return json(publicRepo(match?.[1] ?? repository));
+    };
+
+    const response = await handleRepositoryOverviewGet(fetchImpl);
+
+    expect(response.status).toBe(200);
+    expect(urls.some((url) => url.includes("check-runs"))).toBe(false);
+    expect(urls.some((url) => /\/pulls\/\d+/.test(url))).toBe(false);
+    expect(urls.some((url) => url.includes("/reviews"))).toBe(false);
+    expect(urls.some((url) => url.endsWith("/status"))).toBe(false);
   });
 
   it("isolates a suppressed target from other repository results", async () => {
