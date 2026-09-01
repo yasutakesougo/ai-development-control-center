@@ -2,6 +2,7 @@ import { resolveHumanAction } from "../domain/humanActionResolver";
 import { handleAuthStatus } from "./auth/authStatus";
 import { observeRepository } from "./github/readOnlyAdapter";
 import { handleLedgerRecordPost, handleLedgerRecordsGet, type LedgerApiEnv } from "./ledger/recordsApi";
+import { handleRepositoryOverviewGet } from "./repositoryOverviewApi";
 import { buildStatusPayload } from "./statusApi";
 import { handleStatusOverlayGet } from "./statusOverlayApi";
 
@@ -24,6 +25,10 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/auth/status") {
       return handleAuthStatus(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/repositories/overview") {
+      return handleRepositoryOverviewGet();
     }
 
     if (request.method === "GET" && url.pathname === "/api/status") {
