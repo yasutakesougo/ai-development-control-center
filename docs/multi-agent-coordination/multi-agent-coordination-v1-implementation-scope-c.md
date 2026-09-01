@@ -13,8 +13,13 @@ Slice B integration:
 PR #116
 merge commit: 27c31e7f690e13eddb7f7b00d83e013ba0851947
 
-Scope baseline:
+Scope baseline (original):
 main @ 27c31e7f690e13eddb7f7b00d83e013ba0851947
+
+Current-main reconciliation (@ abac2ff):
+main @ abac2ff1b3f704bf4cdb59e1bfaf3c148a8a19a0
+reviews/multi-agent-coordination-v1-slice-c-current-main-scope-reconciliation-abac2ff.md
+reviews/multi-agent-coordination-v1-slice-c-independent-scope-re-review-2-abac2ff.md
 ```
 
 ```text
@@ -572,10 +577,15 @@ MAC-IMPL-SLICE-B:
 COMPLETE / MERGED / RECONCILED
 
 MAC-IMPL-SLICE-C:
-IMPLEMENTATION SCOPE CORRECTION-1 APPLIED
+IMPLEMENTATION SCOPE CORRECTION-2 APPLIED
+CURRENT-MAIN SCOPE RECONCILIATION @ abac2ff: COMPLETE
+INDEPENDENT SCOPE RE-REVIEW-2 @ abac2ff: REVIEW-CLEARED / PASS
 
 Implementation Start:
-NOT AUTHORIZED BY THIS CORRECTION
+GO RECOMMENDED (separate Human consumption required)
+
+Rebase:
+HOLD
 
 Provider / Harness invocation:
 NOT AUTHORIZED
@@ -590,5 +600,6 @@ Ready / Merge / Deploy:
 NOT AUTHORIZED
 
 Next:
-Slice C Independent Scope Re-Review-1
+Human Implementation Start GO consumption
+→ fresh implementation branch from abac2ff
 ```
