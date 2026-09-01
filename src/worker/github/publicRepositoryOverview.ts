@@ -1,6 +1,7 @@
 import type { EvidenceState } from "../../domain/observedFacts";
 
 const API = "https://api.github.com";
+export const MAX_OPEN_PR_PAGES = 10;
 
 export const PUBLIC_OVERVIEW_REPOSITORIES = [
   "yasutakesougo/ai-development-control-center",
@@ -9,6 +10,13 @@ export const PUBLIC_OVERVIEW_REPOSITORIES = [
 ] as const;
 
 export type PublicOverviewRepository = (typeof PUBLIC_OVERVIEW_REPOSITORIES)[number];
+
+export type PublicRepositoryOpenPullRequest = {
+  number: number;
+  title: string;
+  draft: boolean;
+  htmlUrl: string | null;
+};
 
 export type PublicRepositoryOverviewSummary = {
   repository: string;
@@ -20,6 +28,10 @@ export type PublicRepositoryOverviewSummary = {
   openPrCount: number | null;
 };
 
+export type PublicRepositoryOverviewDetail = PublicRepositoryOverviewSummary & {
+  openPullRequests: PublicRepositoryOpenPullRequest[] | null;
+};
+
 type RepositoryResponse = {
   full_name?: string;
   private?: boolean;
@@ -28,7 +40,17 @@ type RepositoryResponse = {
 };
 
 type CommitResponse = { sha?: string };
-type PullResponse = { number?: number };
+type PullResponse = {
+  number?: number;
+  title?: string;
+  draft?: boolean;
+  html_url?: string;
+};
+
+type OpenPullObservation = {
+  count: number | null;
+  pulls: PublicRepositoryOpenPullRequest[] | null;
+};
 
 export type PublicGitHubFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -40,6 +62,23 @@ export async function observePublicRepositorySummary(
   repository: PublicOverviewRepository,
   fetchImpl: PublicGitHubFetch = fetch,
 ): Promise<PublicRepositoryOverviewSummary | null> {
+  const detail = await observePublicRepository(repository, fetchImpl);
+  if (!detail) return null;
+  const { openPullRequests: _openPullRequests, ...summary } = detail;
+  return summary;
+}
+
+export async function observePublicRepositoryDetail(
+  repository: PublicOverviewRepository,
+  fetchImpl: PublicGitHubFetch = fetch,
+): Promise<PublicRepositoryOverviewDetail | null> {
+  return observePublicRepository(repository, fetchImpl);
+}
+
+async function observePublicRepository(
+  repository: PublicOverviewRepository,
+  fetchImpl: PublicGitHubFetch,
+): Promise<PublicRepositoryOverviewDetail | null> {
   const observedAt = new Date().toISOString();
   const epochId = `${repository}:${observedAt}:${crypto.randomUUID()}`;
 
@@ -54,73 +93,102 @@ export async function observePublicRepositorySummary(
 
   if (!isExactCurrentlyPublic(repo, repository)) return null;
   if (!repo.default_branch) {
-    return buildSummary(repository, epochId, observedAt, "MISSING", null, null);
+    return buildDetail(repository, epochId, observedAt, "MISSING", null, null, null);
   }
 
   try {
-    const [branchResponse, openPrCount] = await Promise.all([
+    const [branchResponse, openPullObservation] = await Promise.all([
       publicGitHubGet(
         `/repos/${repository}/commits/${encodeURIComponent(repo.default_branch)}`,
         fetchImpl,
       ),
-      observeExactOpenPullRequestCount(repository, fetchImpl),
+      observeOpenPullRequests(repository, fetchImpl),
     ]);
 
     if (!branchResponse.ok) {
-      return buildSummary(repository, epochId, observedAt, "ERROR", null, openPrCount);
+      return buildDetail(
+        repository,
+        epochId,
+        observedAt,
+        "ERROR",
+        null,
+        openPullObservation.count,
+        openPullObservation.pulls,
+      );
     }
 
     const branch = (await branchResponse.json()) as CommitResponse;
     if (!branch.sha) {
-      return buildSummary(repository, epochId, observedAt, "MISSING", null, openPrCount);
+      return buildDetail(
+        repository,
+        epochId,
+        observedAt,
+        "MISSING",
+        null,
+        openPullObservation.count,
+        openPullObservation.pulls,
+      );
     }
 
-    const evidenceState: EvidenceState = openPrCount === null ? "MISSING" : "CONFIRMED";
-    return buildSummary(repository, epochId, observedAt, evidenceState, branch.sha, openPrCount);
+    const evidenceState: EvidenceState = openPullObservation.count === null ? "MISSING" : "CONFIRMED";
+    return buildDetail(
+      repository,
+      epochId,
+      observedAt,
+      evidenceState,
+      branch.sha,
+      openPullObservation.count,
+      openPullObservation.pulls,
+    );
   } catch {
-    return buildSummary(repository, epochId, observedAt, "ERROR", null, null);
+    return buildDetail(repository, epochId, observedAt, "ERROR", null, null, null);
   }
 }
 
-async function observeExactOpenPullRequestCount(
+async function observeOpenPullRequests(
   repository: PublicOverviewRepository,
   fetchImpl: PublicGitHubFetch,
-): Promise<number | null> {
-  let page = 1;
-  let count = 0;
+): Promise<OpenPullObservation> {
+  const pulls: PublicRepositoryOpenPullRequest[] = [];
 
-  while (page <= 100) {
+  for (let page = 1; page <= MAX_OPEN_PR_PAGES; page += 1) {
     const response = await publicGitHubGet(
       `/repos/${repository}/pulls?state=open&per_page=100&page=${page}`,
       fetchImpl,
     );
-    if (!response.ok) return null;
+    if (!response.ok) return { count: null, pulls: null };
 
-    const pulls = (await response.json()) as PullResponse[];
-    count += pulls.length;
-    if (pulls.length < 100) return count;
-    page += 1;
+    const pagePulls = (await response.json()) as PullResponse[];
+    for (const pull of pagePulls) {
+      if (typeof pull.number !== "number" || typeof pull.title !== "string") continue;
+      pulls.push({
+        number: pull.number,
+        title: pull.title,
+        draft: Boolean(pull.draft),
+        htmlUrl: typeof pull.html_url === "string" ? pull.html_url : null,
+      });
+    }
+
+    if (pagePulls.length < 100) return { count: pulls.length, pulls };
   }
 
-  return null;
+  // The tenth page was full, so an exact total was not proven within the reviewed bound.
+  return { count: null, pulls };
 }
 
 function isExactCurrentlyPublic(repo: RepositoryResponse, repository: string): boolean {
-  return (
-    repo.full_name === repository &&
-    repo.private === false &&
-    repo.visibility === "public"
-  );
+  return repo.full_name === repository && repo.private === false && repo.visibility === "public";
 }
 
-function buildSummary(
+function buildDetail(
   repository: string,
   epochId: string,
   observedAt: string,
   evidenceState: EvidenceState,
   currentMain: string | null,
   openPrCount: number | null,
-): PublicRepositoryOverviewSummary {
+  openPullRequests: PublicRepositoryOpenPullRequest[] | null,
+): PublicRepositoryOverviewDetail {
   return {
     repository,
     epochId,
@@ -129,6 +197,7 @@ function buildSummary(
     evidenceState,
     currentMain,
     openPrCount,
+    openPullRequests,
   };
 }
 
