@@ -21,6 +21,7 @@ export type PublicRepositoryOverviewSummary = {
 };
 
 type RepositoryResponse = {
+  full_name?: string;
   private?: boolean;
   visibility?: string;
   default_branch?: string;
@@ -40,7 +41,7 @@ export async function observePublicRepositorySummary(
   fetchImpl: PublicGitHubFetch = fetch,
 ): Promise<PublicRepositoryOverviewSummary | null> {
   const observedAt = new Date().toISOString();
-  const epochId = `${repository}:${observedAt}`;
+  const epochId = `${repository}:${observedAt}:${crypto.randomUUID()}`;
 
   let repo: RepositoryResponse;
   try {
@@ -51,7 +52,7 @@ export async function observePublicRepositorySummary(
     return null;
   }
 
-  if (!isCurrentlyPublic(repo)) return null;
+  if (!isExactCurrentlyPublic(repo, repository)) return null;
   if (!repo.default_branch) {
     return buildSummary(repository, epochId, observedAt, "MISSING", null, null);
   }
@@ -104,8 +105,12 @@ async function observeExactOpenPullRequestCount(
   return null;
 }
 
-function isCurrentlyPublic(repo: RepositoryResponse): boolean {
-  return repo.private === false && repo.visibility === "public";
+function isExactCurrentlyPublic(repo: RepositoryResponse, repository: string): boolean {
+  return (
+    repo.full_name === repository &&
+    repo.private === false &&
+    repo.visibility === "public"
+  );
 }
 
 function buildSummary(
