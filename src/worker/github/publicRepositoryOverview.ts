@@ -174,8 +174,8 @@ async function observeOpenPullRequests(
     if (pagePulls.length < 100) return { count, pulls };
   }
 
-  // The tenth page was full, so an exact total was not proven within the reviewed bound.
-  return { count: null, pulls };
+  // The tenth page was full. Neither an exact total nor a complete detail list is proven.
+  return { count: null, pulls: null };
 }
 
 function isExactCurrentlyPublic(repo: RepositoryResponse, repository: string): boolean {
