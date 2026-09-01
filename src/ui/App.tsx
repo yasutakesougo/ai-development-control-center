@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildApprovalIntentFingerprint,
   isApprovalIntentUiAllowed,
@@ -21,6 +21,12 @@ import { ApprovalIntentPanel } from "./ApprovalIntentPanel";
 import { fetchLedgerHistory, postLedgerRecord, type LedgerHistoryResult } from "./ledgerApi";
 import { LedgerHistoryPanel } from "./LedgerHistoryPanel";
 import { LedgerRecordControls } from "./LedgerRecordControls";
+import {
+  RepositoryOverviewPanel,
+  type RepositoryOverviewData,
+  type RepositoryOverviewDetailData,
+} from "./RepositoryOverviewPanel";
+import { fetchRepositoryDetail, fetchRepositoryOverview } from "./repositoryOverviewApi";
 import { StatusOverlayPanel } from "./StatusOverlayPanel";
 
 type PrEvidence = {
@@ -73,7 +79,13 @@ export function App({
   statusOverlayUnavailableReason = null,
 }: AppProps = {}) {
   const [data, setData] = useState<StatusResponse | null>(null);
+  const [repositoryOverview, setRepositoryOverview] = useState<RepositoryOverviewData | null>(null);
+  const [selectedRepository, setSelectedRepository] = useState<string | null>(null);
+  const [repositoryDetail, setRepositoryDetail] = useState<RepositoryOverviewDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestId = useRef(0);
   const [intentDraft, setIntentDraft] = useState<ApprovalIntentDraft | null>(null);
   const [submission, setSubmission] = useState<LedgerSubmissionState>({ phase: "IDLE" });
   const [history, setHistory] = useState<LedgerHistoryResult | null>(null);
@@ -98,13 +110,32 @@ export function App({
     }
   }, []);
 
+  const loadRepositoryOverview = useCallback(async () => {
+    setOverviewLoading(true);
+    setRepositoryOverview(await fetchRepositoryOverview());
+    setOverviewLoading(false);
+  }, []);
+
   const loadHistory = useCallback(async () => {
     setHistory(await fetchLedgerHistory());
   }, []);
 
   useEffect(() => {
+    void loadRepositoryOverview();
     Promise.all([loadStatus(), loadHistory()]).finally(() => setLoading(false));
-  }, [loadStatus, loadHistory]);
+  }, [loadStatus, loadHistory, loadRepositoryOverview]);
+
+  async function handleSelectRepository(repository: string) {
+    const requestId = detailRequestId.current + 1;
+    detailRequestId.current = requestId;
+    setSelectedRepository(repository);
+    setRepositoryDetail(null);
+    setDetailLoading(true);
+    const detail = await fetchRepositoryDetail(repository);
+    if (detailRequestId.current !== requestId) return;
+    setRepositoryDetail(detail?.repository === repository ? detail : null);
+    setDetailLoading(false);
+  }
 
   const action = data?.action ?? fallback;
   const evidenceState = data?.developmentStatus.evidenceState;
@@ -163,6 +194,15 @@ export function App({
         <p className="instruction">{loading ? "GitHubの状態を確認しています。" : action.instruction}</p>
         {!loading && <p className="reason">{action.reason}</p>}
       </section>
+
+      <RepositoryOverviewPanel
+        loading={overviewLoading}
+        data={repositoryOverview}
+        selectedRepository={selectedRepository}
+        detailLoading={detailLoading}
+        detail={repositoryDetail}
+        onSelectRepository={handleSelectRepository}
+      />
 
       <section className="status-card">
         <h2>Development Status</h2>
