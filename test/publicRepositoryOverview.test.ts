@@ -22,6 +22,15 @@ function publicRepo(fullName = repository) {
   };
 }
 
+function successfulPublicFetch(): PublicGitHubFetch {
+  return async (input) => {
+    const url = String(input);
+    if (url.includes("/commits/")) return json({ sha: "abc123" });
+    if (url.includes("/pulls?")) return json([]);
+    return json(publicRepo());
+  };
+}
+
 describe("PUBLIC-ONLY repository overview", () => {
   it("uses the explicit allowlist only", () => {
     expect(isPublicOverviewRepository(repository)).toBe(true);
@@ -44,6 +53,15 @@ describe("PUBLIC-ONLY repository overview", () => {
     expect(result?.openPrCount).toBe(0);
     expect(seen.length).toBe(3);
     for (const headers of seen) expect(headers.has("Authorization")).toBe(false);
+  });
+
+  it("creates a unique epoch identity for each observation", async () => {
+    const first = await observePublicRepositorySummary(repository, successfulPublicFetch());
+    const second = await observePublicRepositorySummary(repository, successfulPublicFetch());
+
+    expect(first?.epochId).toBeTruthy();
+    expect(second?.epochId).toBeTruthy();
+    expect(first?.epochId).not.toBe(second?.epochId);
   });
 
   it("suppresses targets whose current PUBLIC visibility cannot be proven", async () => {
