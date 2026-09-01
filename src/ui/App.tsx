@@ -24,7 +24,9 @@ import { LedgerRecordControls } from "./LedgerRecordControls";
 import {
   RepositoryOverviewPanel,
   type RepositoryOverviewData,
+  type RepositoryOverviewDetailData,
 } from "./RepositoryOverviewPanel";
+import { fetchRepositoryDetail, fetchRepositoryOverview } from "./repositoryOverviewApi";
 import { StatusOverlayPanel } from "./StatusOverlayPanel";
 
 type PrEvidence = {
@@ -61,12 +63,7 @@ const fallback: HumanAction = {
 };
 
 export interface AppProps {
-  /**
-   * Optional STATUS-OVERLAY document for read-only display.
-   * The UI never observes GitHub/workflow itself — callers supply the document.
-   */
   statusOverlay?: StatusOverlayDocument | null;
-  /** Runtime wiring phase; defaults to disabled when omitted. */
   statusOverlayPhase?: StatusOverlayRuntimePhase;
   statusOverlayUnavailableReason?: string | null;
 }
@@ -78,8 +75,11 @@ export function App({
 }: AppProps = {}) {
   const [data, setData] = useState<StatusResponse | null>(null);
   const [repositoryOverview, setRepositoryOverview] = useState<RepositoryOverviewData | null>(null);
+  const [selectedRepository, setSelectedRepository] = useState<string | null>(null);
+  const [repositoryDetail, setRepositoryDetail] = useState<RepositoryOverviewDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [overviewLoading, setOverviewLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [intentDraft, setIntentDraft] = useState<ApprovalIntentDraft | null>(null);
   const [submission, setSubmission] = useState<LedgerSubmissionState>({ phase: "IDLE" });
   const [history, setHistory] = useState<LedgerHistoryResult | null>(null);
@@ -106,15 +106,8 @@ export function App({
 
   const loadRepositoryOverview = useCallback(async () => {
     setOverviewLoading(true);
-    try {
-      const response = await fetch("/api/repositories/overview", { cache: "no-store" });
-      if (!response.ok) throw new Error("repository overview request failed");
-      setRepositoryOverview((await response.json()) as RepositoryOverviewData);
-    } catch {
-      setRepositoryOverview(null);
-    } finally {
-      setOverviewLoading(false);
-    }
+    setRepositoryOverview(await fetchRepositoryOverview());
+    setOverviewLoading(false);
   }, []);
 
   const loadHistory = useCallback(async () => {
@@ -125,6 +118,15 @@ export function App({
     void loadRepositoryOverview();
     Promise.all([loadStatus(), loadHistory()]).finally(() => setLoading(false));
   }, [loadStatus, loadHistory, loadRepositoryOverview]);
+
+  async function handleSelectRepository(repository: string) {
+    setSelectedRepository(repository);
+    setRepositoryDetail(null);
+    setDetailLoading(true);
+    const detail = await fetchRepositoryDetail(repository);
+    setRepositoryDetail(detail?.repository === repository ? detail : null);
+    setDetailLoading(false);
+  }
 
   const action = data?.action ?? fallback;
   const evidenceState = data?.developmentStatus.evidenceState;
@@ -147,7 +149,6 @@ export function App({
   function handleSelectIntent(intent: ApprovalIntent) {
     const result = selectApprovalIntent(approvalAllowed, intent, localFingerprint);
     setIntentDraft(result.draft);
-    // A fresh choice starts a fresh submission context (a later press generates a new key).
     setSubmission({ phase: "IDLE" });
   }
 
@@ -169,7 +170,6 @@ export function App({
   }
 
   function handleRetry() {
-    // Blind retry after an unknown result reuses the SAME idempotency key.
     const attempt = retryableAttempt(submission);
     if (!attempt) return;
     void submitAttempt(attempt);
@@ -184,7 +184,14 @@ export function App({
         {!loading && <p className="reason">{action.reason}</p>}
       </section>
 
-      <RepositoryOverviewPanel loading={overviewLoading} data={repositoryOverview} />
+      <RepositoryOverviewPanel
+        loading={overviewLoading}
+        data={repositoryOverview}
+        selectedRepository={selectedRepository}
+        detailLoading={detailLoading}
+        detail={repositoryDetail}
+        onSelectRepository={handleSelectRepository}
+      />
 
       <section className="status-card">
         <h2>Development Status</h2>
@@ -206,15 +213,11 @@ export function App({
       )}
 
       {statusOverlayPhase === "unavailable" && (
-        <section
-          className="status-overlay-card tone-unknown"
-          data-testid="status-overlay-unavailable"
-        >
+        <section className="status-overlay-card tone-unknown" data-testid="status-overlay-unavailable">
           <p className="eyebrow">STATUS-OVERLAY-V1</p>
           <h2>Status overlay unavailable</h2>
           <p className="status-overlay-note">
-            {statusOverlayUnavailableReason ??
-              "STATUS-OVERLAY could not be loaded. This is not NO_ACTION."}
+            {statusOverlayUnavailableReason ?? "STATUS-OVERLAY could not be loaded. This is not NO_ACTION."}
           </p>
         </section>
       )}
@@ -262,11 +265,7 @@ export function App({
                   Draft={item.draft ? "YES" : "NO"}, CI={item.ci}, Review={item.review}, Merge={item.mergeState},{" "}
                   HumanDecision={item.humanDecision} ({item.humanDecisionSource})
                   {item.sourceRefs.length > 0 && (
-                    <ul>
-                      {item.sourceRefs.map((ref) => (
-                        <li key={ref}>{ref}</li>
-                      ))}
-                    </ul>
+                    <ul>{item.sourceRefs.map((ref) => <li key={ref}>{ref}</li>)}</ul>
                   )}
                 </li>
               ))}
