@@ -1,7 +1,7 @@
 # AUTO-REFRESH-PUBLICATION-IDENTITY-V1
 ## Minimal Correction Definition
 
-**Status: IMPLEMENTATION HEAD FIXED · INDEPENDENT IMPLEMENTATION REVIEW-CLEARED · WAITING HUMAN READY GO**
+**Status: SCOPE REVIEW-CLEARED · IMPLEMENTATION NOT AUTHORIZED**
 
 ```text
 Workstream
@@ -14,13 +14,8 @@ This document
 = PHASE 1 Minimal Correction Definition
   + PHASE 2 Exact Implementation Scope (LOCKED, one file)
   + PHASE 3 Independent Scope Review (REVIEW-CLEARED)
-  + PHASE 4 Human Implementation Start GO (CONSUMED)
-  + PHASE 5 Minimal Implementation (script commit argv)
-  + PHASE 6 Focused Verification (PASS)
-  + PHASE 7 Exact Implementation HEAD Fixation
-  + PHASE 8 Independent Implementation Review (REVIEW-CLEARED)
 
-Human Implementation Start GO = CONSUMED
+Human Implementation Start GO = NOT GRANTED
 Human Ready GO               = NOT GRANTED
 Human Merge GO               = NOT GRANTED
 Workflow Re-run GO           = NOT GRANTED
@@ -203,7 +198,7 @@ Why this file:
 4. Workflow YAML stays an orchestration wrapper.
 ```
 
-Locked mutation (implemented after Human Implementation Start GO):
+Locked mutation (not implemented until Human Implementation Start GO):
 
 ```text
 Keep git(["checkout", "-B", branch]) and git(["add", ...]) unchanged.
@@ -314,19 +309,19 @@ PHASE 0   Current-Main Rebaseline          = THIS DOCUMENT (4b47b5a)
 PHASE 1   Minimal Correction Definition    = THIS DOCUMENT
 PHASE 2   Exact Implementation Scope       = THIS DOCUMENT (LOCKED)
 PHASE 3   Independent Scope Review         = REVIEW-CLEARED
-PHASE 4   Human Implementation Start GO    = CONSUMED
-PHASE 5   Minimal Implementation           = APPLIED
-PHASE 6   Focused Verification             = PASS
-PHASE 7   Exact HEAD Fixation              = 8cffd55d8bcaf5c1073221c375ed9ad8149c6ef5
-PHASE 8   Independent Implementation Review= REVIEW-CLEARED
+PHASE 4   Human Implementation Start GO    = NOT GRANTED
+PHASE 5   Minimal Implementation           = NOT AUTHORIZED
+PHASE 6   Focused Verification             = NOT AUTHORIZED
+PHASE 7   Exact HEAD Fixation              = NOT AUTHORIZED
+PHASE 8   Independent Implementation Review= NOT AUTHORIZED
 PHASE 9   Human Ready GO                   = NOT GRANTED
 PHASE 10  Human Merge GO                   = NOT GRANTED
 PHASE 11  Post-Merge Workflow Re-run GO    = NOT GRANTED
 PHASE 12  Publication Acceptance           = NOT AUTHORIZED
 ```
 
-`git config user.name` / `user.email` remain forbidden. Identity is
-process-local `git -c` on the Snapshot commit only.
+`git config user.name` / `user.email` (or equivalent process-local ident)
+must not be applied until PHASE 4 is granted.
 
 ---
 
@@ -410,12 +405,12 @@ files and leave CLI `--publish` unfixed. Identity is required only at
 
 No MUST_FIX remains. Scope Correction is **not** required.
 
-Human Implementation Start GO was **not** granted by this review. A later
-Human Implementation Start GO was consumed; implementation is a later commit.
+Human Implementation Start GO is **not** granted by this review.
 
 ```text
 Human Understanding Check = not performed here
-Human Implementation Start GO at review time = NOT GRANTED
+Human Implementation Start GO = NOT GRANTED
+user.name / user.email mutation = still FORBIDDEN until that GO
 ```
 
 ---
@@ -428,12 +423,8 @@ AUTO-REFRESH-PUBLICATION-IDENTITY-V1
   Minimal Correction Definition             = DEFINED
   Exact Implementation Scope                = LOCKED
   Independent Scope Review                  = REVIEW-CLEARED
-  Human Implementation Start GO             = CONSUMED
-  Implementation                            = APPLIED
-  Exact Implementation HEAD                 = 8cffd55d8bcaf5c1073221c375ed9ad8149c6ef5
-  Focused Verification                      = PASS
-  Independent Implementation Review         = REVIEW-CLEARED
-  Human Ready GO                            = NOT GRANTED
+  Human Implementation Start GO             = NOT GRANTED
+  Implementation                            = NOT AUTHORIZED
 
 PR #133 CLOSE                               = NOT YET AUTHORIZED
 WORKFLOW RE-RUN                             = NOT YET AUTHORIZED
@@ -443,71 +434,7 @@ SECRET CORRECTION                           = NOT REQUIRED
 
 ```text
 NEXT
-= Human Ready GO
-= then Human Merge GO
-= then Post-Merge Workflow Re-run GO
-```
-
----
-
-## 11. Focused Verification + Exact HEAD Fixation
-
-```text
-Implementation HEAD = 8cffd55d8bcaf5c1073221c375ed9ad8149c6ef5
-files               = scripts/run-persistent-auto-refresh.ts only
-base main           = 4b47b5a3576564aebbe3f20d15c7807b89618243
-```
-
-```text
-identity present (isolated empty-HOME git, same argv) = PASS
-  author    = github-actions[bot]
-  email     = 41898282+github-actions[bot]@users.noreply.github.com
-  committer = same
-  repo-local user.name / user.email = unset
-  Author identity unknown = NOT PRESENT
-
-commit creation path (process-local -c commit) = PASS
-npm run verify = PASS
-  typecheck PASS
-  tests     974 passed / 47 files
-  build     PASS
-
-observation/snapshot regression:
-  workflow YAML vs main           = unchanged
-  src/worker, src/observer, wrangler.jsonc vs main = unchanged
-  no new test file
-```
-
-Publication acceptance (`git push` / Draft PR / live Actions logs) remains
-**not** this phase. That waits for Human Ready GO, Human Merge GO, and
-Post-Merge Workflow Re-run GO.
-
----
-
-## 12. Independent Implementation Review
-
-```text
-REVIEW ID     = AUTO-REFRESH-PUBLICATION-IDENTITY-V1 Independent Implementation Review-1
-REVIEWED HEAD = 8cffd55d8bcaf5c1073221c375ed9ad8149c6ef5
-VERDICT       = REVIEW-CLEARED
-P0 MUST_FIX   = 0
-P1 MUST_FIX   = 0
-```
-
-Exact diff is one hunk: the Snapshot `git commit` argv gained process-local
-`-c user.name=github-actions[bot]` and
-`-c user.email=41898282+github-actions[bot]@users.noreply.github.com`.
-`checkout -B`, `add`, and `push` are unchanged. No `git config`. No workflow
-file. No Worker / `/api/status` / secret / Human Gate change.
-
-| findingId | severity | disposition | rationale |
-|---|---|---|---|
-| IIR-1 | P0 | CLOSED | Diff matches locked surface, call site, mechanism, and ident. |
-| IIR-2 | P0 | CLOSED | Non-changes held: workflow, git config, secrets, /api/status, PR #133. |
-| IIR-3 | P2 | DEFER | Live Actions publication still needs Post-Merge Workflow Re-run GO. |
-
-```text
-Human Ready GO  = NOT GRANTED by this review
-Human Merge GO  = NOT GRANTED
-Workflow Re-run = NOT AUTHORIZED
+= Human Implementation Start GO
+= then minimal implementation of the locked git -c commit argv
+  in scripts/run-persistent-auto-refresh.ts only
 ```
