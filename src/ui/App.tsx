@@ -18,6 +18,11 @@ import {
 import type { StatusOverlayDocument } from "../domain/statusOverlayContract";
 import type { StatusOverlayRuntimePhase } from "../runtime/statusOverlayRuntime";
 import { ApprovalIntentPanel } from "./ApprovalIntentPanel";
+import { HumanGatePanel } from "./HumanGatePanel";
+import {
+  isHumanGateStatusSource,
+  type HumanGateSourceAvailability,
+} from "./humanGateViewModel";
 import { fetchLedgerHistory, postLedgerRecord, type LedgerHistoryResult } from "./ledgerApi";
 import { LedgerHistoryPanel } from "./LedgerHistoryPanel";
 import { LedgerRecordControls } from "./LedgerRecordControls";
@@ -79,6 +84,8 @@ export function App({
   statusOverlayUnavailableReason = null,
 }: AppProps = {}) {
   const [data, setData] = useState<StatusResponse | null>(null);
+  const [humanGateSourceAvailability, setHumanGateSourceAvailability] =
+    useState<HumanGateSourceAvailability>("LOADING");
   const [repositoryOverview, setRepositoryOverview] = useState<RepositoryOverviewData | null>(null);
   const [selectedRepository, setSelectedRepository] = useState<string | null>(null);
   const [repositoryDetail, setRepositoryDetail] = useState<RepositoryOverviewDetailData | null>(null);
@@ -91,10 +98,13 @@ export function App({
   const [history, setHistory] = useState<LedgerHistoryResult | null>(null);
 
   const loadStatus = useCallback(async () => {
+    setHumanGateSourceAvailability("LOADING");
     try {
       const response = await fetch("/api/status", { cache: "no-store" });
       if (!response.ok) throw new Error("status request failed");
-      setData((await response.json()) as StatusResponse);
+      const payload = (await response.json()) as unknown;
+      setData(payload as StatusResponse);
+      setHumanGateSourceAvailability(isHumanGateStatusSource(payload) ? "AVAILABLE" : "UNAVAILABLE");
     } catch {
       setData({
         action: fallback,
@@ -107,6 +117,7 @@ export function App({
         evidence: null,
         observedAt: new Date().toISOString(),
       });
+      setHumanGateSourceAvailability("UNAVAILABLE");
     }
   }, []);
 
@@ -197,6 +208,11 @@ export function App({
         <p className="instruction">{loading ? "GitHubの状態を確認しています。" : action.instruction}</p>
         {!loading && <p className="reason">{action.reason}</p>}
       </section>
+
+      <HumanGatePanel
+        availability={humanGateSourceAvailability}
+        source={humanGateSourceAvailability === "AVAILABLE" && data ? data : null}
+      />
 
       <RepositoryOverviewPanel
         loading={overviewLoading}
