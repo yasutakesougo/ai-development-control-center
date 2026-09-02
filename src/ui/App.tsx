@@ -103,8 +103,9 @@ export function App({
       const response = await fetch("/api/status", { cache: "no-store" });
       if (!response.ok) throw new Error("status request failed");
       const payload = (await response.json()) as unknown;
+      if (!isHumanGateStatusSource(payload)) throw new Error("invalid status response");
       setData(payload as StatusResponse);
-      setHumanGateSourceAvailability(isHumanGateStatusSource(payload) ? "AVAILABLE" : "UNAVAILABLE");
+      setHumanGateSourceAvailability("AVAILABLE");
     } catch {
       setData({
         action: fallback,
