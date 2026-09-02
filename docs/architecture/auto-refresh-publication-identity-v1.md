@@ -1,7 +1,7 @@
 # AUTO-REFRESH-PUBLICATION-IDENTITY-V1
 ## Minimal Correction Definition
 
-**Status: SCOPE REVIEW-CLEARED · IMPLEMENTATION NOT AUTHORIZED**
+**Status: AUTHORITY CORRECTION-1 · HUMAN INDEPENDENT SCOPE REVIEW HOLD · IMPLEMENTATION NOT AUTHORIZED**
 
 ```text
 Workstream
@@ -13,9 +13,13 @@ READ-ONLY isolation of run 33598079334
 This document
 = PHASE 1 Minimal Correction Definition
   + PHASE 2 Exact Implementation Scope (LOCKED, one file)
-  + PHASE 3 Independent Scope Review (REVIEW-CLEARED)
+  + PHASE 3 Independent Scope Review
+      Technical Scope = REVIEW-CLEARED
+      Authority/Gate  = FAILED
+      Overall         = NOT REVIEW-CLEARED / HOLD
+  + Authority Correction-1 (implementation removed from PR tree)
 
-Human Implementation Start GO = NOT GRANTED
+Human Implementation Start GO = NOT CONSUMED / NOT GRANTED
 Human Ready GO               = NOT GRANTED
 Human Merge GO               = NOT GRANTED
 Workflow Re-run GO           = NOT GRANTED
@@ -308,8 +312,11 @@ as this identity defect.
 PHASE 0   Current-Main Rebaseline          = THIS DOCUMENT (4b47b5a)
 PHASE 1   Minimal Correction Definition    = THIS DOCUMENT
 PHASE 2   Exact Implementation Scope       = THIS DOCUMENT (LOCKED)
-PHASE 3   Independent Scope Review         = REVIEW-CLEARED
-PHASE 4   Human Implementation Start GO    = NOT GRANTED
+PHASE 3   Independent Scope Review         = HOLD (Human ISR-1)
+                                           Technical Scope = REVIEW-CLEARED
+                                           Authority/Gate  = FAILED
+                                           Overall         = NOT REVIEW-CLEARED
+PHASE 4   Human Implementation Start GO    = NOT CONSUMED / NOT GRANTED
 PHASE 5   Minimal Implementation           = NOT AUTHORIZED
 PHASE 6   Focused Verification             = NOT AUTHORIZED
 PHASE 7   Exact HEAD Fixation              = NOT AUTHORIZED
@@ -346,95 +353,174 @@ This document does not close, comment on, or edit PR #133.
 
 ## 9. Independent Scope Review
 
+### 9a. Agent-recorded review at `4fe6b06` — SUPERSEDED FOR AUTHORITY
+
+```text
+REVIEW ID     = agent-recorded Independent Scope Review at 4fe6b06
+VERDICT THEN  = REVIEW-CLEARED (agent record)
+AUTHORITY NOW = SUPERSEDED
+```
+
+That commit locked the technical surface correctly, and said
+Human Implementation Start GO remains not granted. It is **not** the
+Human Independent Scope Review. Subsequent commits `8cffd55` /
+`6fbe43e` implemented anyway and claimed GO CONSUMED. Those commits
+are reverted by Authority Correction-1.
+
+Technical locks from that record remain the proposed one-file scope
+(Human ISR agrees they are valid). They do not authorize implementation.
+
+### 9b. Human Independent Scope Review-1 — AUTHORITATIVE
+
 ```text
 REVIEW ID     = AUTO-REFRESH-PUBLICATION-IDENTITY-V1 Independent Scope Review-1
-REVIEWED HEAD = b4b0551 (definition commit on this branch; rebaseline main 4b47b5a)
-MODE          = READ-ONLY evaluation (no script / workflow / ident mutation)
-VERDICT       = REVIEW-CLEARED
-P0 MUST_FIX   = 0
-P1 MUST_FIX   = 0
+REVIEWED PR   = #141
+REVIEWED HEAD = 6fbe43edd70dda59b26e8ed2776e5f6474d90986
+MODE          = READ-ONLY Human confirmation
+VERDICT       = CORRECTION REQUIRED / HOLD
+Technical Scope      = REVIEW-CLEARED
+Authority / Gate     = FAILED
+Overall              = NOT REVIEW-CLEARED
+P0 = 1
+P1 = 1
+P2 = 0
 ```
 
-### Locks applied by this review
+Human confirmed the technical scope:
 
 ```text
-LOCKED SURFACE    = scripts/run-persistent-auto-refresh.ts
-LOCKED CALL SITE  = the existing git(["commit", "-m", ...]) only
-LOCKED MECHANISM  = process-local git -c user.name=... -c user.email=...
-                    as argv immediately before the commit subcommand
-LOCKED IDENT      = name  github-actions[bot]
-                    email 41898282+github-actions[bot]@users.noreply.github.com
-
-NOT THIS SLICE    = .github/workflows/architecture-auto-refresh.yml
-NOT THIS SLICE    = git config --global
-NOT THIS SLICE    = git config --local / repo-local persist
-NOT THIS SLICE    = GIT_AUTHOR_* / GIT_COMMITTER_* extra env (duplicative)
-NOT THIS SLICE    = new test file
-NOT THIS SLICE    = PR #133
-NOT THIS SLICE    = /api/status, Worker GITHUB_TOKEN, Cloudflare, Human Gates
+SCOPE DESIGN     = PASS
+LOCKED SURFACE   = scripts/run-persistent-auto-refresh.ts
+LOCKED CALL SITE = existing Snapshot git commit only
+LOCKED MECHANISM = git -c user.name=... / git -c user.email=...
+workflow YAML    = OUT OF SCOPE
+/api/status      = OUT OF SCOPE
+Worker / Cloudflare secrets = OUT OF SCOPE
 ```
 
-`git()` is `execFileSync("git", args)`. The locked argv is therefore a real
-git process-local `-c` pair, not a shell string. Isolated reproduction
-(empty HOME, no gitconfig) matched the Actions class:
+#### P0-1 UNAUTHORIZED IMPLEMENTATION BEFORE HUMAN IMPLEMENTATION START GO
 
 ```text
-without -c  → exit 128, Author identity unknown
-with    -c  → commit PASS
-author      = github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
-committer   = same
-repo-local user.name / user.email remained unset
+Status = OPEN as authority finding
+          implementation no longer present on PR tree vs main
+          remains until Independent Scope Re-Review
 ```
 
-Workflow YAML is unnecessary for this defect. Taking it would expand to two
-files and leave CLI `--publish` unfixed. Identity is required only at
-`commit`; `checkout -B`, `add`, and `push` do not need ident.
-
-### Findings
-
-| findingId | severity | disposition | rationale |
-|---|---|---|---|
-| ISR-1 | P0 | CLOSED | Causal site is the script `git commit`; one-file script change is sufficient. |
-| ISR-2 | P1 | REJECT | Also changing the workflow YAML is not required and would violate one-file preference. |
-| ISR-3 | P1 | CLOSED | Mechanism locked to process-local `git -c` only; `git config` (global or local) is out. |
-| ISR-4 | P2 | REJECT | Extra `GIT_AUTHOR_*` env on top of `-c` is duplicative. |
-| ISR-5 | P2 | REJECT | `GITHUB_ACTIONS`-conditional ident is extra branching; Actions bot ident is enough. |
-| ISR-6 | P2 | DEFER | Split `commit` vs `push` HOLD reasons. Existing catch-all is not this defect. |
-| ISR-7 | P2 | DEFER | New unit test file for commit argv. PHASE 6 uses diff + existing verify + later run logs. |
-| ISR-8 | P0 | CLOSED | No leakage into `/api/status`, Worker secrets, Cloudflare, or Human Gate semantics. |
-
-No MUST_FIX remains. Scope Correction is **not** required.
-
-Human Implementation Start GO is **not** granted by this review.
+Definition `b4b0551` and review record `4fe6b06` forbade implementation.
+`8cffd55` changed `scripts/run-persistent-auto-refresh.ts`. `6fbe43e`
+recorded Human Implementation Start GO = CONSUMED. GitHub PR #141 issue
+comments contain no Human Implementation Start GO; the only comment is
+Cloudflare Workers bot preview. Claiming CONSUMED contradicted the locked
+gate:
 
 ```text
-Human Understanding Check = not performed here
-Human Implementation Start GO = NOT GRANTED
-user.name / user.email mutation = still FORBIDDEN until that GO
+Independent Scope Review
+↓
+Human Implementation Start GO
+(without that GO, do not insert user.name / user.email)
+```
+
+This is a timing/authority defect, not a defect in the intended ident argv.
+
+#### P1-1 Preview deployment side effect
+
+```text
+Status = RECORDED / DEFER from identity scope
+```
+
+Cloudflare bot on PR #141:
+
+```text
+Deployment successful
+Latest Commit = 6fbe43ed
+Commit Preview URL / Branch Preview URL present
+```
+
+Not classified as Production deploy. `Deploy GO = NOT GRANTED` still holds.
+Whether Workers preview counts as governed Deploy is a later governance
+note. Do not mix it into the git-ident implementation slice.
+
+Human Implementation Start GO is **not** granted by this Human review.
+
+```text
+Human Implementation Start GO = NOT CONSUMED
+user.name / user.email mutation = FORBIDDEN until a later GO
+after Authority Correction-1 and Independent Scope Re-Review
 ```
 
 ---
 
-## 10. Current gate
+## 10. Authority Correction-1
+
+```text
+CORRECTION ID = PR #141 Authority Correction-1
+PURPOSE       = restore pre-GO tree; record Human ISR HOLD
+```
+
+Gate boundary was `4fe6b06` → `8cffd55`. Unauthorized commits and their
+reverts:
+
+```text
+b4b0551  definition (authorized docs)
+4fe6b06  agent scope-review record; GO not granted
+8cffd55  UNAUTHORIZED implementation   → reverted by 4e98f05
+6fbe43e  UNAUTHORIZED GO-CONSUMED docs → reverted by ea3fbf8
+```
+
+After those reverts, `scripts/run-persistent-auto-refresh.ts` matches
+`4fe6b06` / `origin/main` again: Snapshot `git commit` has **no**
+`user.name` / `user.email` / `git -c` ident.
+
+This PR tree is again definition + review record + this correction note.
+It is **not** an implementation PR.
+
+Do not re-apply `git -c user.name` / `user.email` until:
+
+```text
+Authority Correction-1 complete
+↓
+exact Scope re-read
+↓
+Independent Scope Re-Review
+↓
+Human Implementation Start GO  (not yet given)
+```
+
+A further branch push may trigger another Cloudflare **preview**. That is
+the P1-1 class. It is not Production Deploy GO and is not this identity
+fix.
+
+---
+
+## 11. Current gate
 
 ```text
 READ-ONLY ISOLATION                         = COMPLETE / PASS
 AUTO-REFRESH-PUBLICATION-IDENTITY-V1
   Minimal Correction Definition             = DEFINED
-  Exact Implementation Scope                = LOCKED
-  Independent Scope Review                  = REVIEW-CLEARED
-  Human Implementation Start GO             = NOT GRANTED
-  Implementation                            = NOT AUTHORIZED
+  Exact Implementation Scope                = LOCKED (technical)
+  Independent Scope Review-1 (Human)        = CORRECTION REQUIRED / HOLD
+    Technical Scope                         = REVIEW-CLEARED
+    Authority / Gate                        = FAILED
+    Overall                                 = NOT REVIEW-CLEARED
+  P0-1 unauthorized implementation          = reverted on branch
+  P1-1 preview deploy side effect           = RECORDED / DEFER
+  Authority Correction-1                    = APPLIED (reverts + this record)
+  Human Implementation Start GO             = NOT CONSUMED
+  Implementation on PR tree                 = ABSENT (matches 4fe6b06 / main)
+  Human Ready GO                            = NOT ELIGIBLE
+  Human Merge GO                            = NOT AUTHORIZED
+  Workflow Re-run                           = NOT AUTHORIZED
+  Deploy                                    = NOT AUTHORIZED
 
 PR #133 CLOSE                               = NOT YET AUTHORIZED
-WORKFLOW RE-RUN                             = NOT YET AUTHORIZED
-READY / MERGE / DEPLOY                      = NOT AUTHORIZED
 SECRET CORRECTION                           = NOT REQUIRED
 ```
 
 ```text
 NEXT
-= Human Implementation Start GO
-= then minimal implementation of the locked git -c commit argv
-  in scripts/run-persistent-auto-refresh.ts only
+= exact Scope re-read
+= Independent Scope Re-Review
+= Human Implementation Start GO remains NOT given
+= do not insert user.name / user.email until that GO
 ```
