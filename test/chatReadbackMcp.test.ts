@@ -158,6 +158,18 @@ describe("CHAT-READBACK-V1 MCP contract", () => {
     expect(response.status).toBe(400);
   });
 
+  it("fails closed for a cross-origin browser request", async () => {
+    const response = await handleChatReadbackMcp(
+      request(
+        { jsonrpc: "2.0", id: 7, method: "ping" },
+        { Origin: "https://unexpected.example" },
+      ),
+      { loadStatusPayload: async () => statusPayload() },
+    );
+
+    expect(response.status).toBe(403);
+  });
+
   it("accepts initialized notifications without creating state", async () => {
     const response = await handleChatReadbackMcp(
       request({ jsonrpc: "2.0", method: "notifications/initialized" }),
