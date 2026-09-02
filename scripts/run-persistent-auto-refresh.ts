@@ -471,15 +471,7 @@ async function main(): Promise<void> {
     git(["checkout", "-B", branch]);
     report.mutations.featureBranch = true;
     git(["add", ...snapshotArtifacts]);
-    git([
-      "-c",
-      "user.name=github-actions[bot]",
-      "-c",
-      "user.email=41898282+github-actions[bot]@users.noreply.github.com",
-      "commit",
-      "-m",
-      `docs(architecture): persistent auto-refresh Snapshot (${startMain.slice(0, 7)})`,
-    ]);
+    git(["commit", "-m", `docs(architecture): persistent auto-refresh Snapshot (${startMain.slice(0, 7)})`]);
     report.mutations.snapshotCommit = true;
     git(["push", "-u", "origin", `HEAD:${branch}`]);
   } catch {
