@@ -1,0 +1,114 @@
+.human-gate-crt {
+  margin-top: 16px;
+  padding: 20px;
+  background: #101510;
+  border: 1px solid #566456;
+  border-radius: 18px;
+  color: #dce8dc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  box-shadow: inset 0 0 0 1px rgba(220, 232, 220, 0.04);
+}
+
+.human-gate-crt-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.human-gate-crt h2,
+.human-gate-crt h3,
+.human-gate-crt p {
+  color: inherit;
+}
+
+.human-gate-crt h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+}
+
+.human-gate-crt-kicker {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.human-gate-crt-boundary {
+  margin: 0;
+  max-width: 250px;
+  text-align: right;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  opacity: 0.82;
+}
+
+.human-gate-crt-axes {
+  margin-top: 16px;
+  border-top: 1px solid #455245;
+  border-bottom: 1px solid #455245;
+}
+
+.human-gate-crt-axes div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid #2c362c;
+}
+
+.human-gate-crt-axes div:first-child {
+  border-top: 0;
+}
+
+.human-gate-crt-axes dt {
+  color: #a9b8a9;
+  font-size: 0.76rem;
+  letter-spacing: 0.06em;
+}
+
+.human-gate-crt-axes dd {
+  margin: 0;
+  color: #edf6ed;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.human-gate-crt-block {
+  margin-top: 16px;
+}
+
+.human-gate-crt-block h3 {
+  margin: 0 0 6px;
+  color: #a9b8a9;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+}
+
+.human-gate-crt-block p,
+.human-gate-crt-block ul {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.human-gate-crt-block ul {
+  padding-left: 20px;
+}
+
+@media (max-width: 520px) {
+  .human-gate-crt-header {
+    display: block;
+  }
+
+  .human-gate-crt-boundary {
+    margin-top: 10px;
+    max-width: none;
+    text-align: left;
+  }
+
+  .human-gate-crt-axes div {
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+}
