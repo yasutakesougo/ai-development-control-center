@@ -1,7 +1,7 @@
 # AUTO-REFRESH-PUBLICATION-IDENTITY-V1
 ## Minimal Correction Definition
 
-**Status: IMPLEMENTATION APPLIED AFTER HUMAN IMPLEMENTATION START · WAITING HUMAN READY GO**
+**Status: INDEPENDENT IMPLEMENTATION REVIEW-CLEARED · WAITING HUMAN READY GO**
 
 ```text
 Workstream
@@ -15,11 +15,12 @@ This document
   + PHASE 2 Exact Implementation Scope (LOCKED, one file)
   + PHASE 3 Independent Scope Review
       Technical Scope = REVIEW-CLEARED
-      Authority/Gate  = FAILED
-      Overall         = NOT REVIEW-CLEARED / HOLD
-  + Authority Correction-1 (implementation removed from PR tree)
-  + PHASE 4 Human Implementation Start (CONSUMED after Correction-1)
-  + PHASE 5 Minimal Implementation (02caa21)
+      Independent Scope Re-Review = PASS / REVIEW-CLEARED
+  + Authority Correction-1 COMPLETE
+  + PHASE 4 Human Implementation Start GO = GIVEN / CONSUMED
+      (chat Human GO is valid Authority; not GitHub-comment-only)
+  + PHASE 5 Minimal Implementation HEAD = 02caa21 AUTHORIZED / APPLIED
+  + PHASE 8 Independent Implementation Review = REVIEW-CLEARED
 
 Human Implementation Start GO = CONSUMED (after Authority Correction-1)
 Human Ready GO               = NOT GRANTED
@@ -314,23 +315,24 @@ as this identity defect.
 PHASE 0   Current-Main Rebaseline          = THIS DOCUMENT (4b47b5a)
 PHASE 1   Minimal Correction Definition    = THIS DOCUMENT
 PHASE 2   Exact Implementation Scope       = THIS DOCUMENT (LOCKED)
-PHASE 3   Independent Scope Review         = HOLD (Human ISR-1)
-                                           Technical Scope = REVIEW-CLEARED
-                                           Authority/Gate  = FAILED
-                                           Overall         = NOT REVIEW-CLEARED
-PHASE 4   Human Implementation Start GO    = CONSUMED (after Authority Correction-1)
-PHASE 5   Minimal Implementation           = APPLIED 02caa2157079818705c230cdeffb0b485d9e0644
+PHASE 3   Independent Scope Review         = REVIEW-CLEARED
+                                           (Human ISR-1 HOLD was gate/timing;
+                                            Independent Scope Re-Review = PASS)
+PHASE 4   Human Implementation Start GO    = GIVEN / CONSUMED
+                                           (chat Human GO is valid Authority)
+PHASE 5   Minimal Implementation           = AUTHORIZED / APPLIED
+                                           02caa2157079818705c230cdeffb0b485d9e0644
 PHASE 6   Focused Verification             = PASS
 PHASE 7   Exact HEAD Fixation              = 02caa2157079818705c230cdeffb0b485d9e0644
-PHASE 8   Independent Implementation Review= PENDING Human / this record
+PHASE 8   Independent Implementation Review= REVIEW-CLEARED
 PHASE 9   Human Ready GO                   = NOT GRANTED
 PHASE 10  Human Merge GO                   = NOT GRANTED
 PHASE 11  Post-Merge Workflow Re-run GO    = NOT GRANTED
 PHASE 12  Publication Acceptance           = NOT AUTHORIZED
 ```
 
-`git config user.name` / `user.email` (or equivalent process-local ident)
-must not be applied until PHASE 4 is granted.
+`git config user.name` / `user.email` remain forbidden. Identity is
+process-local `git -c` on the Snapshot commit only.
 
 ---
 
@@ -502,29 +504,35 @@ fix.
 ```text
 READ-ONLY ISOLATION                         = COMPLETE / PASS
 AUTO-REFRESH-PUBLICATION-IDENTITY-V1
-  Minimal Correction Definition             = DEFINED
-  Exact Implementation Scope                = LOCKED
-  Independent Scope Review-1 (Human)        = HOLD recorded; technical scope PASS
-  Authority Correction-1                    = APPLIED
-  Human Implementation Start                = CONSUMED (after Correction-1)
-  Implementation HEAD                       = 02caa2157079818705c230cdeffb0b485d9e0644
+  Authority Correction-1                    = COMPLETE
+  Exact Scope re-read                       = PASS
+  Independent Scope Re-Review               = PASS / REVIEW-CLEARED
+  Human Implementation Start GO             = GIVEN / CONSUMED
+    source = this chat (valid Authority; not GitHub-comment-only)
+  Implementation                            = AUTHORIZED / APPLIED
+  Exact Implementation HEAD                 = 02caa2157079818705c230cdeffb0b485d9e0644
   Focused Verification                      = PASS
-  Human Ready GO                            = NOT GRANTED
+  Independent Implementation Review         = REVIEW-CLEARED
+  Authority Correction-2                    = NOT REQUIRED
+  Human Ready GO                            = NOT YET GRANTED
   Human Merge GO                            = NOT AUTHORIZED
-  Workflow Re-run                           = NOT AUTHORIZED
+  Post-Merge Workflow Re-run                = NOT AUTHORIZED
   Deploy                                    = NOT AUTHORIZED
 
-PR #133 CLOSE                               = NOT YET AUTHORIZED
-SECRET CORRECTION                           = NOT REQUIRED
-P1-1 preview side effect                    = RECORDED (this push may preview again)
+PR #141                                   = OPEN / DRAFT
+CURRENT MAIN                              = 4b47b5a3576564aebbe3f20d15c7807b89618243
+PR HEAD                                   = 7b03bfac5e182ed7c7ee833516fd818dffb5c58e
+  (docs after 02caa21; review target remains 02caa21)
+
+PR #133 CLOSE                             = NOT YET AUTHORIZED
+SECRET CORRECTION                         = NOT REQUIRED
+P1-1 preview side effect                  = RECORDED / DEFER
 ```
 
 ```text
 NEXT
-= Independent Implementation Review (Human)
-= Human Ready GO
-= Human Merge GO
-= Post-Merge Workflow Re-run GO
+= Human Ready GO / HOLD
+= not Merge, not workflow re-run, not Deploy
 ```
 
 ---
@@ -572,4 +580,55 @@ npm run verify                    = PASS (974 tests, typecheck, build)
 
 Live Actions push/Draft publication still waits for Ready / Merge /
 Workflow Re-run GOs. This record does not grant them.
+
+---
+
+## 13. Independent Implementation Review-1
+
+```text
+REVIEW ID     = AUTO-REFRESH-PUBLICATION-IDENTITY-V1 Independent Implementation Review-1
+REVIEWED HEAD = 02caa2157079818705c230cdeffb0b485d9e0644
+PR HEAD THEN  = 7b03bfac5e182ed7c7ee833516fd818dffb5c58e
+CURRENT MAIN  = 4b47b5a3576564aebbe3f20d15c7807b89618243
+MODE          = READ-ONLY of Exact Implementation HEAD
+VERDICT       = PASS / REVIEW-CLEARED
+P0 MUST_FIX   = 0
+P1 MUST_FIX   = 0
+```
+
+Human correction recorded: chat `Implementation Start` after Authority
+Correction-1 is valid Human Implementation Start GO. GitHub PR comment is
+not the only Authority surface. `02caa215` is **AUTHORIZED / APPLIED**,
+not premature. Authority Correction-2 is **NOT REQUIRED**.
+
+Exact `02caa215` diff (one file, one hunk):
+
+```text
+scripts/run-persistent-auto-refresh.ts
+
+git(["commit", "-m", ...])
+→ git([
+    "-c", "user.name=github-actions[bot]",
+    "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+    "commit",
+    "-m", `docs(architecture): persistent auto-refresh Snapshot (${startMain.slice(0, 7)})`,
+  ])
+```
+
+`checkout -B`, `add`, `push` unchanged. No `git config`. No workflow YAML.
+Versus `origin/main`, the only non-docs change is that hunk.
+
+| findingId | severity | disposition | rationale |
+|---|---|---|---|
+| IIR-1 | P0 | CLOSED | Diff matches locked surface, call site, mechanism, and ident. |
+| IIR-2 | P0 | CLOSED | Non-changes held: workflow, git config, secrets, /api/status, Human Gates, PR #133. |
+| IIR-3 | P2 | DEFER | Live Actions `git push` / Draft publication waits for Ready / Merge / Re-run GOs. |
+| IIR-4 | P2 | DEFER | Cloudflare preview (P1-1) is not this implementation hunk. |
+
+```text
+Human Ready GO             = NOT YET GRANTED
+Human Merge GO             = NOT AUTHORIZED
+Post-Merge Workflow Re-run = NOT AUTHORIZED
+Deploy                     = NOT AUTHORIZED
+```
 
