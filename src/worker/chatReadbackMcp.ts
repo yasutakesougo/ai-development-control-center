@@ -67,6 +67,16 @@ function negotiatedProtocolVersion(params: unknown): string {
   return LATEST_PROTOCOL_VERSION;
 }
 
+function isOriginAllowed(request: Request): boolean {
+  const origin = request.headers.get("Origin");
+  if (origin === null) return true;
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
+
 function toolDefinition() {
   return {
     name: TOOL_NAME,
@@ -144,6 +154,10 @@ export async function handleChatReadbackMcp(
   request: Request,
   dependencies: ChatReadbackMcpDependencies,
 ): Promise<Response> {
+  if (!isOriginAllowed(request)) {
+    return new Response("Forbidden", { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", {
       status: 405,
@@ -169,9 +183,6 @@ export async function handleChatReadbackMcp(
   if (!isJsonRpcRequest(message)) return jsonRpcError(null, -32600, "Invalid Request");
 
   if (!("id" in message)) {
-    if (message.method === "notifications/initialized" || message.method.startsWith("notifications/")) {
-      return new Response(null, { status: 202, headers: { "Cache-Control": "no-store" } });
-    }
     return new Response(null, { status: 202, headers: { "Cache-Control": "no-store" } });
   }
 
