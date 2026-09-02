@@ -1,7 +1,7 @@
 # AUTO-REFRESH-PUBLICATION-IDENTITY-V1
 ## Minimal Correction Definition
 
-**Status: AUTHORITY CORRECTION-1 · HUMAN INDEPENDENT SCOPE REVIEW HOLD · IMPLEMENTATION NOT AUTHORIZED**
+**Status: IMPLEMENTATION APPLIED AFTER HUMAN IMPLEMENTATION START · WAITING HUMAN READY GO**
 
 ```text
 Workstream
@@ -18,8 +18,10 @@ This document
       Authority/Gate  = FAILED
       Overall         = NOT REVIEW-CLEARED / HOLD
   + Authority Correction-1 (implementation removed from PR tree)
+  + PHASE 4 Human Implementation Start (CONSUMED after Correction-1)
+  + PHASE 5 Minimal Implementation (02caa21)
 
-Human Implementation Start GO = NOT CONSUMED / NOT GRANTED
+Human Implementation Start GO = CONSUMED (after Authority Correction-1)
 Human Ready GO               = NOT GRANTED
 Human Merge GO               = NOT GRANTED
 Workflow Re-run GO           = NOT GRANTED
@@ -202,7 +204,7 @@ Why this file:
 4. Workflow YAML stays an orchestration wrapper.
 ```
 
-Locked mutation (not implemented until Human Implementation Start GO):
+Locked mutation (implemented after Human Implementation Start):
 
 ```text
 Keep git(["checkout", "-B", branch]) and git(["add", ...]) unchanged.
@@ -316,11 +318,11 @@ PHASE 3   Independent Scope Review         = HOLD (Human ISR-1)
                                            Technical Scope = REVIEW-CLEARED
                                            Authority/Gate  = FAILED
                                            Overall         = NOT REVIEW-CLEARED
-PHASE 4   Human Implementation Start GO    = NOT CONSUMED / NOT GRANTED
-PHASE 5   Minimal Implementation           = NOT AUTHORIZED
-PHASE 6   Focused Verification             = NOT AUTHORIZED
-PHASE 7   Exact HEAD Fixation              = NOT AUTHORIZED
-PHASE 8   Independent Implementation Review= NOT AUTHORIZED
+PHASE 4   Human Implementation Start GO    = CONSUMED (after Authority Correction-1)
+PHASE 5   Minimal Implementation           = APPLIED 02caa2157079818705c230cdeffb0b485d9e0644
+PHASE 6   Focused Verification             = PASS
+PHASE 7   Exact HEAD Fixation              = 02caa2157079818705c230cdeffb0b485d9e0644
+PHASE 8   Independent Implementation Review= PENDING Human / this record
 PHASE 9   Human Ready GO                   = NOT GRANTED
 PHASE 10  Human Merge GO                   = NOT GRANTED
 PHASE 11  Post-Merge Workflow Re-run GO    = NOT GRANTED
@@ -486,6 +488,9 @@ Independent Scope Re-Review
 Human Implementation Start GO  (not yet given)
 ```
 
+Later: Human Implementation Start was given after this correction.
+See §12 for the authorized implementation HEAD `02caa21`.
+
 A further branch push may trigger another Cloudflare **preview**. That is
 the P1-1 class. It is not Production Deploy GO and is not this identity
 fix.
@@ -498,29 +503,73 @@ fix.
 READ-ONLY ISOLATION                         = COMPLETE / PASS
 AUTO-REFRESH-PUBLICATION-IDENTITY-V1
   Minimal Correction Definition             = DEFINED
-  Exact Implementation Scope                = LOCKED (technical)
-  Independent Scope Review-1 (Human)        = CORRECTION REQUIRED / HOLD
-    Technical Scope                         = REVIEW-CLEARED
-    Authority / Gate                        = FAILED
-    Overall                                 = NOT REVIEW-CLEARED
-  P0-1 unauthorized implementation          = reverted on branch
-  P1-1 preview deploy side effect           = RECORDED / DEFER
-  Authority Correction-1                    = APPLIED (reverts + this record)
-  Human Implementation Start GO             = NOT CONSUMED
-  Implementation on PR tree                 = ABSENT (matches 4fe6b06 / main)
-  Human Ready GO                            = NOT ELIGIBLE
+  Exact Implementation Scope                = LOCKED
+  Independent Scope Review-1 (Human)        = HOLD recorded; technical scope PASS
+  Authority Correction-1                    = APPLIED
+  Human Implementation Start                = CONSUMED (after Correction-1)
+  Implementation HEAD                       = 02caa2157079818705c230cdeffb0b485d9e0644
+  Focused Verification                      = PASS
+  Human Ready GO                            = NOT GRANTED
   Human Merge GO                            = NOT AUTHORIZED
   Workflow Re-run                           = NOT AUTHORIZED
   Deploy                                    = NOT AUTHORIZED
 
 PR #133 CLOSE                               = NOT YET AUTHORIZED
 SECRET CORRECTION                           = NOT REQUIRED
+P1-1 preview side effect                    = RECORDED (this push may preview again)
 ```
 
 ```text
 NEXT
-= exact Scope re-read
-= Independent Scope Re-Review
-= Human Implementation Start GO remains NOT given
-= do not insert user.name / user.email until that GO
+= Independent Implementation Review (Human)
+= Human Ready GO
+= Human Merge GO
+= Post-Merge Workflow Re-run GO
 ```
+
+---
+
+## 12. Post-Correction implementation record
+
+Exact scope re-read before this implementation:
+
+```text
+origin/main     = 4b47b5a3576564aebbe3f20d15c7807b89618243
+pre-impl HEAD   = 1f3c7d933f8995e511333bfe86eca2efbab75c0a
+script vs main  = identical (no ident)
+locked surface  = scripts/run-persistent-auto-refresh.ts
+locked call     = Snapshot git commit only
+```
+
+Human message after Authority Correction-1: `Implementation Start`.
+
+```text
+Implementation HEAD = 02caa2157079818705c230cdeffb0b485d9e0644
+files               = scripts/run-persistent-auto-refresh.ts only
+```
+
+Diff is the locked argv only:
+
+```text
+git([
+  "-c", "user.name=github-actions[bot]",
+  "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+  "commit",
+  "-m", `docs(architecture): persistent auto-refresh Snapshot (${startMain.slice(0, 7)})`,
+])
+```
+
+`checkout -B`, `add`, `push` unchanged. No `git config`. No workflow file.
+
+Focused Verification:
+
+```text
+isolated empty-HOME git -c commit = PASS
+Author identity unknown           = NOT PRESENT
+repo-local user.name              = unset
+npm run verify                    = PASS (974 tests, typecheck, build)
+```
+
+Live Actions push/Draft publication still waits for Ready / Merge /
+Workflow Re-run GOs. This record does not grant them.
+
