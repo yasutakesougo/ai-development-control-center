@@ -1,5 +1,6 @@
 import { resolveHumanAction } from "../domain/humanActionResolver";
 import { handleAuthStatus } from "./auth/authStatus";
+import { handleChatReadbackMcp } from "./chatReadbackMcp";
 import { observeRepository } from "./github/readOnlyAdapter";
 import { handleLedgerRecordPost, handleLedgerRecordsGet, type LedgerApiEnv } from "./ledger/recordsApi";
 import { handleRepositoryDetailGet, handleRepositoryOverviewGet } from "./repositoryOverviewApi";
@@ -19,6 +20,12 @@ interface Env extends LedgerApiEnv {
 
 const TARGET_REPOSITORY = "yasutakesougo/severe-behavior-support-spfx";
 
+async function loadStatusPayload(env: Env): Promise<Record<string, unknown>> {
+  const facts = await observeRepository(TARGET_REPOSITORY, env);
+  const action = resolveHumanAction(facts);
+  return buildStatusPayload(facts, action);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -36,10 +43,14 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname === "/api/status") {
-      const facts = await observeRepository(TARGET_REPOSITORY, env);
-      const action = resolveHumanAction(facts);
-      const payload = await buildStatusPayload(facts, action);
+      const payload = await loadStatusPayload(env);
       return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    if (url.pathname === "/mcp") {
+      return handleChatReadbackMcp(request, {
+        loadStatusPayload: () => loadStatusPayload(env),
+      });
     }
 
     if (request.method === "GET" && url.pathname === "/api/status-overlay") {
