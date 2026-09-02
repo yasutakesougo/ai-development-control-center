@@ -1,6 +1,6 @@
 # `/api/status` GitHub observation failure — READ-ONLY isolation
 
-**Status: READ-ONLY TRIAGE LOCKED · NO IMPLEMENTATION AUTHORIZED**
+**Status: READ-ONLY TRIAGE LOCKED · NEXT HUMAN ACTION LOCKED · NO IMPLEMENTATION AUTHORIZED**
 
 This note isolates the remaining HumanAction copy:
 
@@ -29,12 +29,44 @@ IN SCOPE
 = read-only isolation of GET /api/status GitHub observation fail-closed
 
 OUT OF SCOPE / NOT AUTHORIZED
-= GITHUB_TOKEN inspect, rotate, or put
+= GITHUB_TOKEN value read, display, rotate, or put
+= substituting CLOUDFLARE_API_TOKEN for GITHUB_TOKEN
 = TARGET_REPOSITORY change
 = observeRepository / resolver / payload-shape change
 = exposing GitHub HTTP status or token presence on the public API
 = mutating yasutakesougo/severe-behavior-support-spfx
 = treating overview / overlay CONFIRMED as /api/status CONFIRMED
+```
+
+Canonical lock after isolation:
+
+```text
+READ-ONLY ISOLATION
+= PASS
+
+Production deployment
+= HEALTHY
+
+/api/status transport
+= HTTP 200
+
+HumanAction UNKNOWN
+= resolver の fail-closed 結果
+
+Failure boundary
+= first authenticated GitHub repository observation
+
+Target
+= yasutakesougo/severe-behavior-support-spfx
+
+Implementation
+= NOT AUTHORIZED
+
+Secret mutation
+= NOT AUTHORIZED
+
+TARGET_REPOSITORY mutation
+= NOT AUTHORIZED
 ```
 
 ## 2. Live production observation (2026-09-01)
@@ -178,37 +210,103 @@ Public GitHub / Worker egress    = ruled out (overview + overlay CONFIRMED)
 Action-card scope misread        = already corrected; not this failure
 ```
 
-## 8. Next authorized step (Human)
-
-Read-only, no chat paste of secrets:
+## 8. Locked next gate (Human)
 
 ```text
-1. Confirm whether production Worker secret GITHUB_TOKEN exists
-   (Dashboard or `wrangler secret list` — name only).
+CURRENT
+= READ-ONLY diagnosis complete
 
-2. From a Human-authenticated terminal, GET
-   https://api.github.com/repos/yasutakesougo/severe-behavior-support-spfx
-   with that token. Record only the HTTP status (200 / 401 / 403 / 404).
+NEXT HUMAN ACTION
+= production GITHUB_TOKEN presence check
+  + authenticated GET status check
 
-3. Map:
-   missing secret     → H1
-   401 / 403          → H2 (or insufficient fine-grained permissions)
-   404                → H3 or H4
-   200                → reopen H5; do not guess
+Code mutation
+= HOLD
 
-4. Do not rotate, broaden, or put a token unless separately authorized.
-5. Do not change /api/status semantics to paper over ERROR.
+GitHub token replacement
+= HOLD until H1/H2/H3 classification
 ```
+
+Do not read or display token values. Confirm only the secret **name** and the
+authenticated GET **HTTP status**.
+
+`CLOUDFLARE_API_TOKEN` is Cloudflare deploy authentication for the agent
+environment. It is **not** `GITHUB_TOKEN`. Do not replace or overwrite one
+with the other.
+
+### PHASE 1 — Worker secret name presence
+
+```text
+production Worker = ai-development-control-center
+secret name       = GITHUB_TOKEN
+record            = exists / absent
+do not            = print, copy, or rotate the value
+```
+
+Dashboard → Workers → `ai-development-control-center` → Settings → Variables
+and Secrets, or a Human `wrangler secret list` that can actually read that
+script's secrets.
+
+### PHASE 2 — Authenticated repository probe
+
+Only after PHASE 1 = exists. Use the Worker GitHub credential (or the same
+fine-grained PAT it was minted from). Record HTTP status only.
+
+```text
+GET /repos/yasutakesougo/severe-behavior-support-spfx
+```
+
+```text
+HTTP classification
+├─ 200       → credential works → reopen H5
+├─ 401 / 403 → H2
+├─ 404       → H3 or H4
+└─ no token  → H1
+```
+
+If PHASE 2 returns **404**, do **not** mint a replacement token first. Confirm
+whether the existing fine-grained PAT includes
+`yasutakesougo/severe-behavior-support-spfx` in Repository access. Only after
+that grant check is H3 vs H4 separable. Recreate a token only if separately
+authorized after that classification.
+
+### This environment's PHASE 1 attempt (2026-09-02)
+
+Presence-only. Token values were not read or printed.
+
+```text
+shell GITHUB_TOKEN / GH_TOKEN     = absent
+CLOUDFLARE_API_TOKEN              = present (deploy auth)
+CLOUDFLARE_ACCOUNT_ID             = present
+GET /user/tokens/verify           = 200, success, status=active
+
+GET .../workers/scripts/ai-development-control-center
+                                  = 403 Authentication error [10000]
+GET .../workers/scripts/.../secrets
+                                  = 403 Authentication error [10000]
+wrangler secret list --name ai-development-control-center
+                                  = same 403
+
+PHASE 1 GITHUB_TOKEN presence     = UNCONFIRMED
+H1                                = NOT classified
+PHASE 2 authenticated GitHub GET  = NOT RUN
+  (no GITHUB_TOKEN available; Worker secret value must not be fetched)
+```
+
+The deploy token can authenticate to Cloudflare and cannot list production
+Worker secrets. That is a Cloudflare permission boundary, not a GitHub
+observation result.
 
 ## 9. Suggested follow-up slices (not started)
 
 Only if separately defined and authorized:
 
 ```text
-SLICE-DIAG-AUTH   Human records token presence + authenticated GET status
+SLICE-DIAG-AUTH   Human completes PHASE 1 + PHASE 2 (name + HTTP status)
 SLICE-OBSERVE-ERR optional: persist GitHub HTTP class (404/401/403/5xx) in
                   internal errors without leaking token or widening authority
 SLICE-TOKEN-FIX   Human secret put / rotation, same README permission boundary
+                  — only after H1/H2/H3 classification
 ```
 
 No implementation slice is opened by this document.
@@ -232,8 +330,15 @@ NOT
 
 OPEN
 = which of H1–H4 (token absence / invalid / no-grant / missing repo)
+= PHASE 1 presence UNCONFIRMED from this environment
 = requires Human secret-presence + authenticated GET
 
 IMPLEMENTATION
+= NOT AUTHORIZED
+
+Secret mutation
+= NOT AUTHORIZED
+
+TARGET_REPOSITORY mutation
 = NOT AUTHORIZED
 ```
