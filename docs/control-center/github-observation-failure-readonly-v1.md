@@ -1,6 +1,6 @@
 # `/api/status` GitHub observation failure — READ-ONLY isolation
 
-**Status: READ-ONLY TRIAGE LOCKED · NEXT HUMAN ACTION LOCKED · NO IMPLEMENTATION AUTHORIZED**
+**Status: READ-ONLY DIAGNOSIS COMPLETE · H1 CONFIRMED · CREDENTIAL PROVISION NOT AUTHORIZED**
 
 This note isolates the remaining HumanAction copy:
 
@@ -40,24 +40,53 @@ OUT OF SCOPE / NOT AUTHORIZED
 = treating overview / overlay CONFIRMED as /api/status CONFIRMED
 ```
 
-Canonical lock:
+Canonical lock (Human Dashboard PHASE 1):
 
 ```text
 PRODUCTION-DRIFT-CORRECTION = CLOSED / PASS
 READ-ONLY ISOLATION         = PASS
-Failure boundary            = private GitHub credential observation
 
-GITHUB_TOKEN presence       = UNCONFIRMED
-H1                          = UNCLASSIFIED
+GITHUB_TOKEN presence       = ABSENT
+H1                          = CONFIRMED
+
+H2/H3/H4                    = NOT APPLICABLE YET
 Authenticated target GET    = NOT RUN
 
 Code mutation               = HOLD
-Secret replacement          = HOLD
 TARGET_REPOSITORY mutation  = HOLD
+READ-ONLY diagnosis         = COMPLETE
 
 NEXT
-= Human Dashboard check of production GITHUB_TOKEN name
+= separate Human Gate
+  GITHUB-OBSERVATION-CREDENTIAL-V1
+  Human Secret Provision GO
+  (not consumed)
 ```
+
+Causal chain (now closed as diagnosis):
+
+```text
+production Worker
+ai-development-control-center
+
+GITHUB_TOKEN
+= NOT CONFIGURED
+
+↓
+private severe-behavior-support-spfx を認証付きでGETできない
+
+↓
+GitHub 404
+
+↓
+evidenceState = ERROR
+
+↓
+HumanAction = UNKNOWN
+```
+
+Credential put, PAT mint, code change, and redeploy are **out of this document**.
+See `docs/control-center/github-observation-credential-v1.md`.
 
 ## 2. Live production observation (2026-09-01)
 
@@ -200,162 +229,52 @@ Public GitHub / Worker egress    = ruled out (overview + overlay CONFIRMED)
 Action-card scope misread        = already corrected; not this failure
 ```
 
-## 8. Locked next gate (Human)
+## 8. PHASE 1 result (Human Dashboard)
+
+Human confirmed production Worker secret-name presence:
 
 ```text
-CURRENT
-= READ-ONLY diagnosis complete
-= cause region = production GitHub credential boundary
-  (not code, not deploy)
-
-NEXT
-= Human Dashboard check of production GITHUB_TOKEN name
-
-Code mutation
-= HOLD
-
-Secret replacement
-= HOLD
-
-TARGET_REPOSITORY mutation
-= HOLD
-
-CLOUDFLARE_API_TOKEN scope expansion
-= NOT REQUIRED
+Worker     = ai-development-control-center
+surface    = Dashboard Secrets
+GITHUB_TOKEN
+           = NOT CONFIGURED / ABSENT
+H1         = CONFIRMED
 ```
 
-Cloudflare Worker secrets cannot be re-displayed. Dashboard confirmation that
-the name `GITHUB_TOKEN` exists does **not** yield a value that can be passed
-to an external `curl`. Do not screenshot values or paste token bodies.
+PHASE 1B and PHASE 2 are **not applicable**. There is no stored Worker
+credential whose metadata or recovered PAT value could be inspected.
 
-`CLOUDFLARE_API_TOKEN` is Cloudflare deploy authentication. It is **not**
-`GITHUB_TOKEN`. Do not substitute. Do not widen it merely to list secret
-names. Dashboard PHASE 1 is the minimum change.
+H2 / H3 / H4 remain unused until a credential exists and still fails.
 
-### PHASE 1 — Worker secret-name presence
+Agent-side Cloudflare secrets-list 403 is historical only. It is not needed
+once Dashboard PHASE 1 is recorded.
+
+## 9. Hand-off (out of READ-ONLY)
+
+This document does not authorize secret put.
 
 ```text
-Worker     = ai-development-control-center (production)
-surface    = Dashboard → Settings → Variables and Secrets
-record     = GITHUB_TOKEN exists / absent
-do not     = open the value, copy it, or rotate it
+NEXT GATE
+= GITHUB-OBSERVATION-CREDENTIAL-V1
+= Human Secret Provision GO
+= docs/control-center/github-observation-credential-v1.md
 ```
-
-```text
-PHASE 1
-Production Worker secret-name presence
-
-GITHUB_TOKEN absent
-→ H1 CONFIRMED
-
-GITHUB_TOKEN present
-→ H1 REJECTED
-→ H2 / H3 / H4 remain
-```
-
-### PHASE 1B — provenance / metadata, no credential mutation
-
-Only after PHASE 1 = present. Prefer GitHub token settings / PAT metadata
-over any new secret. Do not mint or put a token here.
-
-```text
-PHASE 1B
-Original GitHub credential provenance / metadata
-
-- token expired / revoked
-  → H2
-
-- fine-grained PAT で
-  severe-behavior-support-spfx が Repository access 外
-  → H3
-
-- token active
-  + repository access includes target
-  → H2/H3 を低下
-  → H4/H5 の切り分けへ
-```
-
-If PHASE 1B cannot identify the original PAT (no safe store, no GitHub token
-list match), stop. Do not invent a curl.
-
-```text
-H1 = REJECTED
-H2/H3/H4 = UNRESOLVED
-READ-ONLY limit reached
-token replacement = separate Human Gate (not opened here)
-```
-
-### PHASE 2 — authenticated GET (optional, only with recovered PAT value)
-
-Only if the original PAT value is available from a **safe store** that is not
-the Worker secret store. Never reconstruct the value from Cloudflare.
-
-```text
-GET /repos/yasutakesougo/severe-behavior-support-spfx
-```
-
-```text
-200       → first hop works → H5
-401 / 403 → H2
-404       → H3 or H4
-            (do not replace the token yet;
-             finish PHASE 1B repository-access check first)
-```
-
-### This environment's PHASE 1 attempt (2026-09-02)
-
-Presence-only. Token values were not read or printed.
-
-```text
-shell GITHUB_TOKEN / GH_TOKEN     = absent
-CLOUDFLARE_API_TOKEN              = present (deploy auth)
-CLOUDFLARE_ACCOUNT_ID             = present
-GET /user/tokens/verify           = 200, success, status=active
-
-GET .../workers/scripts/ai-development-control-center
-                                  = 403 Authentication error [10000]
-GET .../workers/scripts/.../secrets
-                                  = 403 Authentication error [10000]
-wrangler secret list --name ai-development-control-center
-                                  = same 403
-
-PHASE 1 GITHUB_TOKEN presence     = UNCONFIRMED
-H1                                = UNCLASSIFIED
-Authenticated target GET          = NOT RUN
-```
-
-Leave `CLOUDFLARE_API_TOKEN` as deploy-only. Human Dashboard name check is
-enough for PHASE 1.
-
-## 9. Suggested follow-up slices (not started)
-
-Only if separately defined and authorized:
-
-```text
-SLICE-DIAG-AUTH   Human PHASE 1 (name) → PHASE 1B (metadata)
-                  → optional PHASE 2 if PAT value is in a safe store
-SLICE-OBSERVE-ERR optional: persist GitHub HTTP class without leaking token
-SLICE-TOKEN-FIX   separate Human Gate after H1/H2/H3 classification
-```
-
-No implementation slice is opened by this document.
 
 ## 10. Result
 
 ```text
 PRODUCTION-DRIFT-CORRECTION = CLOSED / PASS
 READ-ONLY ISOLATION         = PASS
-Failure boundary            = private GitHub credential observation
 
-GITHUB_TOKEN presence       = UNCONFIRMED
-H1                          = UNCLASSIFIED
+GITHUB_TOKEN presence       = ABSENT
+H1                          = CONFIRMED
+
+H2/H3/H4                    = NOT APPLICABLE YET
 Authenticated target GET    = NOT RUN
 
 Code mutation               = HOLD
-Secret replacement          = HOLD
 TARGET_REPOSITORY mutation  = HOLD
-
-NEXT
-= Human Dashboard check of production GITHUB_TOKEN name
+READ-ONLY diagnosis         = COMPLETE
 ```
+
 
