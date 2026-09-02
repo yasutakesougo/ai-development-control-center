@@ -12,6 +12,15 @@ import type {
 
 const API = "https://api.github.com";
 
+export const GITHUB_SUBREQUEST_BUDGET_EXCEEDED = "GITHUB_SUBREQUEST_BUDGET_EXCEEDED";
+export const SUBREQUEST_LIMIT = 50;
+export const BASE_COST = 3;
+export const PER_PR_COST = 3;
+
+export function requiredCost(openPullRequestCount: number): number {
+  return BASE_COST + PER_PR_COST * openPullRequestCount;
+}
+
 type GitHubEnv = { GITHUB_TOKEN?: string };
 
 type RepoResponse = { default_branch?: string };
@@ -50,8 +59,11 @@ export async function observeRepository(
     if (!branch.sha) return missing(repository, sourceRefs, "main commit SHA missing");
 
     const pulls = await githubGet<PullResponse[]>(`/repos/${repository}/pulls?state=open&per_page=30`, env);
-    const observedPullRequests: ObservedPullRequest[] = [];
+    if (requiredCost(pulls.length) > SUBREQUEST_LIMIT) {
+      return budgetExceeded(repository, sourceRefs);
+    }
 
+    const observedPullRequests: ObservedPullRequest[] = [];
     for (const pull of pulls) {
       observedPullRequests.push(await observePull(repository, pull, env));
     }
@@ -119,13 +131,7 @@ async function observePull(
     };
   }
 
-  // Checks API may be unavailable for fine-grained PATs (no Checks permission UI).
-  // Soft-fail check-runs so observation can continue with Commit Status only.
-  const [checks, status, reviews] = await Promise.all([
-    githubGetOptional<CheckRunsResponse>(
-      `/repos/${repository}/commits/${sha}/check-runs?per_page=100`,
-      env,
-    ),
+  const [status, reviews] = await Promise.all([
     githubGet<StatusResponse>(`/repos/${repository}/commits/${sha}/status`, env),
     githubGet<ReviewResponse[]>(`/repos/${repository}/pulls/${summary.number}/reviews?per_page=100`, env),
   ]);
@@ -134,7 +140,7 @@ async function observePull(
     number: summary.number,
     title: summary.title,
     draft: Boolean(summary.draft),
-    ci: normalizeCi(checks, status),
+    ci: normalizeCi(null, status),
     review: normalizeReview(reviews),
     mergeState: normalizeMergeState(pull),
     humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
@@ -197,13 +203,6 @@ async function githubGet<T>(path: string, env: GitHubEnv): Promise<T> {
   return (await response.json()) as T;
 }
 
-/** Soft-fail GET for optional endpoints (e.g. check-runs without Checks permission). */
-async function githubGetOptional<T>(path: string, env: GitHubEnv): Promise<T | null> {
-  const response = await githubFetch(path, env);
-  if (!response.ok) return null;
-  return (await response.json()) as T;
-}
-
 async function githubFetch(path: string, env: GitHubEnv): Promise<Response> {
   const headers = new Headers({
     Accept: "application/vnd.github+json",
@@ -212,6 +211,19 @@ async function githubFetch(path: string, env: GitHubEnv): Promise<Response> {
   });
   if (env.GITHUB_TOKEN) headers.set("Authorization", `Bearer ${env.GITHUB_TOKEN}`);
   return fetch(`${API}${path}`, { method: "GET", headers });
+}
+
+function budgetExceeded(repository: string, sourceRefs: string[]): ObservedFacts {
+  return {
+    repository,
+    observedAt: new Date().toISOString(),
+    evidenceState: "ERROR",
+    currentMain: null,
+    openPullRequests: null,
+    relevantIssueStates: null,
+    errors: [GITHUB_SUBREQUEST_BUDGET_EXCEEDED],
+    sourceRefs,
+  };
 }
 
 function missing(repository: string, sourceRefs: string[], message: string): ObservedFacts {
