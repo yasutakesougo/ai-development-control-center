@@ -6,7 +6,11 @@ Human Secret Provision
 
 ## Status
 
-DEFINED · Human Secret Provision GO **NOT CONSUMED**
+Human Secret Provision GO **CONSUMED**
+
+Execution in the Cloud Agent environment **BLOCKED** (cannot mint the bound
+PAT; cannot write production Worker secrets; agent GitHub token must not be
+reused). Remaining put is Human-terminal / Dashboard.
 
 Prerequisite (closed):
 
@@ -69,10 +73,14 @@ deploy auth only.
 
 ## After Human Secret Provision GO (minimal change)
 
-Human-authenticated terminal / GitHub + Cloudflare Dashboard only. Do not
-paste the PAT into chat, commits, or screenshots.
+GO is consumed. The following remains a **Human** action on a Human-authenticated
+GitHub + Cloudflare session. Do not paste the PAT into chat, commits, or
+screenshots.
 
-1. Create a fine-grained PAT with the bound permissions above.
+1. GitHub → Settings → Developer settings → Fine-grained personal access
+   tokens → Generate. Repository access =
+   `yasutakesougo/severe-behavior-support-spfx` only. Permissions = bound
+   set above.
 2. Register it on production Worker `ai-development-control-center` as secret
    name `GITHUB_TOKEN` only:
 
@@ -89,6 +97,32 @@ paste the PAT into chat, commits, or screenshots.
 
 4. Do not grant the PAT to overview/public repos. Do not add it to staging
    unless a later gate says so.
+
+5. Do **not** put the Cloud Agent / `gh` installation token as
+   `GITHUB_TOKEN`. That identity cannot see the private target (GET repo =
+   404) and is out of the bound permission set.
+
+### Agent execution record (GO consumed, 2026-09-02)
+
+```text
+Human Secret Provision GO     = CONSUMED
+PAT mint from this environment = BLOCKED
+  (no user fine-grained PAT API; agent gh cannot see target repo)
+production secret put         = BLOCKED
+  (CLOUDFLARE_API_TOKEN GET .../secrets = 403 code 10000)
+agent token reused as Worker GITHUB_TOKEN = NO
+code mutation                 = NO
+redeploy                      = NO
+
+GET /api/status (unchanged)
+  evidenceState = ERROR
+  main          = Unknown
+  openPrCount   = null
+```
+
+`CLOUDFLARE_API_TOKEN` is still deploy-only. Do not widen it unless a later
+Human gate says the agent must put the secret. Dashboard / Human wrangler
+put is the minimum path.
 
 ## Closeout readback (after put)
 
@@ -135,8 +169,13 @@ CLOUDFLARE_API_TOKEN                  = unchanged
 
 ```text
 GITHUB-OBSERVATION-CREDENTIAL-V1
-Human Secret Provision GO = NOT CONSUMED
+Human Secret Provision GO = CONSUMED
+
+PAT create + GITHUB_TOKEN put
+= HUMAN EXECUTION REMAINING
 
 NEXT
-= Human GO, then PAT create + production secret put + /api/status readback
+= Human mints bound fine-grained PAT
+  + production secret put GITHUB_TOKEN
+  + GET /api/status readback
 ```

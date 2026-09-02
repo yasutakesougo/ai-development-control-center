@@ -57,10 +57,9 @@ TARGET_REPOSITORY mutation  = HOLD
 READ-ONLY diagnosis         = COMPLETE
 
 NEXT
-= separate Human Gate
-  GITHUB-OBSERVATION-CREDENTIAL-V1
-  Human Secret Provision GO
-  (not consumed)
+= GITHUB-OBSERVATION-CREDENTIAL-V1
+  Human Secret Provision GO = CONSUMED
+  PAT create + production secret put = HUMAN EXECUTION REMAINING
 ```
 
 Causal chain (now closed as diagnosis):
