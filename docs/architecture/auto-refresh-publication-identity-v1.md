@@ -1,7 +1,7 @@
 # AUTO-REFRESH-PUBLICATION-IDENTITY-V1
 ## Minimal Correction Definition
 
-**Status: MINIMAL CORRECTION DEFINED · IMPLEMENTATION NOT AUTHORIZED**
+**Status: SCOPE REVIEW-CLEARED · IMPLEMENTATION NOT AUTHORIZED**
 
 ```text
 Workstream
@@ -12,7 +12,8 @@ READ-ONLY isolation of run 33598079334
 
 This document
 = PHASE 1 Minimal Correction Definition
-  + PHASE 2 Exact Implementation Scope (proposed, one file)
+  + PHASE 2 Exact Implementation Scope (LOCKED, one file)
+  + PHASE 3 Independent Scope Review (REVIEW-CLEARED)
 
 Human Implementation Start GO = NOT GRANTED
 Human Ready GO               = NOT GRANTED
@@ -137,8 +138,8 @@ Correct **only** Draft publication `git commit` identity.
 
 ```text
 IN SCOPE
-= non-empty process-local or repo-local git author/committer
-  for the persistent auto-refresh Snapshot commit
+= non-empty process-local git author/committer
+  for the persistent auto-refresh Snapshot commit only
 
 OUT OF SCOPE
 = global git config
@@ -156,16 +157,16 @@ OUT OF SCOPE
 Identity must be:
 
 ```text
-repo-local  (git config without --global)
-     OR
-process-local (git -c user.* ... / GIT_AUTHOR_* + GIT_COMMITTER_*)
+process-local only
+= git -c user.name=... -c user.email=... on the commit argv
 
-global git config = FORBIDDEN
-secret values     = NOT REQUIRED
+git config --global = FORBIDDEN
+git config --local  = FORBIDDEN in this slice
+GIT_AUTHOR_* extra  = NOT REQUIRED (duplicative of -c)
+secret values       = NOT REQUIRED
 ```
 
-Expected identity (default, unless Independent Scope Review names another
-non-empty bot ident):
+Locked identity:
 
 ```text
 name  = github-actions[bot]
@@ -176,12 +177,12 @@ This ident is documentation of the intended commit author, not a secret.
 
 ---
 
-## 4. Exact Implementation Scope (proposed)
+## 4. Exact Implementation Scope (LOCKED)
 
-Prefer **one** file. Do not change both unless Independent Scope Review
-proves one file is insufficient.
+Independent Scope Review locked **one** file. Do not change the workflow
+unless a later Scope Correction proves this file is insufficient.
 
-### Preferred surface (one file)
+### Locked surface (one file)
 
 ```text
 scripts/run-persistent-auto-refresh.ts
@@ -197,7 +198,7 @@ Why this file:
 4. Workflow YAML stays an orchestration wrapper.
 ```
 
-Proposed mutation (not implemented in this PR):
+Locked mutation (not implemented until Human Implementation Start GO):
 
 ```text
 Keep git(["checkout", "-B", branch]) and git(["add", ...]) unchanged.
@@ -211,16 +212,17 @@ Change only the commit invocation to pass process-local identity, e.g.
     "-m", `docs(architecture): persistent auto-refresh Snapshot (${startMain.slice(0, 7)})`,
   ])
 
-Do not call git config --global.
-Do not persist identity for later unrelated git commands unless a later
-scope review requires repo-local config for committer consistency.
+Do not call git config --global or git config --local.
+Do not persist identity for later git commands.
 ```
 
-Optional focused test (only after Human Implementation Start GO): assert the
-commit path supplies non-empty ident, or a dry helper around the commit argv.
-Do not add Worker / `/api/status` tests for this slice.
+Focused test file: **not in this slice** (Independent Scope Review DEFER).
+PHASE 6 evidence is: exact diff of the commit argv, existing `npm run verify`,
+and (only after Post-Merge Workflow Re-run GO) Actions logs showing
+`Author identity unknown = NOT PRESENT`. Do not add Worker / `/api/status`
+tests.
 
-### Rejected-for-now alternative (do not also take)
+### Rejected alternative (do not take)
 
 ```text
 .github/workflows/architecture-auto-refresh.yml
@@ -228,8 +230,7 @@ Do not add Worker / `/api/status` tests for this slice.
 
 A repo-local `git config user.name` / `user.email` step (no `--global`)
 would fix hosted Actions only. CLI `--publish` would still fail without
-ident. Use this file only if Independent Scope Review rejects the script
-surface.
+ident. Independent Scope Review rejected this alternative.
 
 ### Files that must not change in the implementation slice
 
@@ -306,8 +307,8 @@ as this identity defect.
 ```text
 PHASE 0   Current-Main Rebaseline          = THIS DOCUMENT (4b47b5a)
 PHASE 1   Minimal Correction Definition    = THIS DOCUMENT
-PHASE 2   Exact Implementation Scope       = THIS DOCUMENT (proposed)
-PHASE 3   Independent Scope Review         = NEXT
+PHASE 2   Exact Implementation Scope       = THIS DOCUMENT (LOCKED)
+PHASE 3   Independent Scope Review         = REVIEW-CLEARED
 PHASE 4   Human Implementation Start GO    = NOT GRANTED
 PHASE 5   Minimal Implementation           = NOT AUTHORIZED
 PHASE 6   Focused Verification             = NOT AUTHORIZED
@@ -343,14 +344,85 @@ This document does not close, comment on, or edit PR #133.
 
 ---
 
-## 9. Current gate
+## 9. Independent Scope Review
+
+```text
+REVIEW ID     = AUTO-REFRESH-PUBLICATION-IDENTITY-V1 Independent Scope Review-1
+REVIEWED HEAD = b4b0551 (definition commit on this branch; rebaseline main 4b47b5a)
+MODE          = READ-ONLY evaluation (no script / workflow / ident mutation)
+VERDICT       = REVIEW-CLEARED
+P0 MUST_FIX   = 0
+P1 MUST_FIX   = 0
+```
+
+### Locks applied by this review
+
+```text
+LOCKED SURFACE    = scripts/run-persistent-auto-refresh.ts
+LOCKED CALL SITE  = the existing git(["commit", "-m", ...]) only
+LOCKED MECHANISM  = process-local git -c user.name=... -c user.email=...
+                    as argv immediately before the commit subcommand
+LOCKED IDENT      = name  github-actions[bot]
+                    email 41898282+github-actions[bot]@users.noreply.github.com
+
+NOT THIS SLICE    = .github/workflows/architecture-auto-refresh.yml
+NOT THIS SLICE    = git config --global
+NOT THIS SLICE    = git config --local / repo-local persist
+NOT THIS SLICE    = GIT_AUTHOR_* / GIT_COMMITTER_* extra env (duplicative)
+NOT THIS SLICE    = new test file
+NOT THIS SLICE    = PR #133
+NOT THIS SLICE    = /api/status, Worker GITHUB_TOKEN, Cloudflare, Human Gates
+```
+
+`git()` is `execFileSync("git", args)`. The locked argv is therefore a real
+git process-local `-c` pair, not a shell string. Isolated reproduction
+(empty HOME, no gitconfig) matched the Actions class:
+
+```text
+without -c  → exit 128, Author identity unknown
+with    -c  → commit PASS
+author      = github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+committer   = same
+repo-local user.name / user.email remained unset
+```
+
+Workflow YAML is unnecessary for this defect. Taking it would expand to two
+files and leave CLI `--publish` unfixed. Identity is required only at
+`commit`; `checkout -B`, `add`, and `push` do not need ident.
+
+### Findings
+
+| findingId | severity | disposition | rationale |
+|---|---|---|---|
+| ISR-1 | P0 | CLOSED | Causal site is the script `git commit`; one-file script change is sufficient. |
+| ISR-2 | P1 | REJECT | Also changing the workflow YAML is not required and would violate one-file preference. |
+| ISR-3 | P1 | CLOSED | Mechanism locked to process-local `git -c` only; `git config` (global or local) is out. |
+| ISR-4 | P2 | REJECT | Extra `GIT_AUTHOR_*` env on top of `-c` is duplicative. |
+| ISR-5 | P2 | REJECT | `GITHUB_ACTIONS`-conditional ident is extra branching; Actions bot ident is enough. |
+| ISR-6 | P2 | DEFER | Split `commit` vs `push` HOLD reasons. Existing catch-all is not this defect. |
+| ISR-7 | P2 | DEFER | New unit test file for commit argv. PHASE 6 uses diff + existing verify + later run logs. |
+| ISR-8 | P0 | CLOSED | No leakage into `/api/status`, Worker secrets, Cloudflare, or Human Gate semantics. |
+
+No MUST_FIX remains. Scope Correction is **not** required.
+
+Human Implementation Start GO is **not** granted by this review.
+
+```text
+Human Understanding Check = not performed here
+Human Implementation Start GO = NOT GRANTED
+user.name / user.email mutation = still FORBIDDEN until that GO
+```
+
+---
+
+## 10. Current gate
 
 ```text
 READ-ONLY ISOLATION                         = COMPLETE / PASS
 AUTO-REFRESH-PUBLICATION-IDENTITY-V1
   Minimal Correction Definition             = DEFINED
-  Exact Implementation Scope                = PROPOSED
-  Independent Scope Review                  = PENDING
+  Exact Implementation Scope                = LOCKED
+  Independent Scope Review                  = REVIEW-CLEARED
   Human Implementation Start GO             = NOT GRANTED
   Implementation                            = NOT AUTHORIZED
 
@@ -362,8 +434,7 @@ SECRET CORRECTION                           = NOT REQUIRED
 
 ```text
 NEXT
-= Independent Scope Review of the one-file proposal
-  (scripts/run-persistent-auto-refresh.ts, process-local git -c ident)
-= then Human Implementation Start GO
-= then minimal implementation on a later commit
+= Human Implementation Start GO
+= then minimal implementation of the locked git -c commit argv
+  in scripts/run-persistent-auto-refresh.ts only
 ```
