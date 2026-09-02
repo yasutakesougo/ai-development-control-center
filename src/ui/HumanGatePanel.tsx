@@ -3,6 +3,7 @@ import {
   type HumanGateSourceAvailability,
   type HumanGateStatusSource,
 } from "./humanGateViewModel";
+import "./humanGateCrt.css";
 
 export interface HumanGatePanelProps {
   availability: HumanGateSourceAvailability;
