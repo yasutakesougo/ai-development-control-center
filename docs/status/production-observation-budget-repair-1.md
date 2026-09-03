@@ -9,7 +9,7 @@ PHASE 1 — Definition
 ## Status
 
 ```text
-DEFINITION DRAFTED
+DEFINITION REVIEW-CLEARED (Independent Definition Review-1)
 Human Definition Lock GO: NOT CONSUMED / AWAITING
 Implementation Start: NOT AUTHORIZED
 Ready / Merge / Deploy: NOT AUTHORIZED
@@ -32,6 +32,7 @@ Issue creation from this agent connection was blocked (`403` on Issues write).
 Use the templates in
 `docs/status/production-observation-budget-repair-1-issue-templates.md`
 to open the parent + child Issues after Definition Lock if they do not yet exist.
+
 ## Baseline
 
 Historical failure fixation (immutable):
@@ -61,6 +62,13 @@ Observed `main` at Definition drafting:
 
 ```text
 91b96b250658ab4c5eab81d13ad95392cd2a84b0
+```
+
+PR #147 Definition HEAD at Independent Definition Review-1:
+
+```text
+base SHA = 91b96b250658ab4c5eab81d13ad95392cd2a84b0
+(review applies to Definition content; subsequent clarification commit may advance HEAD)
 ```
 
 Predecessor (kept; insufficient alone):
@@ -100,17 +108,61 @@ Observation cost は bounded でなければならない。
 
 This Objective is **not** “change 50 → 100”.
 
-## Principles (Definition Lock candidates)
+## PHASE 1 Lock boundary (explicit)
 
-| Principle | Content |
+Human Definition Lock GO, when consumed, locks **only** the items below.
+It does **not** lock PHASE 2/3 numeric budgets, prioritizer order, or Tier
+membership rules.
+
+### LOCK (PHASE 1)
+
+| # | Lock item |
 |---|---|
-| Budget is a safety boundary | Do not simply raise the limit above the Cloudflare constraint |
-| Do not lose repo evidence | One / many PRs must not force whole-repository `ERROR` when Tier-0 succeeded |
-| Cost bounded | No unbounded fan-out against Open PR count |
-| Partial ≠ Confirmed | Unobserved PRs must not be treated as fully observed |
-| Human Gate fail-closed | Do not infer GO / actionable Human decisions from incomplete evidence |
-| Deterministic | Which PRs receive detailed observation must be deterministic |
-| Auditability | Persist why a PR was observed vs omitted |
+| 1 | Observation cost must be bounded |
+| 2 | Open PR count must not blind repository / main observation |
+| 3 | `PARTIAL` ≠ `CONFIRMED` |
+| 4 | Unobserved PRs must be explicit |
+| 5 | `PARTIAL` must fail closed for Human Gate (no GO candidates from PARTIAL) |
+| 6 | Selection must be deterministic |
+| 7 | Why observed / omitted must be auditable |
+
+Also locked with Definition:
+
+| Item | Content |
+|---|---|
+| Historical failure classification | Architecture defect remains despite PR-count recovery |
+| Objective | As stated above |
+| Non-goals / rejects | As stated below |
+| Parent / child structure | Parent repair program + `BOUNDED-GITHUB-OBSERVATION-V1` implementation child |
+| Next phase after Lock | PHASE 2 Failure Semantics Definition (**not** coding) |
+
+### DO NOT LOCK YET (defer to PHASE 2 / PHASE 3)
+
+```text
+❌ SAFE_BUDGET exact value
+❌ MAX_DETAILED_PRS exact value
+❌ Exact prioritizer order
+❌ Detailed Tier membership rules
+❌ Exact evidenceState enum migration / field schema
+❌ Exact UI/readback copy
+❌ Exact verification N-matrix thresholds beyond the invariant
+   “budget pressure must not yield repository-wide ERROR when Tier-0 succeeded”
+```
+
+Any numbers or priority lists appearing later in this document are **design
+intent for review only**, not PHASE 1 Lock content.
+
+## Principles (map to LOCK items)
+
+| Principle | LOCK # | Content |
+|---|---|---|
+| Budget is a safety boundary | 1 | Do not simply raise the limit above the Cloudflare constraint |
+| Do not lose repo evidence | 2 | Open PR pressure must not force whole-repository `ERROR` when Tier-0 succeeded |
+| Cost bounded | 1 | No unbounded fan-out against Open PR count |
+| Partial ≠ Confirmed | 3, 4 | Unobserved PRs must not be treated as fully observed; omissions explicit |
+| Human Gate fail-closed | 5 | Do not infer GO / actionable Human decisions from incomplete evidence |
+| Deterministic | 6 | Which PRs receive detailed observation must be deterministic |
+| Auditability | 7 | Persist why a PR was observed vs omitted |
 
 ## Non-goals (explicit rejects)
 
@@ -132,12 +184,9 @@ After **Human Definition Lock GO**, the program continues:
 
 ```text
 PHASE 2  Failure Semantics Definition
-         CONFIRMED | PARTIAL | ERROR
+         CONFIRMED | PARTIAL | ERROR  (exact semantics / fields)
 PHASE 3  Bounded Observation Design
-         Tier-0 always / Tier-1 bounded detail / Tier-2 summary-only
-         Deterministic prioritizer
-         SAFE_BUDGET headroom (example only until Semantics/Scope lock:
-           SAFE_BUDGET = 45, MAX_DETAILED_PRS = floor((45-3)/3) = 14)
+         Tier model, prioritizer, SAFE_BUDGET / MAX_DETAILED_PRS
 PHASE 4  Implementation Scope Definition
          → Independent Scope Review-1
          → Scope Correction if needed
@@ -153,12 +202,12 @@ PHASE 6  Focused Verification + boundary matrix
          → Closure
 ```
 
-PHASE 2–4 details below are **design intent for review**, not Implementation
-authorization.
+PHASE 2–4 details below are **design intent for review**, not PHASE 1 Lock and
+not Implementation authorization.
 
-### PHASE 2 intent — Failure semantics
+### PHASE 2 intent — Failure semantics (not locked)
 
-Separate:
+Separate (exact field names / enum migration deferred to PHASE 2):
 
 | State | Meaning |
 |---|---|
@@ -176,34 +225,46 @@ Human Action = UNKNOWN / HOLD
 (not repository-wide ERROR)
 ```
 
-V1 strongly recommends: **PARTIAL must not create GO candidates**.
+PHASE 1 Lock #5 already requires: **PARTIAL must not create GO candidates**.
+PHASE 2 defines the precise semantics / payload shape.
 
-### PHASE 3 intent — Bounded observation
+### PHASE 3 intent — Bounded observation (not locked)
+
+Illustrative Tier sketch only:
 
 ```text
 Tier 0  Repository GET + default-branch HEAD + Open PR list
-        → always
+        → always (supports LOCK #2)
 Tier 1  Human-Gate-relevant PRs → detailed observation (bounded)
 Tier 2  Remaining Open PRs → summary only
 ```
 
-Deterministic priority (no “newest 15” as sole rule):
+Illustrative prioritizer sketch only (exact order = DO NOT LOCK YET):
 
 ```text
-1. Human Decision marker PRs
-2. Target Issue / gate-packet related PRs
-3. non-draft + current base main
-4. recently updated PRs
-else summary-only
+example candidates:
+  Human Decision marker PRs
+  Target Issue / gate-packet related PRs
+  non-draft + current base main
+  recently updated PRs
+  else summary-only
 ```
 
-Cost remains modeled against the Cloudflare boundary with **safety headroom**.
-Exact `SAFE_BUDGET` / `MAX_DETAILED_PRS` are locked in Semantics / Scope, not by
-raising the hard Cloudflare limit.
+Illustrative cost headroom only (exact values = DO NOT LOCK YET):
 
-### PHASE 4 intent — Implementation scope sketch
+```text
+example only:
+  SAFE_BUDGET = 45
+  MAX_DETAILED_PRS = floor((45 - 3) / 3) = 14
+```
 
-**IN SCOPE (V1)**
+Hard Cloudflare `SUBREQUEST_LIMIT = 50` remains a safety boundary (LOCK #1).
+Exact SAFE_BUDGET / MAX_DETAILED_PRS / prioritizer / Tier membership are locked
+in PHASE 3 (and Scope), not here.
+
+### PHASE 4 intent — Implementation scope sketch (not locked)
+
+**IN SCOPE (V1 intent)**
 
 - bounded detailed PR observation
 - deterministic PR prioritization
@@ -214,7 +275,7 @@ raising the hard Cloudflare limit.
 - tests (including real request-count bound, not formula-only)
 - UI / readback PARTIAL display
 
-**OUT OF SCOPE (V1)**
+**OUT OF SCOPE (V1 intent)**
 
 - GitHub GraphQL migration
 - request batching platform
@@ -228,19 +289,21 @@ raising the hard Cloudflare limit.
 
 ## Acceptance direction (locked later in Scope / Verification)
 
-Minimum boundary matrix intent:
+Minimum boundary matrix intent (exact N set deferred; invariant is PHASE 1):
 
 ```text
-N ∈ {0, 1, 14, 15, 16, 19, 30, 100}
+example N set: {0, 1, 14, 15, 16, 19, 30, 100}
 ```
 
-Critical acceptance:
+Critical acceptance invariant (PHASE 1 aligned):
 
 ```text
-N ≥ 16  ⇒  repository observation ≠ ERROR
+budget pressure / large Open PR count
+  ⇒ repository observation ≠ ERROR when Tier-0 succeeded
 omitted PRs ⇒ Human GO inference prohibited
 actual GitHub requests never exceed SUBREQUEST_LIMIT
 selection deterministic for identical inputs
+observed / omitted reasons auditable
 ```
 
 Post-deploy readback (after separate Human Deploy GO):
@@ -257,7 +320,7 @@ Post-deploy readback (after separate Human Deploy GO):
 
 Do not mass-create disposable PRs solely for testing.
 
-## Target architecture (Definition intent)
+## Target architecture (Definition intent; not numeric lock)
 
 ```text
 GitHub
@@ -267,7 +330,7 @@ Repository / main
   ↓
 Open PR list
   ↓
-Deterministic Prioritizer
+Deterministic Prioritizer   ← algorithm locked in PHASE 3
   ↓
 Bounded Detailed Observer
   ├─ observed PRs
@@ -283,11 +346,41 @@ Human Gate
 Fail-Closed Decision
 ```
 
+## Independent Definition Review-1
+
+```text
+Subject:     PR #147 / PRODUCTION-OBSERVATION-BUDGET-REPAIR-1 PHASE 1 Definition
+Base:        main @ 91b96b250658ab4c5eab81d13ad95392cd2a84b0
+Reviewed:    exact Definition re-read + Lock-boundary clarification
+VERDICT:     REVIEW-CLEARED
+P0:          0
+P1:          0
+P2:          0 (clarity note applied: PHASE 1 Lock vs PHASE 2/3 design intent)
+```
+
+| Focus check | Result | Disposition |
+|---|---|---|
+| PARTIAL semantics direction (`PARTIAL` ≠ `CONFIRMED`; no GO from PARTIAL) | PASS | CLOSED — LOCK #3/#5 |
+| Tier 0 preservation (repo/main not blinded by PR fan-out) | PASS | CLOSED — LOCK #2 |
+| Human Gate fail-closed under incomplete PR detail | PASS | CLOSED — LOCK #5 |
+| Bounded cost invariant (no unbounded fan-out; no limit raise-as-fix) | PASS | CLOSED — LOCK #1 + rejects |
+| Deterministic selection required | PASS | CLOSED — LOCK #6; exact order deferred |
+| Auditability of observed / omitted | PASS | CLOSED — LOCK #7 |
+| PHASE 1 Lock content vs PHASE 2/3 design intent separation | PASS after clarification | CLOSED — explicit LOCK / DO NOT LOCK sections |
+
+```text
+Correction-1 required for P0/P1: NO
+Human Definition Lock GO: still NOT CONSUMED (Human only)
+Implementation Start: NO
+Ready / Merge / Deploy: NO
+```
+
 ## Delivery gate (current)
 
 ```text
 PHASE 0 Historical Failure Fixation     = FIXED
-PHASE 1 Definition                      = DRAFTED (this document)
+PHASE 1 Definition                      = REVIEW-CLEARED
+Independent Definition Review-1         = REVIEW-CLEARED
 Human Definition Lock GO                = AWAITING
 PHASE 2 Failure Semantics Definition    = NOT STARTED
 PHASE 3 Bounded Observation Design      = NOT STARTED
@@ -302,14 +395,11 @@ Ready / Merge / Deploy                  = NOT AUTHORIZED
 
 Lock this Definition only by explicit Human GO.
 
-Locking means agreement on:
-
-1. Historical failure remains an architecture defect despite current PR-count recovery
-2. Objective above (bounded observation; no whole-repo ERROR solely from PR fan-out)
-3. Principles table
-4. Non-goals / rejects
-5. Parent/child issue structure
-6. Next phase after Lock = PHASE 2 Failure Semantics Definition (not coding)
+Consuming Human Definition Lock GO means agreement on **PHASE 1 Lock
+boundary** above (LOCK items 1–7 + historical failure / Objective / rejects /
+parent-child / next=PHASE 2), and explicit non-agreement yet on DO NOT LOCK
+items (SAFE_BUDGET, MAX_DETAILED_PRS, exact prioritizer, Tier membership
+rules, exact schema).
 
 ```text
 Human Definition Lock GO: NOT CONSUMED
@@ -318,7 +408,9 @@ Human Definition Lock GO: NOT CONSUMED
 ## Authority boundary
 
 ```text
-This document authorizes Definition review and Human Definition Lock only.
-It does not authorize Implementation Scope Start as complete,
-Implementation coding, Ready, Merge, or Deploy.
+This document authorizes Definition review completion recording and awaits
+Human Definition Lock only.
+It does not authorize Implementation Scope as complete, Implementation coding,
+Ready, Merge, or Deploy.
+It does not itself consume Human Definition Lock GO.
 ```
