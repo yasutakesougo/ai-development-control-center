@@ -97,6 +97,7 @@ const EVIDENCE_BINDING_KEYS = [
   "evidenceDigest",
   "ownerScope",
   "coordinationId",
+  "coordinationPlanFingerprint",
   "taskId",
   "kind",
   "sourceId",
@@ -280,6 +281,7 @@ export interface CoordinationEvidenceBindingV1 {
   evidenceDigest: string;
   ownerScope: CoordinationEvidenceOwnerScopeV1;
   coordinationId: string;
+  coordinationPlanFingerprint: string;
   taskId: string | null;
   kind: CoordinationEvidenceKindV1;
   sourceId: string;
@@ -1165,7 +1167,9 @@ const LIFECYCLE_MATRIX: Record<CoordinationProgressionStatusV1, LifecycleMatrixR
     workerId: "R",
     workerAuthorityFingerprint: "R",
     routingDecisionFingerprint: "R",
-    executionAuthorizationRef: "R",
+    // Base matrix allows null|present; reason-stage rules below distinguish
+    // READY_FOR_AUTHORIZATION (MUST_BE_NULL) from AUTHORIZED_NOT_INVOKED (REQUIRED).
+    executionAuthorizationRef: "O",
     executionAttemptId: "N",
     executionOutcomeRef: "N",
     resultValidationRef: "N",
@@ -1291,6 +1295,7 @@ function evidenceBindingIdentityTuple(
     binding.ref,
     binding.ownerScope,
     binding.coordinationId,
+    binding.coordinationPlanFingerprint,
     binding.taskId,
     binding.kind,
     binding.sourceId,
@@ -1307,6 +1312,7 @@ function evidenceOwnerIdentityTuple(binding: CoordinationEvidenceBindingV1): str
   return JSON.stringify([
     binding.ownerScope,
     binding.coordinationId,
+    binding.coordinationPlanFingerprint,
     binding.taskId,
     binding.kind,
     binding.sourceId,
@@ -1324,6 +1330,7 @@ export function parseCoordinationEvidenceBindingV1(
     !isFingerprint(raw.evidenceDigest) ||
     (raw.ownerScope !== "COORDINATION" && raw.ownerScope !== "TASK") ||
     !isLocalId(raw.coordinationId) ||
+    !isFingerprint(raw.coordinationPlanFingerprint) ||
     (raw.taskId !== null && !isAgentTaskId(raw.taskId)) ||
     (raw.kind !== "EVIDENCE" && raw.kind !== "AUDIT") ||
     typeof raw.sourceId !== "string" ||
@@ -1345,6 +1352,7 @@ export function parseCoordinationEvidenceBindingV1(
       evidenceDigest: raw.evidenceDigest,
       ownerScope: raw.ownerScope,
       coordinationId: raw.coordinationId,
+      coordinationPlanFingerprint: raw.coordinationPlanFingerprint,
       taskId: raw.taskId as string | null,
       kind: raw.kind,
       sourceId: raw.sourceId,
@@ -1478,15 +1486,29 @@ export async function computeCoordinationProgressionDecisionFingerprint(
   return sha256Canonical(captureCoordinationProgressionDecisionFingerprintFacts(decision));
 }
 
-type SharedStateSnapshotDigestPayloadV1 = Omit<
-  CoordinationSharedStateSnapshotV1,
-  "snapshotDigest"
->;
+type SharedStateSnapshotDigestPayloadV1 = {
+  schemaVersion: typeof MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA;
+  coordinationId: string;
+  coordinationPlanFingerprint: string;
+  taskStates: CoordinationTaskStateBindingV1[];
+  coordinationEvidenceBindings: CoordinationEvidenceBindingV1[];
+  auditBindings: CoordinationEvidenceBindingV1[];
+};
 
 export async function computeCoordinationSharedStateSnapshotDigest(
-  snapshot: SharedStateSnapshotDigestPayloadV1,
+  snapshot: SharedStateSnapshotDigestPayloadV1 | CoordinationSharedStateSnapshotV1,
 ): Promise<string> {
-  const canonical = canonicalJson(snapshot);
+  // Explicitly construct the covered payload so a full snapshot (with
+  // snapshotDigest) cannot accidentally participate in its own digest.
+  const digestPayload: SharedStateSnapshotDigestPayloadV1 = {
+    schemaVersion: snapshot.schemaVersion,
+    coordinationId: snapshot.coordinationId,
+    coordinationPlanFingerprint: snapshot.coordinationPlanFingerprint,
+    taskStates: snapshot.taskStates,
+    coordinationEvidenceBindings: snapshot.coordinationEvidenceBindings,
+    auditBindings: snapshot.auditBindings,
+  };
+  const canonical = canonicalJson(digestPayload);
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(`${SHARED_STATE_SNAPSHOT_DIGEST_DOMAIN}${canonical}`),
@@ -1494,6 +1516,51 @@ export async function computeCoordinationSharedStateSnapshotDigest(
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function taskEvidenceContainsRef(
+  state: CoordinationTaskStateBindingV1,
+  ref: string,
+): boolean {
+  return state.evidenceBindings.some(
+    (evidence) =>
+      evidence.ref === ref &&
+      evidence.kind === "EVIDENCE" &&
+      evidence.ownerScope === "TASK" &&
+      evidence.taskId === state.taskId,
+  );
+}
+
+function terminalEvidenceRefsBound(state: CoordinationTaskStateBindingV1): boolean {
+  if (state.coordinationProgressionStatus === "FAILED") {
+    return (
+      refPresent(state.executionOutcomeRef) &&
+      taskEvidenceContainsRef(state, state.executionOutcomeRef as string)
+    );
+  }
+  if (state.coordinationProgressionStatus === "SUCCEEDED") {
+    return (
+      refPresent(state.executionOutcomeRef) &&
+      refPresent(state.resultValidationRef) &&
+      taskEvidenceContainsRef(state, state.executionOutcomeRef as string) &&
+      taskEvidenceContainsRef(state, state.resultValidationRef as string)
+    );
+  }
+  return true;
+}
+
+function readyAuthorizationStageCoherent(
+  state: CoordinationTaskStateBindingV1,
+  reason: CoordinationProgressionReasonV1,
+): boolean {
+  if (state.coordinationProgressionStatus !== "READY") return true;
+  if (reason === "READY_FOR_AUTHORIZATION") {
+    return state.executionAuthorizationRef === null;
+  }
+  if (reason === "AUTHORIZED_NOT_INVOKED") {
+    return refPresent(state.executionAuthorizationRef);
+  }
+  return true;
 }
 
 function taskStateLifecycleCoherent(state: CoordinationTaskStateBindingV1): boolean {
@@ -1554,21 +1621,25 @@ function taskStateLifecycleCoherent(state: CoordinationTaskStateBindingV1): bool
     }
   }
 
+  if (!terminalEvidenceRefsBound(state)) return false;
+
   return true;
 }
 
 function evidenceBindingAttributionCoherent(
   binding: CoordinationEvidenceBindingV1,
   snapshotCoordinationId: string,
+  snapshotPlanFingerprint: string,
   containingTaskId: string | null,
   expectedKind: CoordinationEvidenceKindV1,
 ): boolean {
   if (binding.coordinationId !== snapshotCoordinationId) return false;
+  if (binding.coordinationPlanFingerprint !== snapshotPlanFingerprint) return false;
   if (binding.kind !== expectedKind) return false;
-  if (binding.ownerScope === "TASK") {
-    return containingTaskId !== null && binding.taskId === containingTaskId;
+  if (containingTaskId !== null) {
+    return binding.ownerScope === "TASK" && binding.taskId === containingTaskId;
   }
-  return binding.taskId === null;
+  return binding.ownerScope === "COORDINATION" && binding.taskId === null;
 }
 
 function validateGlobalEvidenceCollisions(
@@ -1639,6 +1710,10 @@ export async function validateCoordinationSharedStateSnapshotV1(
   }
 
   const taskRefById = new Map(binding.plan.taskRefs.map((task) => [task.taskId, task] as const));
+  const progressionRefs = progressionDecisions.map((entry) => entry.progressionDecisionRef);
+  if (hasDuplicates(progressionRefs)) {
+    return { ok: false, reason: "REJECTED_CONTRADICTION" };
+  }
   const progressionByRef = new Map(
     progressionDecisions.map((entry) => [entry.progressionDecisionRef, entry.decision] as const),
   );
@@ -1658,6 +1733,7 @@ export async function validateCoordinationSharedStateSnapshotV1(
         !evidenceBindingAttributionCoherent(
           evidence,
           snapshot.coordinationId,
+          snapshot.coordinationPlanFingerprint,
           state.taskId,
           "EVIDENCE",
         )
@@ -1678,6 +1754,11 @@ export async function validateCoordinationSharedStateSnapshotV1(
       ) {
         return { ok: false, reason: "REJECTED_CONTRADICTION" };
       }
+      if (
+        !readyAuthorizationStageCoherent(state, boundDecision.coordinationProgressionReason)
+      ) {
+        return { ok: false, reason: "REJECTED_CONTRADICTION" };
+      }
       const expectedFingerprint =
         await computeCoordinationProgressionDecisionFingerprint(boundDecision);
       if (state.progressionDecisionFingerprint !== expectedFingerprint) {
@@ -1691,10 +1772,10 @@ export async function validateCoordinationSharedStateSnapshotV1(
       !evidenceBindingAttributionCoherent(
         evidence,
         snapshot.coordinationId,
+        snapshot.coordinationPlanFingerprint,
         null,
         "EVIDENCE",
-      ) ||
-      evidence.ownerScope !== "COORDINATION"
+      )
     ) {
       return { ok: false, reason: "REJECTED_BINDING" };
     }
@@ -1703,6 +1784,9 @@ export async function validateCoordinationSharedStateSnapshotV1(
   for (const audit of snapshot.auditBindings) {
     if (audit.kind !== "AUDIT") return { ok: false, reason: "REJECTED_BINDING" };
     if (audit.coordinationId !== snapshot.coordinationId) {
+      return { ok: false, reason: "REJECTED_BINDING" };
+    }
+    if (audit.coordinationPlanFingerprint !== snapshot.coordinationPlanFingerprint) {
       return { ok: false, reason: "REJECTED_BINDING" };
     }
     if (audit.ownerScope === "COORDINATION" && audit.taskId !== null) {
