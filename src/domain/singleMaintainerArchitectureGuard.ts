@@ -5,6 +5,12 @@ export type ArchitectureGuardBoundaryDecision =
   | "UNKNOWN";
 export type ArchitectureGuardResult = "PASS" | "HOLD";
 
+const CLASSIFICATIONS = ["MUST", "SHOULD", "NICE-TO-HAVE"] as const;
+const BOUNDARY_DECISIONS = [
+  "NO_NEW_BOUNDARY",
+  "NEW_BOUNDARY_JUSTIFIED",
+  "UNKNOWN",
+] as const;
 const NEW_BOUNDARY_FIELDS = [
   "newRepository",
   "newService",
@@ -62,19 +68,31 @@ export function checkSingleMaintainerArchitectureProposal(
   proposal: SingleMaintainerArchitectureProposal,
 ): SingleMaintainerArchitectureGuardCheck {
   const reasons: string[] = [];
+  const necessity = proposal?.necessity;
 
-  if (!present(proposal.necessity?.withoutChange)) reasons.push("MISSING_WITHOUT_CHANGE");
-  if (!present(proposal.necessity?.businessBlocker)) reasons.push("MISSING_BUSINESS_BLOCKER");
-  if (!present(proposal.minimalAlternative)) reasons.push("MISSING_MINIMAL_ALTERNATIVE");
-  if (!present(proposal.recommendation)) reasons.push("MISSING_RECOMMENDATION");
-  if (!present(proposal.rejected)) reasons.push("MISSING_REJECTED");
+  if (!present(necessity?.withoutChange)) reasons.push("MISSING_WITHOUT_CHANGE");
+  if (!present(necessity?.businessBlocker)) reasons.push("MISSING_BUSINESS_BLOCKER");
+  if (!CLASSIFICATIONS.includes(necessity?.classification as ArchitectureGuardClassification)) {
+    reasons.push("INVALID_CLASSIFICATION");
+  }
+  if (!present(proposal?.minimalAlternative)) reasons.push("MISSING_MINIMAL_ALTERNATIVE");
+  if (!present(proposal?.recommendation)) reasons.push("MISSING_RECOMMENDATION");
+  if (!present(proposal?.rejected)) reasons.push("MISSING_REJECTED");
 
-  const complexity = proposal.complexity;
+  const complexity = proposal?.complexity;
   if (!complexity) {
     reasons.push("MISSING_COMPLEXITY");
   } else {
+    for (const field of NEW_BOUNDARY_FIELDS) {
+      if (typeof complexity[field] !== "boolean") reasons.push(`INVALID_${field.toUpperCase()}`);
+    }
+    if (!BOUNDARY_DECISIONS.includes(complexity.boundaryDecision as ArchitectureGuardBoundaryDecision)) {
+      reasons.push("INVALID_BOUNDARY_DECISION");
+    } else if (complexity.boundaryDecision === "UNKNOWN") {
+      reasons.push("BOUNDARY_DECISION_UNKNOWN");
+    }
+
     const addsBoundary = NEW_BOUNDARY_FIELDS.some((field) => complexity[field] === true);
-    if (complexity.boundaryDecision === "UNKNOWN") reasons.push("BOUNDARY_DECISION_UNKNOWN");
     if (addsBoundary) {
       if (!present(complexity.boundaryReason)) reasons.push("MISSING_BOUNDARY_REASON");
       if (!present(complexity.noNewBoundaryAlternative)) {
@@ -87,7 +105,7 @@ export function checkSingleMaintainerArchitectureProposal(
     }
   }
 
-  if (proposal.safetyChange) {
+  if (proposal?.safetyChange) {
     const safety = proposal.safetyChange;
     if (!present(safety.safetyChange)) reasons.push("MISSING_SAFETY_CHANGE");
     if (!present(safety.whyRequired)) reasons.push("MISSING_SAFETY_WHY_REQUIRED");
