@@ -18,7 +18,7 @@ const EXCLUDED_SEGMENTS = new Set([
   ".wrangler",
 ]);
 
-const directivePattern = /(?:eslint-(?:disable|enable|env)|@ts-(?:ignore|expect-error|nocheck|check)|(?:istanbul|c8|v8)\s+ignore|#\s*source(?:Mapping)?URL|@__PURE__|webpack(?:ChunkName|Mode|Ignore)|vite-ignore)/i;
+const directivePattern = /(?:eslint-(?:disable|enable|env)|@ts-(?:ignore|expect-error|nocheck|check)|(?:istanbul|c8|v8)\s+ignore|#\s*source(?:Mapping)?URL|@__PURE__|webpack(?:ChunkName|Mode|Ignore)|vite-ignore|\/\/\/\s*<(?:reference|amd-module|amd-dependency)\b)/i;
 
 function runGit(cwd, args) {
   return execFileSync("git", args, {
@@ -205,7 +205,17 @@ export function scanCommentWorkaround({ baseSha, headSha, cwd = process.cwd() })
   let parsed;
   try {
     parsed = parseNameStatus(
-      runGit(cwd, ["diff", "--name-status", "-z", "--find-renames=50%", base.sha, head.sha, "--"]),
+      runGit(cwd, [
+        "diff",
+        "--name-status",
+        "-z",
+        "--find-renames=50%",
+        "--find-copies=50%",
+        "--find-copies-harder",
+        base.sha,
+        head.sha,
+        "--",
+      ]),
     );
   } catch (error) {
     errors.push({ path: null, reasonCode: "DIFF_FAILED", detail: gitError(error) });
@@ -217,6 +227,20 @@ export function scanCommentWorkaround({ baseSha, headSha, cwd = process.cwd() })
     return result(base.sha, head.sha, findings, excluded, errors);
   }
 
+  const deletedSupportedSources = parsed.changes
+    .filter((change) => change.status === "D")
+    .map((change) => change.path)
+    .filter((filePath) => SUPPORTED_EXTENSIONS.has(path.extname(filePath).toLowerCase()) && !isExcludedPath(filePath))
+    .sort(compareText);
+  const ambiguousAddedSources = new Set(
+    deletedSupportedSources.length === 0
+      ? []
+      : parsed.changes
+          .filter((change) => change.status === "A")
+          .map((change) => change.path)
+          .filter((filePath) => SUPPORTED_EXTENSIONS.has(path.extname(filePath).toLowerCase()) && !isExcludedPath(filePath)),
+  );
+
   for (const change of parsed.changes) {
     const extension = path.extname(change.path).toLowerCase();
 
@@ -226,6 +250,14 @@ export function scanCommentWorkaround({ baseSha, headSha, cwd = process.cwd() })
     }
     if (change.status.startsWith("R") || change.status.startsWith("C")) {
       errors.push({ path: change.path, reasonCode: "RENAMED_OR_COPIED_FILE", detail: change.oldPath ?? null });
+      continue;
+    }
+    if (ambiguousAddedSources.has(change.path)) {
+      errors.push({
+        path: change.path,
+        reasonCode: "POSSIBLE_UNDETECTED_RENAME_OR_COPY",
+        detail: deletedSupportedSources.join(","),
+      });
       continue;
     }
     if (change.status !== "A" && change.status !== "M") {
