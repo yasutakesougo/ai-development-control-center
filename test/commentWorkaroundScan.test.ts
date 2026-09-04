@@ -1,9 +1,32 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { scanCommentWorkaround } from "../scripts/comment-workaround-scan.mjs";
+
+const scannerPath = fileURLToPath(new URL("../scripts/comment-workaround-scan.mjs", import.meta.url));
+
+type ScanFinding = {
+  path: string;
+  kind: "COMMENT" | "DIRECTIVE_REVIEW";
+  tokenKind: "SINGLE_LINE" | "MULTI_LINE";
+  startLine: number;
+  endLine: number;
+  text: string;
+};
+
+type ScanRecord = {
+  path: string | null;
+  reasonCode: string;
+};
+
+type ScanResult = {
+  status: "CLEAN" | "REVIEW_REQUIRED" | "HOLD";
+  findings: ScanFinding[];
+  excluded: ScanRecord[];
+  errors: ScanRecord[];
+};
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -28,6 +51,12 @@ function commit(cwd: string, message: string): string {
   return git(cwd, ["rev-parse", "HEAD"]);
 }
 
+function runScanner(cwd: string, baseSha: string, headSha: string): { exitCode: number | null; result: ScanResult } {
+  const execution = spawnSync(process.execPath, [scannerPath, baseSha, headSha], { cwd, encoding: "utf8" });
+  if (!execution.stdout) throw new Error(execution.stderr || "scanner produced no output");
+  return { exitCode: execution.status, result: JSON.parse(execution.stdout) as ScanResult };
+}
+
 describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
   it("finds changed comments without treating comment-like strings as comments", () => {
     const cwd = createRepository();
@@ -40,8 +69,9 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     );
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha, headSha, cwd });
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
 
+    expect(exitCode).toBe(0);
     expect(result.status).toBe("REVIEW_REQUIRED");
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({
@@ -59,8 +89,9 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     write(cwd, "a.ts", "// historical why\nexport const value = 2;\n");
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha, headSha, cwd });
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
 
+    expect(exitCode).toBe(0);
     expect(result.status).toBe("CLEAN");
     expect(result.findings).toEqual([]);
   });
@@ -72,8 +103,9 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     write(cwd, "a.ts", "// @ts-expect-error external fixture\nexport const value = 1;\n");
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha, headSha, cwd });
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
 
+    expect(exitCode).toBe(0);
     expect(result.status).toBe("REVIEW_REQUIRED");
     expect(result.findings[0].kind).toBe("DIRECTIVE_REVIEW");
   });
@@ -86,7 +118,7 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     write(cwd, "a.ts", "// alpha\nexport const a = 1;\n");
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha, headSha, cwd });
+    const { result } = runScanner(cwd, baseSha, headSha);
 
     expect(result.findings.map((finding) => finding.path)).toEqual(["a.ts", "z.ts"]);
   });
@@ -99,8 +131,9 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     write(cwd, "notes.md", "// prose\n");
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha, headSha, cwd });
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
 
+    expect(exitCode).toBe(0);
     expect(result.status).toBe("CLEAN");
     expect(result.excluded).toEqual([
       { path: "dist/generated.js", reasonCode: "EXCLUDED_GENERATED_VENDOR_BUILD_PATH" },
@@ -113,8 +146,9 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     write(cwd, "a.ts", "export const value = 1;\n");
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha: "HEAD~1", headSha, cwd });
+    const { exitCode, result } = runScanner(cwd, "HEAD~1", headSha);
 
+    expect(exitCode).toBe(2);
     expect(result.status).toBe("HOLD");
     expect(result.errors[0].reasonCode).toBe("REVISION_NOT_EXACT_SHA");
   });
@@ -126,8 +160,9 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     renameSync(path.join(cwd, "a.ts"), path.join(cwd, "b.ts"));
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha, headSha, cwd });
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
 
+    expect(exitCode).toBe(2);
     expect(result.status).toBe("HOLD");
     expect(result.errors[0].reasonCode).toBe("RENAMED_OR_COPIED_FILE");
   });
@@ -139,8 +174,9 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     write(cwd, "a.ts", "/* first\n * second\n */\nexport const value = 1;\n");
     const headSha = commit(cwd, "head");
 
-    const result = scanCommentWorkaround({ baseSha, headSha, cwd });
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
 
+    expect(exitCode).toBe(0);
     expect(result.status).toBe("REVIEW_REQUIRED");
     expect(result.findings[0]).toMatchObject({ tokenKind: "MULTI_LINE", startLine: 1, endLine: 3 });
   });
