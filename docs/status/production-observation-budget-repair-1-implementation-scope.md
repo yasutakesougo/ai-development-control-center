@@ -356,9 +356,60 @@ Ready / Merge / Deploy: NOT AUTHORIZED
 ```text
 Exact Implementation HEAD = fec5321e087959b5d4d558ef5fbff9ce244bf578
 npm run verify = PASS
-Focused Verification = PASS
-Independent Implementation Review-1 = AWAITING
-Human Ready GO = NOT AUTHORIZED
+Focused Verification = PASS (boundary matrix re-run 63/63)
+Independent Implementation Review-1 = REVIEW-CLEARED
+Human Ready GO = NOT AUTHORIZED / AWAITING
+```
+
+## 10c. Independent Implementation Review-1
+
+```text
+Subject: BOUNDED-GITHUB-OBSERVATION-V1 minimal implementation
+Exact Implementation HEAD: fec5321e087959b5d4d558ef5fbff9ce244bf578
+Docs record commit may be later; reviewed code substance = fec5321
+VERDICT: REVIEW-CLEARED
+P0: 0
+P1: 0
+P2: 1 (type-compat test factories; see below)
+Implementation Correction-1: NOT REQUIRED
+```
+
+### P0 checks
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | PARTIAL cannot generate Human GO | PASS | `resolveHumanAction` PARTIAL→UNKNOWN only; no ACTION_REQUIRED/WAIT/NO_ACTION |
+| 2 | Tier-0 failure not demoted to PARTIAL | PASS | outer catch / missing → ERROR or MISSING; PARTIAL only after Tier-0 success |
+| 3 | PARTIAL blocks fingerprint / approval / ledger | PASS | `buildDecisionFacts` CONFIRMED-only; approval UI false for PARTIAL; ledger requires CONFIRMED |
+| 4 | PARTIAL retains currentMain | PASS | success return always sets `currentMain: branch.sha` before PARTIAL/CONFIRMED |
+| 5 | No path exceeds SUBREQUEST_LIMIT 50 | PASS | selected≤14; estimatedUsed≤45; tests assert fetches≤50 |
+
+### P1 checks
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 6 | N=14 can be CONFIRMED | PASS | boundary test |
+| 7 | N=15 → PARTIAL | PASS | boundary test |
+| 8 | N=19 → PARTIAL + currentMain | PASS | boundary test |
+| 9 | pulls.length===30 → not CONFIRMED | PASS | PARTIAL + OPEN_PR_LIST_PAGE_TRUNCATED |
+| 10 | openPrCount ≠ detailed array length | PASS | statusApi uses `openPullRequestCount` |
+| 11 | omittedPullRequests deterministic | PASS | pure prioritizer + slice |
+| 12 | status / chat / UI show PARTIAL | PASS | statusApi fields; chat enum; App Evidence + observed/omitted rows |
+| 13 | No behavioral allowlist escape | PASS | prod/src mutations within Scope allowlist |
+| 14 | Old budgetExceeded ERROR path gone | PASS | `budgetExceeded()` removed; constant retained export-only, not emitted on Tier-0 success |
+
+### P2 note (non-blocking)
+
+```text
+test/ledgerRecordsApi.test.ts
+test/selectAuthoritativePullBody.test.ts
+= ObservedFacts factory null-field defaults only (TypeScript compat).
+No assertion/behavior change. Not elevated to P1 Correction.
+```
+
+```text
+Human Ready GO: NOT CONSUMED
+Merge / Deploy: NOT AUTHORIZED
 ```
 
 ## 11. Delivery gate
@@ -366,25 +417,27 @@ Human Ready GO = NOT AUTHORIZED
 ```text
 PHASE 4 Implementation Scope Definition = DEFINED
 Independent Scope Review-1              = REVIEW-CLEARED @ ebdb3d2
-Scope Correction-1                      = NOT REQUIRED
+Independent Implementation Review-1     = REVIEW-CLEARED @ fec5321
+Scope / Implementation Correction       = NOT REQUIRED
 Human Implementation Start GO           = CONSUMED
-Code mutation                           = AUTHORIZED (allowlist)
-Ready / Merge / Deploy                  = NOT AUTHORIZED
+Human Ready GO                          = NOT AUTHORIZED / AWAITING
+Merge / Deploy                          = NOT AUTHORIZED
 ```
 
 ## 12. Next
 
 ```text
-Focused Verification (npm run verify)
-→ Exact Implementation HEAD Fixation
-→ Independent Implementation Review-1
-→ Human Ready GO
+Human Ready GO
+→ Human Merge GO
+→ separate Human Deploy GO
+→ Post-Deploy Production Readback
+→ Closure
 ```
 
 ## 13. Authority boundary
 
 ```text
-Human Implementation Start GO is CONSUMED.
-Coding is limited to the Exact mutable files allowlist.
-Ready / Merge / Deploy remain NOT AUTHORIZED.
+Independent Implementation Review-1 is REVIEW-CLEARED.
+Human Ready GO remains NOT CONSUMED.
+Merge / Deploy remain NOT AUTHORIZED.
 ```

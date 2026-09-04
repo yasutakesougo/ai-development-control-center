@@ -24,6 +24,8 @@ PHASE 4 Implementation Scope: DEFINED
 Independent Scope Review-1: REVIEW-CLEARED @ ebdb3d2
 Human Implementation Start GO: CONSUMED
 Implementation Start: CONSUMED / APPLIED
+Independent Implementation Review-1: REVIEW-CLEARED @ fec5321
+Human Ready GO: NOT AUTHORIZED / AWAITING
 Ready / Merge / Deploy: NOT AUTHORIZED
 Mutation: 0 (docs-only; Scope Review recorded; code not authorized)
 ```
@@ -379,7 +381,9 @@ PHASE 4 Implementation Scope Definition = DEFINED
 Independent Scope Review                = REVIEW-CLEARED @ ebdb3d2
 Human Implementation Start GO           = CONSUMED
 BOUNDED-GITHUB-OBSERVATION-V1 code      = APPLIED (allowlist)
-Ready / Merge / Deploy                  = NOT AUTHORIZED
+Independent Implementation Review-1     = REVIEW-CLEARED @ fec5321
+Human Ready GO                          = NOT AUTHORIZED / AWAITING
+Merge / Deploy                          = NOT AUTHORIZED
 ```
 
 ## Human Definition Lock GO
