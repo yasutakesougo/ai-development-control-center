@@ -127,13 +127,14 @@ Replace whole-repository `ERROR` on budget overflow with bounded detailed PR obs
 
 Keep Cloudflare `SUBREQUEST_LIMIT = 50` as a hard safety boundary; use SAFE_BUDGET headroom instead of raising the limit.
 
-## Depends on
+## Next
 
-1. Parent Definition Lock
-2. PHASE 2 Failure Semantics Definition
-3. PHASE 3 Bounded Observation Design
-4. PHASE 4 Implementation Scope Definition + Independent Scope Review
-5. Human Implementation Start GO
+```text
+Independent Scope Review-1
+→ (P0/P1 → Scope Correction-1 → re-review)
+→ Human Implementation Start GO
+→ BOUNDED-GITHUB-OBSERVATION-V1 minimal implementation
+```
 
 ## Authority boundary
 

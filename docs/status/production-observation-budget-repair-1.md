@@ -391,14 +391,16 @@ Consumed on: Human authorization to proceed
   → PHASE 2 Failure Semantics Definition
   → PHASE 3 Bounded Observation Design
 Locked content: PHASE 1 Lock items 1–7 + Objective / rejects / parent-child
-Next after PHASE 3: PHASE 4 Implementation Scope Definition
-  (still requires Scope Review + Human Implementation Start GO before code)
+Next: Independent Scope Review-1
+  → Human Implementation Start GO (required before code)
 ```
 
 ## Authority boundary
 
 ```text
-Definition is locked. PHASE 2 semantics and PHASE 3 bounded design are defined.
-This does not authorize Implementation Scope as complete, Implementation coding,
-Ready, Merge, or Deploy.
+Definition is locked. PHASE 2 semantics, PHASE 3 bounded design, and PHASE 4
+Implementation Scope are defined.
+Independent Scope Review-1 and Human Implementation Start GO are still required
+before any BOUNDED-GITHUB-OBSERVATION-V1 code mutation.
+Ready / Merge / Deploy remain NOT AUTHORIZED.
 ```
