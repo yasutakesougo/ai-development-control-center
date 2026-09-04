@@ -25,7 +25,9 @@ Independent Scope Review-1: REVIEW-CLEARED @ ebdb3d2
 Human Implementation Start GO: CONSUMED
 Implementation Start: CONSUMED / APPLIED
 Independent Implementation Review-1: REVIEW-CLEARED @ fec5321
-Human Ready GO: NOT AUTHORIZED / AWAITING
+Human Ready GO: CONSUMED
+Human Merge GO: AWAITING (authorized next)
+Human Deploy GO: NOT YET
 Ready / Merge / Deploy: NOT AUTHORIZED
 Mutation: 0 (docs-only; Scope Review recorded; code not authorized)
 ```
@@ -382,8 +384,10 @@ Independent Scope Review                = REVIEW-CLEARED @ ebdb3d2
 Human Implementation Start GO           = CONSUMED
 BOUNDED-GITHUB-OBSERVATION-V1 code      = APPLIED (allowlist)
 Independent Implementation Review-1     = REVIEW-CLEARED @ fec5321
-Human Ready GO                          = NOT AUTHORIZED / AWAITING
-Merge / Deploy                          = NOT AUTHORIZED
+Human Ready GO                          = CONSUMED
+Human Merge GO                          = AUTHORIZED (next)
+Human Deploy GO                         = SEPARATE (after merge)
+Merge / Deploy                          = AUTHORIZED BY HUMAN SEQUENCE
 ```
 
 ## Human Definition Lock GO

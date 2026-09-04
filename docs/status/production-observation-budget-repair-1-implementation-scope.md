@@ -358,7 +358,7 @@ Exact Implementation HEAD = fec5321e087959b5d4d558ef5fbff9ce244bf578
 npm run verify = PASS
 Focused Verification = PASS (boundary matrix re-run 63/63)
 Independent Implementation Review-1 = REVIEW-CLEARED
-Human Ready GO = NOT AUTHORIZED / AWAITING
+Human Ready GO = CONSUMED
 ```
 
 ## 10c. Independent Implementation Review-1
@@ -408,8 +408,9 @@ No assertion/behavior change. Not elevated to P1 Correction.
 ```
 
 ```text
-Human Ready GO: NOT CONSUMED
-Merge / Deploy: NOT AUTHORIZED
+Human Ready GO: CONSUMED
+Human Merge GO: AUTHORIZED (next)
+Human Deploy GO: SEPARATE after merge
 ```
 
 ## 11. Delivery gate
@@ -420,15 +421,15 @@ Independent Scope Review-1              = REVIEW-CLEARED @ ebdb3d2
 Independent Implementation Review-1     = REVIEW-CLEARED @ fec5321
 Scope / Implementation Correction       = NOT REQUIRED
 Human Implementation Start GO           = CONSUMED
-Human Ready GO                          = NOT AUTHORIZED / AWAITING
-Merge / Deploy                          = NOT AUTHORIZED
+Human Ready GO                          = CONSUMED
+Human Merge GO                          = AUTHORIZED
+Human Deploy GO                         = SEPARATE (post-merge)
 ```
 
 ## 12. Next
 
 ```text
-Human Ready GO
-→ Human Merge GO
+Human Merge GO
 → separate Human Deploy GO
 → Post-Deploy Production Readback
 → Closure
@@ -437,7 +438,6 @@ Human Ready GO
 ## 13. Authority boundary
 
 ```text
-Independent Implementation Review-1 is REVIEW-CLEARED.
-Human Ready GO remains NOT CONSUMED.
-Merge / Deploy remain NOT AUTHORIZED.
+Human Ready GO is CONSUMED.
+Human Merge GO and separate Human Deploy GO are authorized by Human sequence.
 ```
