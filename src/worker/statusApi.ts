@@ -26,10 +26,14 @@ export async function buildStatusPayload(
       omittedPullRequestCount: facts.omittedPullRequestCount,
       observationBudget: facts.observationBudget,
       warnings: facts.warnings,
+      fleetCompleteness: facts.fleetCompleteness ?? null,
+      gateCompleteness: facts.gateCompleteness ?? null,
     },
     evidence:
       facts.openPullRequests?.map((pr) => ({
         pr: pr.number,
+        headSha: pr.headSha ?? null,
+        gateCandidate: pr.gateCandidate ?? false,
         draft: pr.draft,
         ci: pr.ci,
         review: pr.review,
