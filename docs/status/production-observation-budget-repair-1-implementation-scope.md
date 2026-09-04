@@ -441,3 +441,21 @@ Human Merge GO
 Human Ready GO is CONSUMED.
 Human Merge GO and separate Human Deploy GO are authorized by Human sequence.
 ```
+
+## 14. Post-Merge / Deploy gate record
+
+```text
+Human Ready GO   = CONSUMED
+Human Merge GO   = CONSUMED
+PR               = #147 MERGED
+Merge commit     = 5d3200a4986858ff7a294b6c791f54acdb35da2d
+Human Deploy GO  = AUTHORIZED / BLOCKED
+Deploy blocker   = CLOUDFLARE_API_TOKEN Authentication error 10000
+                   (Workers Scripts/Services deploy not permitted)
+Post-Deploy Readback = NOT COMPLETE (production still serving pre-merge assets
+                       index-zWgST3Vp.js; expected post-deploy index-DwW2BI_S.js)
+Closure          = HOLD until successful production deploy + readback
+```
+
+Evidence log: agent artifact `post-deploy-readback.log` (pre-deploy production observation).
+
