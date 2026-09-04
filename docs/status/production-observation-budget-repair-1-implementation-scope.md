@@ -1,7 +1,7 @@
 # PRODUCTION-OBSERVATION-BUDGET-REPAIR-1
 ## Implementation Scope Definition — BOUNDED-GITHUB-OBSERVATION-V1
 
-**Status: IMPLEMENTATION SCOPE REVIEW-CLEARED · IMPLEMENTATION START NOT AUTHORIZED**
+**Status: IMPLEMENTATION START GO CONSUMED · MINIMAL IMPLEMENTATION IN PROGRESS / APPLIED**
 
 Bound upstream:
 
@@ -346,8 +346,9 @@ Scope Correction-1: NOT REQUIRED
 | N=14 / 15 / 19 / 30 boundary coverage | PASS | §8 mandatory matrix includes 14, 15, 16, 19, 30 (+ 0,1,100) |
 
 ```text
-Human Implementation Start GO: NOT CONSUMED (Human only)
-Implementation / Ready / Merge / Deploy: NO
+Human Implementation Start GO: CONSUMED
+Implementation coding: AUTHORIZED for allowlist only
+Ready / Merge / Deploy: NOT AUTHORIZED
 ```
 
 ## 11. Delivery gate
@@ -356,23 +357,24 @@ Implementation / Ready / Merge / Deploy: NO
 PHASE 4 Implementation Scope Definition = DEFINED
 Independent Scope Review-1              = REVIEW-CLEARED @ ebdb3d2
 Scope Correction-1                      = NOT REQUIRED
-Human Implementation Start GO           = NOT AUTHORIZED / AWAITING
-Code mutation                           = NOT AUTHORIZED
+Human Implementation Start GO           = CONSUMED
+Code mutation                           = AUTHORIZED (allowlist)
 Ready / Merge / Deploy                  = NOT AUTHORIZED
 ```
 
 ## 12. Next
 
 ```text
-exact Scope re-read @ ebdb3d2 = DONE (this Review-1)
-→ Human Implementation Start GO
-→ Minimal implementation on authorized files only
+Focused Verification (npm run verify)
+→ Exact Implementation HEAD Fixation
+→ Independent Implementation Review-1
+→ Human Ready GO
 ```
 
 ## 13. Authority boundary
 
 ```text
-Scope is REVIEW-CLEARED.
-This document still does not consume Human Implementation Start GO.
-It does not authorize coding, Ready, Merge, or Deploy.
+Human Implementation Start GO is CONSUMED.
+Coding is limited to the Exact mutable files allowlist.
+Ready / Merge / Deploy remain NOT AUTHORIZED.
 ```

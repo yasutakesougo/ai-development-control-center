@@ -22,8 +22,8 @@ PHASE 3 Bounded Observation Design: DEFINED
 PHASE 4 Implementation Scope: DEFINED
   docs/status/production-observation-budget-repair-1-implementation-scope.md
 Independent Scope Review-1: REVIEW-CLEARED @ ebdb3d2
-Human Implementation Start GO: NOT AUTHORIZED / AWAITING
-Implementation Start: NOT AUTHORIZED
+Human Implementation Start GO: CONSUMED
+Implementation Start: CONSUMED / APPLIED
 Ready / Merge / Deploy: NOT AUTHORIZED
 Mutation: 0 (docs-only; Scope Review recorded; code not authorized)
 ```
@@ -377,8 +377,8 @@ PHASE 2 Failure Semantics Definition    = DEFINED
 PHASE 3 Bounded Observation Design      = DEFINED
 PHASE 4 Implementation Scope Definition = DEFINED
 Independent Scope Review                = REVIEW-CLEARED @ ebdb3d2
-Human Implementation Start GO           = NOT AUTHORIZED / AWAITING
-BOUNDED-GITHUB-OBSERVATION-V1 code      = NOT AUTHORIZED
+Human Implementation Start GO           = CONSUMED
+BOUNDED-GITHUB-OBSERVATION-V1 code      = APPLIED (allowlist)
 Ready / Merge / Deploy                  = NOT AUTHORIZED
 ```
 
@@ -401,6 +401,7 @@ Next: Human Implementation Start GO
 Definition is locked. PHASE 2 semantics, PHASE 3 bounded design, and PHASE 4
 Implementation Scope are defined.
 Independent Scope Review-1 = REVIEW-CLEARED @ ebdb3d2.
-Human Implementation Start GO remains NOT CONSUMED.
+Human Implementation Start GO = CONSUMED.
+Minimal implementation authorized on Scope allowlist only.
 Ready / Merge / Deploy remain NOT AUTHORIZED.
 ```

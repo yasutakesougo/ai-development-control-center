@@ -32,12 +32,12 @@ PHASE 2 Failure Semantics           = DEFINED
 PHASE 3 Bounded Observation Design  = DEFINED
 PHASE 4 Implementation Scope        = DEFINED
 Independent Scope Review-1          = REVIEW-CLEARED @ ebdb3d2
-Implementation Start                = NOT AUTHORIZED
+Implementation Start                = CONSUMED
 Ready / Merge / Deploy              = NOT AUTHORIZED
 ```
 
 PHASE 1–4 docs are locked through Scope Review-CLEARED. Coding still requires
-explicit Human Implementation Start GO.
+Human Implementation Start GO CONSUMED; Ready/Merge/Deploy still NOT AUTHORIZED.
 
 ## Docs
 
@@ -114,8 +114,8 @@ Failure Semantics Definition:        DEFINED
 Bounded Observation Design:          DEFINED
 Implementation Scope Definition:     DEFINED
 Independent Scope Review-1:          REVIEW-CLEARED @ ebdb3d2
-Human Implementation Start GO:       NOT AUTHORIZED / AWAITING
-Code / tests:                        NOT AUTHORIZED
+Human Implementation Start GO:       CONSUMED
+Code / tests:                        APPLIED (allowlist)
 Ready / Merge / Deploy:              NOT AUTHORIZED
 ```
 
@@ -136,5 +136,6 @@ Independent Scope Review-1
 
 ## Authority boundary
 
-This Issue does not authorize coding until Human Implementation Start GO after Scope Review.
+This Issue does not authorize coding until Human Implementation Start GO
+(Independent Scope Review-1 already REVIEW-CLEARED @ ebdb3d2).
 ```
