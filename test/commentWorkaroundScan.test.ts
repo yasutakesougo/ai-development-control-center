@@ -180,4 +180,18 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     expect(result.status).toBe("REVIEW_REQUIRED");
     expect(result.findings[0]).toMatchObject({ tokenKind: "MULTI_LINE", startLine: 1, endLine: 3 });
   });
+
+  it("fails closed on invalid or unsupported source syntax", () => {
+    const cwd = createRepository();
+    write(cwd, "a.ts", "export const value = 1;\n");
+    const baseSha = commit(cwd, "base");
+    write(cwd, "a.ts", "export const value = ;\n");
+    const headSha = commit(cwd, "head");
+
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
+
+    expect(exitCode).toBe(2);
+    expect(result.status).toBe("HOLD");
+    expect(result.errors[0].reasonCode).toBe("SOURCE_SYNTAX_INVALID_OR_UNSUPPORTED");
+  });
 });
