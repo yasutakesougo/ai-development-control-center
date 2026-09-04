@@ -35,6 +35,12 @@ function factsFromBodies(
     openPullRequests: [openPullRequest],
     relevantIssueStates: {},
     errors: [],
+    openPullRequestCount: null,
+    observedPullRequestCount: null,
+    omittedPullRequestCount: null,
+    warnings: [],
+    observationBudget: null,
+    omittedPullRequests: null,
     sourceRefs: ["github:repo:yasutakesougo/severe-behavior-support-spfx"],
   };
 }
