@@ -118,6 +118,12 @@ function scanFileComments(filePath, text, ranges) {
     (message, length) => lexicalErrors.push({ message: String(message), length: length ?? null }),
   );
   const sourceFile = ts.createSourceFile(filePath, text, ts.ScriptTarget.Latest, false, scriptKindFor(filePath));
+  const parseErrors = sourceFile.parseDiagnostics.map((diagnostic) => ({
+    code: diagnostic.code,
+    start: diagnostic.start ?? null,
+    length: diagnostic.length ?? null,
+    message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+  }));
   const findings = [];
 
   while (true) {
@@ -146,7 +152,7 @@ function scanFileComments(filePath, text, ranges) {
     });
   }
 
-  return { findings, lexicalErrors };
+  return { findings, lexicalErrors, parseErrors };
 }
 
 function gitError(error) {
@@ -255,6 +261,14 @@ export function scanCommentWorkaround({ baseSha, headSha, cwd = process.cwd() })
         path: change.path,
         reasonCode: "LEXICAL_SCAN_FAILED",
         detail: JSON.stringify(scanned.lexicalErrors),
+      });
+      continue;
+    }
+    if (scanned.parseErrors.length > 0) {
+      errors.push({
+        path: change.path,
+        reasonCode: "SOURCE_SYNTAX_INVALID_OR_UNSUPPORTED",
+        detail: JSON.stringify(scanned.parseErrors),
       });
       continue;
     }
