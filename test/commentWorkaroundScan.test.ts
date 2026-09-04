@@ -82,6 +82,25 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     });
   });
 
+  it("handles regex and template literals without false lexical HOLD", () => {
+    const cwd = createRepository();
+    write(cwd, "a.ts", "export const value = 1;\n");
+    const baseSha = commit(cwd, "base");
+    write(
+      cwd,
+      "a.ts",
+      'const pattern = /^[0-9a-f]{40}$/;\nconst text = `value ${1}`;\n// explain this\nexport const value = 1;\n',
+    );
+    const headSha = commit(cwd, "head");
+
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
+
+    expect(exitCode).toBe(0);
+    expect(result.status).toBe("REVIEW_REQUIRED");
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].text).toBe("// explain this");
+  });
+
   it("does not report unchanged historical comments", () => {
     const cwd = createRepository();
     write(cwd, "a.ts", "// historical why\nexport const value = 1;\n");
