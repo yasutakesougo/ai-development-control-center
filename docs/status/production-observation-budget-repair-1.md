@@ -6,6 +6,7 @@
 PHASE 1 — Definition (LOCKED)
 PHASE 2 — Failure Semantics Definition (DEFINED)
 PHASE 3 — Bounded Observation Design (DEFINED)
+PHASE 4 — Implementation Scope Definition (DEFINED)
 ```
 
 ## Status
@@ -18,10 +19,13 @@ PHASE 2 Failure Semantics: DEFINED
   docs/status/production-observation-budget-repair-1-failure-semantics.md
 PHASE 3 Bounded Observation Design: DEFINED
   docs/status/production-observation-budget-repair-1-bounded-observation.md
-PHASE 4 Implementation Scope: NOT STARTED
+PHASE 4 Implementation Scope: DEFINED
+  docs/status/production-observation-budget-repair-1-implementation-scope.md
+Independent Scope Review-1: NOT STARTED / AWAITING
+Human Implementation Start GO: NOT AUTHORIZED
 Implementation Start: NOT AUTHORIZED
 Ready / Merge / Deploy: NOT AUTHORIZED
-Mutation: 0 (docs-only track through PHASE 3)
+Mutation: 0 (docs-only track through PHASE 4 Scope)
 ```
 ## Parent / child structure
 
@@ -151,8 +155,8 @@ Also locked with Definition:
 | PARTIAL Human Gate fail-closed rules | PHASE 2 — DEFINED |
 | `SAFE_BUDGET` / `MAX_DETAILED_PRS` | PHASE 3 — DEFINED (`45` / `14`) |
 | Exact prioritizer order + Tier membership | PHASE 3 — DEFINED |
-| Exact TypeScript field / file Scope | PHASE 4 — NOT STARTED |
-| Exact UI/readback copy | PHASE 4 / implementation — NOT STARTED |
+| Exact TypeScript field / file Scope | PHASE 4 — DEFINED |
+| Exact UI/readback copy | PARTIAL reason copy locked in Scope; broader UI polish deferred |
 
 PHASE 1 no longer leaves these as open design intent once PHASE 2/3 docs exist.
 Pre-Lock “example only” numbers in older sections are superseded by PHASE 3.
@@ -266,30 +270,13 @@ Hard Cloudflare `SUBREQUEST_LIMIT = 50` remains a safety boundary (LOCK #1).
 Exact SAFE_BUDGET / MAX_DETAILED_PRS / prioritizer / Tier membership are locked
 in PHASE 3 (and Scope), not here.
 
-### PHASE 4 intent — Implementation scope sketch (not locked)
+### PHASE 4 — Implementation Scope (DEFINED)
 
-**IN SCOPE (V1 intent)**
+Superseded as sketch. Authoritative Scope:
 
-- bounded detailed PR observation
-- deterministic PR prioritization
-- `PARTIAL` evidence semantics
-- observed / omitted counts
-- budget metadata
-- Human Gate fail-closed handling for PARTIAL
-- tests (including real request-count bound, not formula-only)
-- UI / readback PARTIAL display
-
-**OUT OF SCOPE (V1 intent)**
-
-- GitHub GraphQL migration
-- request batching platform
-- caching
-- distributed observer
-- Cloudflare limit change
-- automatic PR close
-- GitHub App permission redesign
-- retry architecture
-- deployment automation
+```text
+docs/status/production-observation-budget-repair-1-implementation-scope.md
+```
 
 ## Acceptance direction (locked later in Scope / Verification)
 
@@ -388,8 +375,8 @@ Independent Definition Review-1         = REVIEW-CLEARED
 Human Definition Lock GO                = CONSUMED
 PHASE 2 Failure Semantics Definition    = DEFINED
 PHASE 3 Bounded Observation Design      = DEFINED
-PHASE 4 Implementation Scope Definition = NOT STARTED
-Independent Scope Review                = NOT STARTED
+PHASE 4 Implementation Scope Definition = DEFINED
+Independent Scope Review                = NOT STARTED / AWAITING
 Human Implementation Start GO           = NOT AUTHORIZED
 BOUNDED-GITHUB-OBSERVATION-V1 code      = NOT AUTHORIZED
 Ready / Merge / Deploy                  = NOT AUTHORIZED

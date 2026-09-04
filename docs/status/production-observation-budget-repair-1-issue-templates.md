@@ -30,15 +30,16 @@ Independent Definition Review-1     = REVIEW-CLEARED
 Human Definition Lock GO            = CONSUMED
 PHASE 2 Failure Semantics           = DEFINED
 PHASE 3 Bounded Observation Design  = DEFINED
-PHASE 4 Implementation Scope        = NOT STARTED
+PHASE 4 Implementation Scope        = DEFINED
+Independent Scope Review-1          = AWAITING
 Implementation Start                = NOT AUTHORIZED
 Ready / Merge / Deploy              = NOT AUTHORIZED
 ```
 
-PHASE 1 locked the seven invariants. PHASE 2 locked CONFIRMED/PARTIAL/ERROR and
-PARTIAL → HumanAction UNKNOWN. PHASE 3 locked SAFE_BUDGET=45, MAX_DETAILED_PRS=14,
-Tier model, and deterministic prioritizer. Coding still requires PHASE 4 Scope +
-Human Implementation Start GO.
+PHASE 1–3 locked invariants / semantics / budgets. PHASE 4 locks the mutable file
+allowlist, ObservedFacts field names, pagination `length===30` rule, observer
+algorithm, and required tests. Coding still requires Independent Scope Review-1
++ Human Implementation Start GO.
 
 ## Docs
 
@@ -46,6 +47,7 @@ Human Implementation Start GO.
 - `docs/status/production-observation-budget-repair-1.md`
 - `docs/status/production-observation-budget-repair-1-failure-semantics.md`
 - `docs/status/production-observation-budget-repair-1-bounded-observation.md`
+- `docs/status/production-observation-budget-repair-1-implementation-scope.md`
 
 ## Historical failure (immutable)
 
@@ -112,7 +114,8 @@ Parent: PRODUCTION-OBSERVATION-BUDGET-REPAIR-1
 Human Definition Lock GO:            CONSUMED (parent)
 Failure Semantics Definition:        DEFINED
 Bounded Observation Design:          DEFINED
-Implementation Scope Definition:     NOT STARTED
+Implementation Scope Definition:     DEFINED
+Independent Scope Review-1:          AWAITING
 Human Implementation Start GO:       NOT AUTHORIZED
 Code / tests:                        NOT AUTHORIZED
 Ready / Merge / Deploy:              NOT AUTHORIZED
