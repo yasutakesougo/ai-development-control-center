@@ -12,6 +12,10 @@ export const MULTI_AGENT_COORDINATION_PROGRESSION_INPUT_SCHEMA =
   "MULTI-AGENT-COORDINATION-PROGRESSION-INPUT-V1" as const;
 export const MULTI_AGENT_COORDINATION_PROGRESSION_DECISION_SCHEMA =
   "MULTI-AGENT-COORDINATION-PROGRESSION-DECISION-V1" as const;
+export const MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA =
+  "MULTI-AGENT-COORDINATION-SHARED-STATE-SNAPSHOT-V1" as const;
+export const MULTI_AGENT_COORDINATION_PROGRESSION_DECISION_FINGERPRINT_SCHEMA =
+  "MULTI-AGENT-COORDINATION-PROGRESSION-DECISION-FINGERPRINT-V1" as const;
 
 export const MULTI_AGENT_COORDINATION_ID_MAX = 128 as const;
 export const MULTI_AGENT_COORDINATION_TASK_REFS_MAX = 32 as const;
@@ -25,6 +29,8 @@ export const MULTI_AGENT_COORDINATION_TIMESTAMP_MAX = 64 as const;
 
 /** Slice B implements only the pure progression evaluator. Execution surfaces remain disabled. */
 export const MULTI_AGENT_COORDINATION_PROGRESSION_EVALUATOR_IMPLEMENTED = true as const;
+/** Slice C implements only pure shared-state / evidence binding validation. Persistence remains disabled. */
+export const MULTI_AGENT_COORDINATION_SHARED_STATE_BINDING_IMPLEMENTED = true as const;
 export const MULTI_AGENT_COORDINATION_EXECUTION_IMPLEMENTED = false as const;
 export const MULTI_AGENT_COORDINATION_PROVIDER_INVOCATION_IMPLEMENTED = false as const;
 export const MULTI_AGENT_COORDINATION_HARNESS_INVOCATION_IMPLEMENTED = false as const;
@@ -85,6 +91,42 @@ const PROGRESSION_DECISION_KEYS = [
   "taskId",
   "coordinationProgressionStatus",
   "coordinationProgressionReason",
+] as const;
+const EVIDENCE_BINDING_KEYS = [
+  "ref",
+  "evidenceDigest",
+  "ownerScope",
+  "coordinationId",
+  "coordinationPlanFingerprint",
+  "taskId",
+  "kind",
+  "sourceId",
+] as const;
+const TASK_STATE_BINDING_KEYS = [
+  "taskId",
+  "taskRoutingFingerprint",
+  "workerId",
+  "workerAuthorityFingerprint",
+  "routingDecisionFingerprint",
+  "humanDecisionRef",
+  "executionAuthorizationRef",
+  "executionAttemptId",
+  "executionOutcomeRef",
+  "resultValidationRef",
+  "resourceLockDecisionRef",
+  "coordinationProgressionStatus",
+  "progressionDecisionRef",
+  "progressionDecisionFingerprint",
+  "evidenceBindings",
+] as const;
+const SHARED_STATE_SNAPSHOT_KEYS = [
+  "schemaVersion",
+  "snapshotDigest",
+  "coordinationId",
+  "coordinationPlanFingerprint",
+  "taskStates",
+  "coordinationEvidenceBindings",
+  "auditBindings",
 ] as const;
 
 export type CoordinationModeV1 = "SEQUENTIAL" | "PARALLEL_ELIGIBLE";
@@ -229,6 +271,62 @@ export interface CoordinationProgressionDecisionV1 {
   taskId: string;
   coordinationProgressionStatus: CoordinationProgressionStatusV1;
   coordinationProgressionReason: CoordinationProgressionReasonV1;
+}
+
+export type CoordinationEvidenceOwnerScopeV1 = "COORDINATION" | "TASK";
+export type CoordinationEvidenceKindV1 = "EVIDENCE" | "AUDIT";
+
+export interface CoordinationEvidenceBindingV1 {
+  ref: string;
+  evidenceDigest: string;
+  ownerScope: CoordinationEvidenceOwnerScopeV1;
+  coordinationId: string;
+  coordinationPlanFingerprint: string;
+  taskId: string | null;
+  kind: CoordinationEvidenceKindV1;
+  sourceId: string;
+}
+
+export interface CoordinationTaskStateBindingV1 {
+  taskId: string;
+  taskRoutingFingerprint: string;
+  workerId: string | null;
+  workerAuthorityFingerprint: string | null;
+  routingDecisionFingerprint: string | null;
+  humanDecisionRef: string | null;
+  executionAuthorizationRef: string | null;
+  executionAttemptId: string | null;
+  executionOutcomeRef: string | null;
+  resultValidationRef: string | null;
+  resourceLockDecisionRef: string | null;
+  coordinationProgressionStatus: CoordinationProgressionStatusV1;
+  progressionDecisionRef: string;
+  progressionDecisionFingerprint: string;
+  evidenceBindings: CoordinationEvidenceBindingV1[];
+}
+
+export interface CoordinationSharedStateSnapshotV1 {
+  schemaVersion: typeof MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA;
+  snapshotDigest: string;
+  coordinationId: string;
+  coordinationPlanFingerprint: string;
+  taskStates: CoordinationTaskStateBindingV1[];
+  coordinationEvidenceBindings: CoordinationEvidenceBindingV1[];
+  auditBindings: CoordinationEvidenceBindingV1[];
+}
+
+export interface CoordinationProgressionDecisionFingerprintFactsV1 {
+  schemaVersion: typeof MULTI_AGENT_COORDINATION_PROGRESSION_DECISION_FINGERPRINT_SCHEMA;
+  coordinationId: string;
+  coordinationPlanFingerprint: string;
+  taskId: string;
+  coordinationProgressionStatus: CoordinationProgressionStatusV1;
+  coordinationProgressionReason: CoordinationProgressionReasonV1;
+}
+
+export interface CoordinationProgressionDecisionBindingV1 {
+  progressionDecisionRef: string;
+  decision: CoordinationProgressionDecisionV1;
 }
 
 export interface CoordinationPlanBindingV1 {
@@ -997,4 +1095,730 @@ export function parseCoordinationProgressionDecisionV1(
       coordinationProgressionReason: raw.coordinationProgressionReason,
     },
   };
+}
+
+const SHARED_STATE_SNAPSHOT_DIGEST_DOMAIN = "MAC_SHARED_STATE_SNAPSHOT_V1\n" as const;
+
+type LifecycleRefRequirementV1 = "R" | "O" | "N";
+
+interface LifecycleMatrixRowV1 {
+  workerId: LifecycleRefRequirementV1;
+  workerAuthorityFingerprint: LifecycleRefRequirementV1;
+  routingDecisionFingerprint: LifecycleRefRequirementV1;
+  executionAuthorizationRef: LifecycleRefRequirementV1;
+  executionAttemptId: LifecycleRefRequirementV1;
+  executionOutcomeRef: LifecycleRefRequirementV1;
+  resultValidationRef: LifecycleRefRequirementV1;
+  resourceLockDecisionRef: LifecycleRefRequirementV1;
+  evidenceBindings: LifecycleRefRequirementV1;
+  humanDecisionRef: LifecycleRefRequirementV1;
+}
+
+const LIFECYCLE_MATRIX: Record<CoordinationProgressionStatusV1, LifecycleMatrixRowV1> = {
+  PLANNED: {
+    workerId: "N",
+    workerAuthorityFingerprint: "N",
+    routingDecisionFingerprint: "N",
+    executionAuthorizationRef: "N",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "N",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  WAITING_DEPENDENCY: {
+    workerId: "O",
+    workerAuthorityFingerprint: "O",
+    routingDecisionFingerprint: "O",
+    executionAuthorizationRef: "N",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  WAITING_RESOURCE: {
+    workerId: "R",
+    workerAuthorityFingerprint: "R",
+    routingDecisionFingerprint: "R",
+    executionAuthorizationRef: "N",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "R",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  WAITING_HUMAN_GATE: {
+    workerId: "R",
+    workerAuthorityFingerprint: "R",
+    routingDecisionFingerprint: "R",
+    executionAuthorizationRef: "N",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "O",
+  },
+  READY: {
+    workerId: "R",
+    workerAuthorityFingerprint: "R",
+    routingDecisionFingerprint: "R",
+    // Base matrix allows null|present; reason-stage rules below distinguish
+    // READY_FOR_AUTHORIZATION (MUST_BE_NULL) from AUTHORIZED_NOT_INVOKED (REQUIRED).
+    executionAuthorizationRef: "O",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  RUNNING: {
+    workerId: "R",
+    workerAuthorityFingerprint: "R",
+    routingDecisionFingerprint: "R",
+    executionAuthorizationRef: "R",
+    executionAttemptId: "R",
+    executionOutcomeRef: "O",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  HOLD: {
+    workerId: "O",
+    workerAuthorityFingerprint: "O",
+    routingDecisionFingerprint: "O",
+    executionAuthorizationRef: "O",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  NOT_EXECUTED: {
+    workerId: "O",
+    workerAuthorityFingerprint: "O",
+    routingDecisionFingerprint: "O",
+    executionAuthorizationRef: "R",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  CANCELLED: {
+    workerId: "O",
+    workerAuthorityFingerprint: "O",
+    routingDecisionFingerprint: "O",
+    executionAuthorizationRef: "O",
+    executionAttemptId: "N",
+    executionOutcomeRef: "N",
+    resultValidationRef: "N",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "N",
+  },
+  FAILED: {
+    workerId: "R",
+    workerAuthorityFingerprint: "R",
+    routingDecisionFingerprint: "R",
+    executionAuthorizationRef: "R",
+    executionAttemptId: "R",
+    executionOutcomeRef: "R",
+    resultValidationRef: "O",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "R",
+    humanDecisionRef: "N",
+  },
+  SUCCEEDED: {
+    workerId: "R",
+    workerAuthorityFingerprint: "R",
+    routingDecisionFingerprint: "R",
+    executionAuthorizationRef: "R",
+    executionAttemptId: "R",
+    executionOutcomeRef: "R",
+    resultValidationRef: "R",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "R",
+    humanDecisionRef: "N",
+  },
+  UNKNOWN: {
+    workerId: "O",
+    workerAuthorityFingerprint: "O",
+    routingDecisionFingerprint: "O",
+    executionAuthorizationRef: "O",
+    executionAttemptId: "O",
+    executionOutcomeRef: "O",
+    resultValidationRef: "O",
+    resourceLockDecisionRef: "O",
+    evidenceBindings: "O",
+    humanDecisionRef: "O",
+  },
+};
+
+function refPresent(value: string | null): boolean {
+  return value !== null && isOpaqueRef(value);
+}
+
+function refAbsent(value: string | null): boolean {
+  return value === null;
+}
+
+function refRequirementSatisfied(
+  requirement: LifecycleRefRequirementV1,
+  value: string | null,
+  count?: number,
+): boolean {
+  if (requirement === "R") {
+    if (count !== undefined) return count >= 1;
+    return refPresent(value);
+  }
+  if (requirement === "N") {
+    if (count !== undefined) return count === 0;
+    return refAbsent(value);
+  }
+  if (count !== undefined) return true;
+  return value === null || refPresent(value);
+}
+
+function evidenceBindingIdentityTuple(
+  binding: CoordinationEvidenceBindingV1,
+): string {
+  return JSON.stringify([
+    binding.ref,
+    binding.ownerScope,
+    binding.coordinationId,
+    binding.coordinationPlanFingerprint,
+    binding.taskId,
+    binding.kind,
+    binding.sourceId,
+  ]);
+}
+
+function evidenceImmutableIdentityTuple(
+  binding: CoordinationEvidenceBindingV1,
+): string {
+  return JSON.stringify([binding.ref, binding.evidenceDigest]);
+}
+
+function evidenceOwnerIdentityTuple(binding: CoordinationEvidenceBindingV1): string {
+  return JSON.stringify([
+    binding.ownerScope,
+    binding.coordinationId,
+    binding.coordinationPlanFingerprint,
+    binding.taskId,
+    binding.kind,
+    binding.sourceId,
+  ]);
+}
+
+export function parseCoordinationEvidenceBindingV1(
+  raw: unknown,
+): CoordinationParseResultV1<CoordinationEvidenceBindingV1> {
+  if (!isPlainObject(raw) || !hasExactKeys(raw, EVIDENCE_BINDING_KEYS)) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  if (
+    !isOpaqueRef(raw.ref) ||
+    !isFingerprint(raw.evidenceDigest) ||
+    (raw.ownerScope !== "COORDINATION" && raw.ownerScope !== "TASK") ||
+    !isLocalId(raw.coordinationId) ||
+    !isFingerprint(raw.coordinationPlanFingerprint) ||
+    (raw.taskId !== null && !isAgentTaskId(raw.taskId)) ||
+    (raw.kind !== "EVIDENCE" && raw.kind !== "AUDIT") ||
+    typeof raw.sourceId !== "string" ||
+    raw.sourceId.length < 1 ||
+    raw.sourceId.length > MULTI_AGENT_COORDINATION_SOURCE_ID_MAX
+  ) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  if (raw.ownerScope === "COORDINATION" && raw.taskId !== null) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  if (raw.ownerScope === "TASK" && raw.taskId === null) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  return {
+    ok: true,
+    value: {
+      ref: raw.ref,
+      evidenceDigest: raw.evidenceDigest,
+      ownerScope: raw.ownerScope,
+      coordinationId: raw.coordinationId,
+      coordinationPlanFingerprint: raw.coordinationPlanFingerprint,
+      taskId: raw.taskId as string | null,
+      kind: raw.kind,
+      sourceId: raw.sourceId,
+    },
+  };
+}
+
+function parseEvidenceBindingArray(
+  raw: unknown,
+): CoordinationParseResultV1<CoordinationEvidenceBindingV1[]> {
+  if (
+    !Array.isArray(raw) ||
+    raw.length > MULTI_AGENT_COORDINATION_REFERENCE_ARRAY_MAX
+  ) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  const bindings: CoordinationEvidenceBindingV1[] = [];
+  for (const item of raw) {
+    const parsed = parseCoordinationEvidenceBindingV1(item);
+    if (!parsed.ok) return parsed;
+    bindings.push(parsed.value);
+  }
+  return { ok: true, value: bindings };
+}
+
+export function parseCoordinationTaskStateBindingV1(
+  raw: unknown,
+): CoordinationParseResultV1<CoordinationTaskStateBindingV1> {
+  if (!isPlainObject(raw) || !hasExactKeys(raw, TASK_STATE_BINDING_KEYS)) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  if (
+    !isAgentTaskId(raw.taskId) ||
+    !isFingerprint(raw.taskRoutingFingerprint) ||
+    (raw.workerId !== null && !isLocalId(raw.workerId)) ||
+    (raw.workerAuthorityFingerprint !== null && !isFingerprint(raw.workerAuthorityFingerprint)) ||
+    (raw.routingDecisionFingerprint !== null && !isFingerprint(raw.routingDecisionFingerprint)) ||
+    (raw.humanDecisionRef !== null && !isOpaqueRef(raw.humanDecisionRef)) ||
+    (raw.executionAuthorizationRef !== null && !isOpaqueRef(raw.executionAuthorizationRef)) ||
+    (raw.executionAttemptId !== null && !isOpaqueRef(raw.executionAttemptId)) ||
+    (raw.executionOutcomeRef !== null && !isOpaqueRef(raw.executionOutcomeRef)) ||
+    (raw.resultValidationRef !== null && !isOpaqueRef(raw.resultValidationRef)) ||
+    (raw.resourceLockDecisionRef !== null && !isOpaqueRef(raw.resourceLockDecisionRef)) ||
+    !includesValue(PROGRESSION_STATUSES, raw.coordinationProgressionStatus) ||
+    !isOpaqueRef(raw.progressionDecisionRef) ||
+    !isFingerprint(raw.progressionDecisionFingerprint)
+  ) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  const evidenceBindings = parseEvidenceBindingArray(raw.evidenceBindings);
+  if (!evidenceBindings.ok) return evidenceBindings;
+  return {
+    ok: true,
+    value: {
+      taskId: raw.taskId,
+      taskRoutingFingerprint: raw.taskRoutingFingerprint,
+      workerId: raw.workerId as string | null,
+      workerAuthorityFingerprint: raw.workerAuthorityFingerprint as string | null,
+      routingDecisionFingerprint: raw.routingDecisionFingerprint as string | null,
+      humanDecisionRef: raw.humanDecisionRef as string | null,
+      executionAuthorizationRef: raw.executionAuthorizationRef as string | null,
+      executionAttemptId: raw.executionAttemptId as string | null,
+      executionOutcomeRef: raw.executionOutcomeRef as string | null,
+      resultValidationRef: raw.resultValidationRef as string | null,
+      resourceLockDecisionRef: raw.resourceLockDecisionRef as string | null,
+      coordinationProgressionStatus: raw.coordinationProgressionStatus,
+      progressionDecisionRef: raw.progressionDecisionRef,
+      progressionDecisionFingerprint: raw.progressionDecisionFingerprint,
+      evidenceBindings: evidenceBindings.value,
+    },
+  };
+}
+
+export function parseCoordinationSharedStateSnapshotV1(
+  raw: unknown,
+): CoordinationParseResultV1<CoordinationSharedStateSnapshotV1> {
+  if (!isPlainObject(raw) || !hasExactKeys(raw, SHARED_STATE_SNAPSHOT_KEYS)) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  if (
+    raw.schemaVersion !== MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA ||
+    !isFingerprint(raw.snapshotDigest) ||
+    !isLocalId(raw.coordinationId) ||
+    !isFingerprint(raw.coordinationPlanFingerprint) ||
+    !Array.isArray(raw.taskStates) ||
+    raw.taskStates.length < 1 ||
+    raw.taskStates.length > MULTI_AGENT_COORDINATION_TASK_REFS_MAX
+  ) {
+    return { ok: false, reason: "REJECTED_SCHEMA" };
+  }
+  const taskStates: CoordinationTaskStateBindingV1[] = [];
+  for (const item of raw.taskStates) {
+    const parsed = parseCoordinationTaskStateBindingV1(item);
+    if (!parsed.ok) return parsed;
+    taskStates.push(parsed.value);
+  }
+  const coordinationEvidenceBindings = parseEvidenceBindingArray(raw.coordinationEvidenceBindings);
+  if (!coordinationEvidenceBindings.ok) return coordinationEvidenceBindings;
+  const auditBindings = parseEvidenceBindingArray(raw.auditBindings);
+  if (!auditBindings.ok) return auditBindings;
+  return {
+    ok: true,
+    value: {
+      schemaVersion: MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA,
+      snapshotDigest: raw.snapshotDigest,
+      coordinationId: raw.coordinationId,
+      coordinationPlanFingerprint: raw.coordinationPlanFingerprint,
+      taskStates,
+      coordinationEvidenceBindings: coordinationEvidenceBindings.value,
+      auditBindings: auditBindings.value,
+    },
+  };
+}
+
+export function captureCoordinationProgressionDecisionFingerprintFacts(
+  decision: CoordinationProgressionDecisionV1,
+): CoordinationProgressionDecisionFingerprintFactsV1 {
+  return {
+    schemaVersion: MULTI_AGENT_COORDINATION_PROGRESSION_DECISION_FINGERPRINT_SCHEMA,
+    coordinationId: decision.coordinationId,
+    coordinationPlanFingerprint: decision.coordinationPlanFingerprint,
+    taskId: decision.taskId,
+    coordinationProgressionStatus: decision.coordinationProgressionStatus,
+    coordinationProgressionReason: decision.coordinationProgressionReason,
+  };
+}
+
+export async function computeCoordinationProgressionDecisionFingerprint(
+  decision: CoordinationProgressionDecisionV1,
+): Promise<string> {
+  return sha256Canonical(captureCoordinationProgressionDecisionFingerprintFacts(decision));
+}
+
+type SharedStateSnapshotDigestPayloadV1 = {
+  schemaVersion: typeof MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA;
+  coordinationId: string;
+  coordinationPlanFingerprint: string;
+  taskStates: CoordinationTaskStateBindingV1[];
+  coordinationEvidenceBindings: CoordinationEvidenceBindingV1[];
+  auditBindings: CoordinationEvidenceBindingV1[];
+};
+
+export async function computeCoordinationSharedStateSnapshotDigest(
+  snapshot: SharedStateSnapshotDigestPayloadV1 | CoordinationSharedStateSnapshotV1,
+): Promise<string> {
+  // Explicitly construct the covered payload so a full snapshot (with
+  // snapshotDigest) cannot accidentally participate in its own digest.
+  const digestPayload: SharedStateSnapshotDigestPayloadV1 = {
+    schemaVersion: snapshot.schemaVersion,
+    coordinationId: snapshot.coordinationId,
+    coordinationPlanFingerprint: snapshot.coordinationPlanFingerprint,
+    taskStates: snapshot.taskStates,
+    coordinationEvidenceBindings: snapshot.coordinationEvidenceBindings,
+    auditBindings: snapshot.auditBindings,
+  };
+  const canonical = canonicalJson(digestPayload);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${SHARED_STATE_SNAPSHOT_DIGEST_DOMAIN}${canonical}`),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function taskEvidenceContainsRef(
+  state: CoordinationTaskStateBindingV1,
+  ref: string,
+): boolean {
+  return state.evidenceBindings.some(
+    (evidence) =>
+      evidence.ref === ref &&
+      evidence.kind === "EVIDENCE" &&
+      evidence.ownerScope === "TASK" &&
+      evidence.taskId === state.taskId,
+  );
+}
+
+function terminalEvidenceRefsBound(state: CoordinationTaskStateBindingV1): boolean {
+  if (state.coordinationProgressionStatus === "FAILED") {
+    return (
+      refPresent(state.executionOutcomeRef) &&
+      taskEvidenceContainsRef(state, state.executionOutcomeRef as string)
+    );
+  }
+  if (state.coordinationProgressionStatus === "SUCCEEDED") {
+    return (
+      refPresent(state.executionOutcomeRef) &&
+      refPresent(state.resultValidationRef) &&
+      taskEvidenceContainsRef(state, state.executionOutcomeRef as string) &&
+      taskEvidenceContainsRef(state, state.resultValidationRef as string)
+    );
+  }
+  return true;
+}
+
+function readyAuthorizationStageCoherent(
+  state: CoordinationTaskStateBindingV1,
+  reason: CoordinationProgressionReasonV1,
+): boolean {
+  if (state.coordinationProgressionStatus !== "READY") return true;
+  if (reason === "READY_FOR_AUTHORIZATION") {
+    return state.executionAuthorizationRef === null;
+  }
+  if (reason === "AUTHORIZED_NOT_INVOKED") {
+    return refPresent(state.executionAuthorizationRef);
+  }
+  return true;
+}
+
+function taskStateLifecycleCoherent(state: CoordinationTaskStateBindingV1): boolean {
+  const matrix = LIFECYCLE_MATRIX[state.coordinationProgressionStatus];
+  if (
+    !refRequirementSatisfied(matrix.workerId, state.workerId) ||
+    !refRequirementSatisfied(matrix.workerAuthorityFingerprint, state.workerAuthorityFingerprint) ||
+    !refRequirementSatisfied(matrix.routingDecisionFingerprint, state.routingDecisionFingerprint) ||
+    !refRequirementSatisfied(matrix.executionAuthorizationRef, state.executionAuthorizationRef) ||
+    !refRequirementSatisfied(matrix.executionAttemptId, state.executionAttemptId) ||
+    !refRequirementSatisfied(matrix.executionOutcomeRef, state.executionOutcomeRef) ||
+    !refRequirementSatisfied(matrix.resultValidationRef, state.resultValidationRef) ||
+    !refRequirementSatisfied(matrix.resourceLockDecisionRef, state.resourceLockDecisionRef) ||
+    !refRequirementSatisfied(matrix.humanDecisionRef, state.humanDecisionRef) ||
+    !refRequirementSatisfied(matrix.evidenceBindings, null, state.evidenceBindings.length)
+  ) {
+    return false;
+  }
+
+  const workerPresent = state.workerId !== null;
+  const workerFingerprintPresent = state.workerAuthorityFingerprint !== null;
+  const routingPresent = state.routingDecisionFingerprint !== null;
+  if (workerPresent !== workerFingerprintPresent || workerPresent !== routingPresent) {
+    return false;
+  }
+
+  if (state.executionAttemptId !== null && state.executionAuthorizationRef === null) return false;
+  if (state.executionOutcomeRef !== null && state.executionAttemptId === null) return false;
+  if (state.resultValidationRef !== null && state.executionOutcomeRef === null) return false;
+
+  if (
+    state.coordinationProgressionStatus === "RUNNING" &&
+    state.resultValidationRef !== null
+  ) {
+    return false;
+  }
+  if (state.coordinationProgressionStatus === "NOT_EXECUTED") {
+    if (
+      state.executionAttemptId !== null ||
+      state.executionOutcomeRef !== null ||
+      state.resultValidationRef !== null
+    ) {
+      return false;
+    }
+  }
+  if (state.coordinationProgressionStatus === "PLANNED") {
+    if (
+      state.workerId !== null ||
+      state.workerAuthorityFingerprint !== null ||
+      state.routingDecisionFingerprint !== null ||
+      state.executionAuthorizationRef !== null ||
+      state.executionAttemptId !== null ||
+      state.executionOutcomeRef !== null ||
+      state.resultValidationRef !== null ||
+      state.resourceLockDecisionRef !== null
+    ) {
+      return false;
+    }
+  }
+
+  if (!terminalEvidenceRefsBound(state)) return false;
+
+  return true;
+}
+
+function evidenceBindingAttributionCoherent(
+  binding: CoordinationEvidenceBindingV1,
+  snapshotCoordinationId: string,
+  snapshotPlanFingerprint: string,
+  containingTaskId: string | null,
+  expectedKind: CoordinationEvidenceKindV1,
+): boolean {
+  if (binding.coordinationId !== snapshotCoordinationId) return false;
+  if (binding.coordinationPlanFingerprint !== snapshotPlanFingerprint) return false;
+  if (binding.kind !== expectedKind) return false;
+  if (containingTaskId !== null) {
+    return binding.ownerScope === "TASK" && binding.taskId === containingTaskId;
+  }
+  return binding.ownerScope === "COORDINATION" && binding.taskId === null;
+}
+
+function validateGlobalEvidenceCollisions(
+  bindings: readonly CoordinationEvidenceBindingV1[],
+): boolean {
+  const seenIdentityTuples = new Set<string>();
+  const refToDigest = new Map<string, string>();
+  const immutableToOwner = new Map<string, string>();
+
+  for (const binding of bindings) {
+    const identityTuple = evidenceBindingIdentityTuple(binding);
+    if (seenIdentityTuples.has(identityTuple)) return false;
+    seenIdentityTuples.add(identityTuple);
+
+    const priorDigest = refToDigest.get(binding.ref);
+    if (priorDigest !== undefined && priorDigest !== binding.evidenceDigest) return false;
+    refToDigest.set(binding.ref, binding.evidenceDigest);
+
+    const immutableTuple = evidenceImmutableIdentityTuple(binding);
+    const ownerTuple = evidenceOwnerIdentityTuple(binding);
+    const priorOwner = immutableToOwner.get(immutableTuple);
+    if (priorOwner !== undefined && priorOwner !== ownerTuple) return false;
+    immutableToOwner.set(immutableTuple, ownerTuple);
+  }
+
+  return true;
+}
+
+function progressionBindingCoherent(
+  state: CoordinationTaskStateBindingV1,
+  snapshotCoordinationId: string,
+  snapshotPlanFingerprint: string,
+  decision: CoordinationProgressionDecisionV1,
+): boolean {
+  return (
+    decision.coordinationId === snapshotCoordinationId &&
+    decision.coordinationPlanFingerprint === snapshotPlanFingerprint &&
+    decision.taskId === state.taskId &&
+    decision.coordinationProgressionStatus === state.coordinationProgressionStatus
+  );
+}
+
+export async function validateCoordinationSharedStateSnapshotV1(
+  raw: unknown,
+  binding: CoordinationPlanBindingV1,
+  progressionDecisions: readonly CoordinationProgressionDecisionBindingV1[] = [],
+): Promise<CoordinationParseResultV1<CoordinationSharedStateSnapshotV1>> {
+  const parsed = parseCoordinationSharedStateSnapshotV1(raw);
+  if (!parsed.ok) return parsed;
+  const snapshot = parsed.value;
+
+  if (!bindingMatches(binding, snapshot.coordinationId, snapshot.coordinationPlanFingerprint)) {
+    return { ok: false, reason: "REJECTED_BINDING" };
+  }
+
+  const admittedTaskIds = binding.plan.taskRefs.map((task) => task.taskId);
+  const admittedTaskIdSet = new Set(admittedTaskIds);
+  const snapshotTaskIds = snapshot.taskStates.map((state) => state.taskId);
+  if (hasDuplicates(snapshotTaskIds)) {
+    return { ok: false, reason: "REJECTED_BINDING" };
+  }
+  const snapshotTaskIdSet = new Set(snapshotTaskIds);
+  if (
+    snapshotTaskIds.length !== admittedTaskIds.length ||
+    !admittedTaskIds.every((taskId) => snapshotTaskIdSet.has(taskId))
+  ) {
+    return { ok: false, reason: "REJECTED_BINDING" };
+  }
+
+  const taskRefById = new Map(binding.plan.taskRefs.map((task) => [task.taskId, task] as const));
+  const progressionRefs = progressionDecisions.map((entry) => entry.progressionDecisionRef);
+  if (hasDuplicates(progressionRefs)) {
+    return { ok: false, reason: "REJECTED_CONTRADICTION" };
+  }
+  const progressionByRef = new Map(
+    progressionDecisions.map((entry) => [entry.progressionDecisionRef, entry.decision] as const),
+  );
+
+  for (const state of snapshot.taskStates) {
+    const taskRef = taskRefById.get(state.taskId);
+    if (!taskRef) return { ok: false, reason: "REJECTED_BINDING" };
+    if (state.taskRoutingFingerprint !== taskRef.taskRoutingFingerprint) {
+      return { ok: false, reason: "REJECTED_BINDING" };
+    }
+    if (!taskStateLifecycleCoherent(state)) {
+      return { ok: false, reason: "REJECTED_CONTRADICTION" };
+    }
+
+    for (const evidence of state.evidenceBindings) {
+      if (
+        !evidenceBindingAttributionCoherent(
+          evidence,
+          snapshot.coordinationId,
+          snapshot.coordinationPlanFingerprint,
+          state.taskId,
+          "EVIDENCE",
+        )
+      ) {
+        return { ok: false, reason: "REJECTED_BINDING" };
+      }
+    }
+
+    const boundDecision = progressionByRef.get(state.progressionDecisionRef);
+    if (boundDecision) {
+      if (
+        !progressionBindingCoherent(
+          state,
+          snapshot.coordinationId,
+          snapshot.coordinationPlanFingerprint,
+          boundDecision,
+        )
+      ) {
+        return { ok: false, reason: "REJECTED_CONTRADICTION" };
+      }
+      if (
+        !readyAuthorizationStageCoherent(state, boundDecision.coordinationProgressionReason)
+      ) {
+        return { ok: false, reason: "REJECTED_CONTRADICTION" };
+      }
+      const expectedFingerprint =
+        await computeCoordinationProgressionDecisionFingerprint(boundDecision);
+      if (state.progressionDecisionFingerprint !== expectedFingerprint) {
+        return { ok: false, reason: "REJECTED_CONTRADICTION" };
+      }
+    }
+  }
+
+  for (const evidence of snapshot.coordinationEvidenceBindings) {
+    if (
+      !evidenceBindingAttributionCoherent(
+        evidence,
+        snapshot.coordinationId,
+        snapshot.coordinationPlanFingerprint,
+        null,
+        "EVIDENCE",
+      )
+    ) {
+      return { ok: false, reason: "REJECTED_BINDING" };
+    }
+  }
+
+  for (const audit of snapshot.auditBindings) {
+    if (audit.kind !== "AUDIT") return { ok: false, reason: "REJECTED_BINDING" };
+    if (audit.coordinationId !== snapshot.coordinationId) {
+      return { ok: false, reason: "REJECTED_BINDING" };
+    }
+    if (audit.coordinationPlanFingerprint !== snapshot.coordinationPlanFingerprint) {
+      return { ok: false, reason: "REJECTED_BINDING" };
+    }
+    if (audit.ownerScope === "COORDINATION" && audit.taskId !== null) {
+      return { ok: false, reason: "REJECTED_BINDING" };
+    }
+    if (audit.ownerScope === "TASK") {
+      if (audit.taskId === null || !admittedTaskIdSet.has(audit.taskId)) {
+        return { ok: false, reason: "REJECTED_BINDING" };
+      }
+    }
+  }
+
+  const allEvidenceBindings = [
+    ...snapshot.taskStates.flatMap((state) => state.evidenceBindings),
+    ...snapshot.coordinationEvidenceBindings,
+    ...snapshot.auditBindings,
+  ];
+  if (!validateGlobalEvidenceCollisions(allEvidenceBindings)) {
+    return { ok: false, reason: "REJECTED_CONTRADICTION" };
+  }
+
+  const expectedDigest = await computeCoordinationSharedStateSnapshotDigest({
+    schemaVersion: snapshot.schemaVersion,
+    coordinationId: snapshot.coordinationId,
+    coordinationPlanFingerprint: snapshot.coordinationPlanFingerprint,
+    taskStates: snapshot.taskStates,
+    coordinationEvidenceBindings: snapshot.coordinationEvidenceBindings,
+    auditBindings: snapshot.auditBindings,
+  });
+  if (snapshot.snapshotDigest !== expectedDigest) {
+    return { ok: false, reason: "REJECTED_CONTRADICTION" };
+  }
+
+  return { ok: true, value: snapshot };
 }

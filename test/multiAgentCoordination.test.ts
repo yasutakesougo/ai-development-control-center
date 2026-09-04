@@ -11,19 +11,32 @@ import {
   MULTI_AGENT_COORDINATION_PROGRESSION_EVALUATOR_IMPLEMENTED,
   MULTI_AGENT_COORDINATION_PROGRESSION_INPUT_SCHEMA,
   MULTI_AGENT_COORDINATION_PROVIDER_INVOCATION_IMPLEMENTED,
+  MULTI_AGENT_COORDINATION_SHARED_STATE_BINDING_IMPLEMENTED,
+  MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA,
   captureCoordinationPlanFingerprintFacts,
   computeCoordinationPlanFingerprint,
+  computeCoordinationProgressionDecisionFingerprint,
+  computeCoordinationSharedStateSnapshotDigest,
   computeCoordinationTaskRoutingFingerprint,
   computeEffectiveConcurrencyCeiling,
   parseCoordinationCancellationRequestV1,
   parseCoordinationConcurrencyCeilingRefV1,
+  parseCoordinationEvidenceBindingV1,
   parseCoordinationPlanV1,
   parseCoordinationProgressionDecisionV1,
   parseCoordinationProgressionInputV1,
+  parseCoordinationSharedStateSnapshotV1,
+  parseCoordinationTaskStateBindingV1,
+  validateCoordinationSharedStateSnapshotV1,
   type CoordinationCancellationRequestV1,
+  type CoordinationEvidenceBindingV1,
   type CoordinationPlanBindingV1,
   type CoordinationPlanV1,
+  type CoordinationProgressionDecisionBindingV1,
+  type CoordinationProgressionDecisionV1,
   type CoordinationProgressionInputV1,
+  type CoordinationSharedStateSnapshotV1,
+  type CoordinationTaskStateBindingV1,
 } from "../src/domain/multiAgentCoordination";
 
 const FPA = "a".repeat(64);
@@ -930,5 +943,1004 @@ describe("MULTI-AGENT-COORDINATION-V1 Slice B", () => {
         current,
       ),
     ).toEqual({ ok: false, reason: "REJECTED_CONTRADICTION" });
+  });
+});
+
+const FPD = "d".repeat(64);
+const FPE = "e".repeat(64);
+const FPW = "f".repeat(64);
+
+function evidenceBinding(
+  planOrOverrides?: CoordinationPlanBindingV1 | Partial<CoordinationEvidenceBindingV1>,
+  maybeOverrides: Partial<CoordinationEvidenceBindingV1> = {},
+): CoordinationEvidenceBindingV1 {
+  const isPlan =
+    planOrOverrides !== undefined &&
+    typeof planOrOverrides === "object" &&
+    "plan" in planOrOverrides &&
+    "coordinationPlanFingerprint" in planOrOverrides;
+  const planBinding = isPlan ? (planOrOverrides as CoordinationPlanBindingV1) : undefined;
+  const overrides = isPlan
+    ? maybeOverrides
+    : ((planOrOverrides as Partial<CoordinationEvidenceBindingV1> | undefined) ?? {});
+  return {
+    ref: "evidence://task/1",
+    evidenceDigest: FPD,
+    ownerScope: "TASK",
+    coordinationId: planBinding?.plan.coordinationId ?? "coordination-1",
+    coordinationPlanFingerprint: planBinding?.coordinationPlanFingerprint ?? FPA,
+    taskId: "task-a",
+    kind: "EVIDENCE",
+    sourceId: "source-1",
+    ...overrides,
+  };
+}
+
+function progressionDecision(
+  planBinding: CoordinationPlanBindingV1,
+  overrides: Partial<CoordinationProgressionDecisionV1> = {},
+): CoordinationProgressionDecisionV1 {
+  return {
+    schemaVersion: MULTI_AGENT_COORDINATION_PROGRESSION_DECISION_SCHEMA,
+    coordinationId: planBinding.plan.coordinationId,
+    coordinationPlanFingerprint: planBinding.coordinationPlanFingerprint,
+    taskId: planBinding.plan.taskRefs[0].taskId,
+    coordinationProgressionStatus: "PLANNED",
+    coordinationProgressionReason: "PLAN_ADMITTED",
+    ...overrides,
+  };
+}
+
+async function progressionBinding(
+  planBinding: CoordinationPlanBindingV1,
+  ref = "progression://decision/1",
+  overrides: Partial<CoordinationProgressionDecisionV1> = {},
+): Promise<CoordinationProgressionDecisionBindingV1> {
+  const decision = progressionDecision(planBinding, overrides);
+  return {
+    progressionDecisionRef: ref,
+    decision,
+  };
+}
+
+function plannedTaskState(
+  planBinding: CoordinationPlanBindingV1,
+  overrides: Partial<CoordinationTaskStateBindingV1> = {},
+): CoordinationTaskStateBindingV1 {
+  return {
+    taskId: planBinding.plan.taskRefs[0].taskId,
+    taskRoutingFingerprint: planBinding.plan.taskRefs[0].taskRoutingFingerprint,
+    workerId: null,
+    workerAuthorityFingerprint: null,
+    routingDecisionFingerprint: null,
+    humanDecisionRef: null,
+    executionAuthorizationRef: null,
+    executionAttemptId: null,
+    executionOutcomeRef: null,
+    resultValidationRef: null,
+    resourceLockDecisionRef: null,
+    coordinationProgressionStatus: "PLANNED",
+    progressionDecisionRef: "progression://decision/1",
+    progressionDecisionFingerprint: FPD,
+    evidenceBindings: [],
+    ...overrides,
+  };
+}
+
+async function snapshotPayload(
+  planBinding: CoordinationPlanBindingV1,
+  overrides: {
+    taskStates?: CoordinationTaskStateBindingV1[];
+    coordinationEvidenceBindings?: CoordinationEvidenceBindingV1[];
+    auditBindings?: CoordinationEvidenceBindingV1[];
+    coordinationId?: string;
+    coordinationPlanFingerprint?: string;
+  } = {},
+): Promise<CoordinationSharedStateSnapshotV1> {
+  const payload = {
+    schemaVersion: MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA,
+    coordinationId: overrides.coordinationId ?? planBinding.plan.coordinationId,
+    coordinationPlanFingerprint:
+      overrides.coordinationPlanFingerprint ?? planBinding.coordinationPlanFingerprint,
+    taskStates: overrides.taskStates ?? [plannedTaskState(planBinding)],
+    coordinationEvidenceBindings: overrides.coordinationEvidenceBindings ?? [],
+    auditBindings: overrides.auditBindings ?? [],
+  };
+  const snapshotDigest = await computeCoordinationSharedStateSnapshotDigest(payload);
+  return { ...payload, snapshotDigest };
+}
+
+describe("MULTI-AGENT-COORDINATION-V1 Slice C", () => {
+  it("C01 valid FULL snapshot bound to exact plan identity passes", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    const result = await validateCoordinationSharedStateSnapshotV1(snap, current, [
+      {
+        progressionDecisionRef: "progression://decision/1",
+        decision,
+      },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("C02 coordinationId mismatch fails closed", async () => {
+    const current = await binding();
+    const snap = await snapshotPayload(current, { coordinationId: "coordination-other" });
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(false);
+  });
+
+  it("C03 plan fingerprint mismatch fails closed", async () => {
+    const current = await binding();
+    const snap = await snapshotPayload(current, { coordinationPlanFingerprint: FPA });
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(false);
+  });
+
+  it("C04 unknown taskId fails closed", async () => {
+    const current = await binding();
+    const snap = await snapshotPayload(current, {
+      taskStates: [plannedTaskState(current, { taskId: "task-unknown" })],
+    });
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(false);
+  });
+
+  it("C05 duplicate task binding fails closed", async () => {
+    const current = await binding();
+    const state = plannedTaskState(current);
+    const snap = await snapshotPayload(current, { taskStates: [state, { ...state }] });
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(false);
+  });
+
+  it("C06 taskRoutingFingerprint mismatch fails closed", async () => {
+    const current = await binding();
+    const snap = await snapshotPayload(current, {
+      taskStates: [plannedTaskState(current, { taskRoutingFingerprint: FPB })],
+    });
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(false);
+  });
+
+  it("C07 lifecycle matrix accepts OPTIONAL null refs", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "WAITING_DEPENDENCY",
+      coordinationProgressionReason: "DEPENDENCY_PENDING",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "WAITING_DEPENDENCY",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(true);
+  });
+
+  it("C08 lifecycle matrix rejects missing REQUIRED ref", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "READY",
+      coordinationProgressionReason: "AUTHORIZED_NOT_INVOKED",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "READY",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C09 lifecycle matrix rejects MUST_BE_NULL contradiction", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C10 partial snapshot rejects", async () => {
+    const current = await binding(plan({
+      taskRefs: [
+        plan().taskRefs[0],
+        {
+          taskId: "task-b",
+          taskRoutingFingerprint: FPB,
+          dependencyTaskIds: [],
+          coordinationMode: "SEQUENTIAL",
+        },
+      ],
+    }));
+    const snap = await snapshotPayload(current);
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(false);
+  });
+
+  it("C11 task evidence owner mismatch rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [evidenceBinding(current, { taskId: "task-other" })],
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C12 coordination evidence with task owner rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [plannedTaskState(current, { progressionDecisionFingerprint: fingerprint })],
+      coordinationEvidenceBindings: [
+        evidenceBinding(current, { ownerScope: "TASK", taskId: "task-a", kind: "EVIDENCE" }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C13 audit binding unknown task rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [plannedTaskState(current, { progressionDecisionFingerprint: fingerprint })],
+      auditBindings: [
+        evidenceBinding(current, {
+          ownerScope: "TASK",
+          taskId: "task-unknown",
+          kind: "AUDIT",
+          ref: "audit://1",
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C14 duplicate evidence identity tuple rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const duplicate = evidenceBinding(current);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [duplicate, { ...duplicate }],
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C15 array order preserved; no sort/dedupe/repair", async () => {
+    const current = await binding();
+    const first = evidenceBinding(current, { ref: "evidence://first", sourceId: "source-a" });
+    const second = evidenceBinding(current, { ref: "evidence://second", sourceId: "source-b" });
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [first, second],
+        }),
+      ],
+    });
+    const result = await validateCoordinationSharedStateSnapshotV1(snap, current, [
+      { progressionDecisionRef: "progression://decision/1", decision },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.value.taskStates[0].evidenceBindings.map((item) => item.ref)).toEqual([
+      "evidence://first",
+      "evidence://second",
+    ]);
+  });
+
+  it("C16 bare ref cannot substitute for bounded attribution record", () => {
+    expect(parseCoordinationEvidenceBindingV1("evidence://only-a-ref").ok).toBe(false);
+  });
+
+  it("C17 progression identity mismatch fails closed", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "READY",
+      coordinationProgressionReason: "AUTHORIZED_NOT_INVOKED",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "PLANNED",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C18 snapshot validation changes no canonical execution/routing/policy result", async () => {
+    const current = await binding();
+    const raw = progressionInput(current);
+    const before = coordinationModule.evaluateCoordinationProgressionV1(raw, current);
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [plannedTaskState(current, { progressionDecisionFingerprint: fingerprint })],
+    });
+    await validateCoordinationSharedStateSnapshotV1(snap, current, [
+      { progressionDecisionRef: "progression://decision/1", decision },
+    ]);
+    const after = coordinationModule.evaluateCoordinationProgressionV1(raw, current);
+    expect(after).toEqual(before);
+  });
+
+  it("C19 no exported persistence / dispatch / invoke / approve / merge / deploy API", () => {
+    const prohibited = /^(execute|dispatch|invoke|approve|merge|deploy|persist)/i;
+    expect(Object.keys(coordinationModule).filter((key) => prohibited.test(key))).toEqual([]);
+    expect(coordinationModule.MULTI_AGENT_COORDINATION_SHARED_STATE_BINDING_IMPLEMENTED).toBe(true);
+    expect(coordinationModule.MULTI_AGENT_COORDINATION_EXECUTION_IMPLEMENTED).toBe(false);
+  });
+
+  it("C20 existing Slice B progression evaluator behavior unchanged", async () => {
+    const current = await binding();
+    expect(evaluatedDecision(current)).toMatchObject({
+      coordinationProgressionStatus: "PLANNED",
+      coordinationProgressionReason: "PLAN_ADMITTED",
+    });
+  });
+
+  it("C21 SUCCEEDED missing resultValidationRef rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "SUCCEEDED",
+      coordinationProgressionReason: "EXECUTION_AND_RESULT_VALID",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "SUCCEEDED",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: "evidence://auth",
+          executionAttemptId: "attempt-1",
+          executionOutcomeRef: "evidence://outcome",
+          resultValidationRef: null,
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [evidenceBinding(current)],
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C22 FAILED missing executionOutcomeRef/evidence rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "FAILED",
+      coordinationProgressionReason: "EXECUTION_FAILED",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "FAILED",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: "evidence://auth",
+          executionAttemptId: "attempt-1",
+          executionOutcomeRef: null,
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [],
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C23 NOT_EXECUTED with executionAttemptId rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "NOT_EXECUTED",
+      coordinationProgressionReason: "AUTHORIZATION_DENIED",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "NOT_EXECUTED",
+          executionAuthorizationRef: "evidence://auth",
+          executionAttemptId: "attempt-1",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C24 PLANNED with routing/execution/resource ref rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          resourceLockDecisionRef: "evidence://lock",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C25 WAITING_HUMAN_GATE with executionAuthorizationRef rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "WAITING_HUMAN_GATE",
+      coordinationProgressionReason: "HUMAN_GATE_WAIT",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "WAITING_HUMAN_GATE",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: "evidence://auth",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C26 WAITING_HUMAN_GATE without executionAuthorizationRef accepts when other requirements hold", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "WAITING_HUMAN_GATE",
+      coordinationProgressionReason: "HUMAN_GATE_WAIT",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "WAITING_HUMAN_GATE",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          humanDecisionRef: "evidence://human-gate",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(true);
+  });
+
+  it("C27 humanDecisionRef never substitutes for executionAuthorizationRef", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "READY",
+      coordinationProgressionReason: "AUTHORIZED_NOT_INVOKED",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "READY",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          humanDecisionRef: "evidence://human-gate",
+          executionAuthorizationRef: null,
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C28 valid exact snapshotDigest passes", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [plannedTaskState(current, { progressionDecisionFingerprint: fingerprint })],
+    });
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(true);
+  });
+
+  it("C29 snapshotDigest mismatch rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [plannedTaskState(current, { progressionDecisionFingerprint: fingerprint })],
+    });
+    snap.snapshotDigest = FPA;
+    expect((await validateCoordinationSharedStateSnapshotV1(snap, current)).ok).toBe(false);
+  });
+
+  it("C30 identical payload deterministically reproduces snapshotDigest", async () => {
+    const current = await binding();
+    const payload = {
+      schemaVersion: MULTI_AGENT_COORDINATION_SHARED_STATE_SNAPSHOT_SCHEMA,
+      coordinationId: current.plan.coordinationId,
+      coordinationPlanFingerprint: current.coordinationPlanFingerprint,
+      taskStates: [plannedTaskState(current)],
+      coordinationEvidenceBindings: [] as CoordinationEvidenceBindingV1[],
+      auditBindings: [] as CoordinationEvidenceBindingV1[],
+    };
+    const first = await computeCoordinationSharedStateSnapshotDigest(payload);
+    const second = await computeCoordinationSharedStateSnapshotDigest(payload);
+    expect(first).toBe(second);
+  });
+
+  it("C31 evidence binding missing evidenceDigest rejects", () => {
+    expect(
+      parseCoordinationEvidenceBindingV1({
+        ref: "evidence://task/1",
+        ownerScope: "TASK",
+        coordinationId: "coordination-1",
+        coordinationPlanFingerprint: FPA,
+        taskId: "task-a",
+        kind: "EVIDENCE",
+        sourceId: "source-1",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("C32 same ref + conflicting evidenceDigest rejects snapshot-wide", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [evidenceBinding(current, { ref: "evidence://shared", evidenceDigest: FPD })],
+        }),
+      ],
+      coordinationEvidenceBindings: [
+        evidenceBinding(current, {
+          ref: "evidence://shared",
+          evidenceDigest: FPE,
+          ownerScope: "COORDINATION",
+          taskId: null,
+        }),
+      ],
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C33 progression status missing progressionDecisionRef/fingerprint rejects", async () => {
+    const current = await binding();
+    expect(
+      parseCoordinationTaskStateBindingV1({
+        ...plannedTaskState(current),
+        progressionDecisionRef: "",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("C34 progression binding identity mismatch rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "READY",
+      coordinationProgressionReason: "AUTHORIZED_NOT_INVOKED",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "READY",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: "evidence://auth",
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(snap, current, [
+          {
+            progressionDecisionRef: "progression://decision/1",
+            decision: progressionDecision(current, { taskId: "task-other" }),
+          },
+        ])
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("C35 duplicate evidence tuple across different arrays rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const shared = evidenceBinding(current);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [shared],
+        }),
+      ],
+      auditBindings: [{ ...shared, kind: "AUDIT", ref: "audit://dup" }],
+    });
+    const duplicateAudit = evidenceBinding(current, { kind: "AUDIT", ref: "audit://1" });
+    snap.auditBindings = [duplicateAudit, { ...duplicateAudit }];
+    snap.snapshotDigest = await computeCoordinationSharedStateSnapshotDigest({
+      schemaVersion: snap.schemaVersion,
+      coordinationId: snap.coordinationId,
+      coordinationPlanFingerprint: snap.coordinationPlanFingerprint,
+      taskStates: snap.taskStates,
+      coordinationEvidenceBindings: snap.coordinationEvidenceBindings,
+      auditBindings: snap.auditBindings,
+    });
+    expect(
+      (await validateCoordinationSharedStateSnapshotV1(snap, current, [
+        { progressionDecisionRef: "progression://decision/1", decision },
+      ])).ok,
+    ).toBe(false);
+  });
+
+  it("C36 global collision validation preserves original order", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const taskEvidence = evidenceBinding(current, { ref: "evidence://task", sourceId: "source-task" });
+    const auditEvidence = evidenceBinding(current, {
+      ref: "audit://1",
+      kind: "AUDIT",
+      sourceId: "source-audit",
+    });
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [taskEvidence],
+        }),
+      ],
+      auditBindings: [auditEvidence],
+    });
+    const result = await validateCoordinationSharedStateSnapshotV1(snap, current, [
+      { progressionDecisionRef: "progression://decision/1", decision },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.value.auditBindings[0].ref).toBe("audit://1");
+    expect(result.value.taskStates[0].evidenceBindings[0].ref).toBe("evidence://task");
+  });
+
+  it("C37 READY/READY_FOR_AUTHORIZATION with null executionAuthorizationRef passes", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "READY",
+      coordinationProgressionReason: "READY_FOR_AUTHORIZATION",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "READY",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: null,
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(snap, current, [
+          { progressionDecisionRef: "progression://decision/1", decision },
+        ])
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("C38 READY/AUTHORIZED_NOT_INVOKED with null executionAuthorizationRef rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current, {
+      coordinationProgressionStatus: "READY",
+      coordinationProgressionReason: "AUTHORIZED_NOT_INVOKED",
+    });
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "READY",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: null,
+          progressionDecisionFingerprint: fingerprint,
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(snap, current, [
+          { progressionDecisionRef: "progression://decision/1", decision },
+        ])
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("C39 evidence binding plan fingerprint mismatch rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [
+            evidenceBinding(current, { coordinationPlanFingerprint: FPA }),
+          ],
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(snap, current, [
+          { progressionDecisionRef: "progression://decision/1", decision },
+        ])
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("C40 FAILED/SUCCEEDED require lifecycle refs bound to task evidence records", async () => {
+    const current = await binding();
+    const failedDecision = progressionDecision(current, {
+      coordinationProgressionStatus: "FAILED",
+      coordinationProgressionReason: "EXECUTION_FAILED",
+    });
+    const failedFingerprint =
+      await computeCoordinationProgressionDecisionFingerprint(failedDecision);
+    const failedSnap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "FAILED",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: "evidence://auth",
+          executionAttemptId: "attempt-1",
+          executionOutcomeRef: "evidence://outcome",
+          progressionDecisionFingerprint: failedFingerprint,
+          evidenceBindings: [
+            evidenceBinding(current, { ref: "evidence://unrelated" }),
+          ],
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(failedSnap, current, [
+          { progressionDecisionRef: "progression://decision/1", decision: failedDecision },
+        ])
+      ).ok,
+    ).toBe(false);
+
+    const succeededDecision = progressionDecision(current, {
+      coordinationProgressionStatus: "SUCCEEDED",
+      coordinationProgressionReason: "EXECUTION_AND_RESULT_VALID",
+    });
+    const succeededFingerprint =
+      await computeCoordinationProgressionDecisionFingerprint(succeededDecision);
+    const succeededSnap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "SUCCEEDED",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: "evidence://auth",
+          executionAttemptId: "attempt-1",
+          executionOutcomeRef: "evidence://outcome",
+          resultValidationRef: "evidence://result",
+          progressionDecisionFingerprint: succeededFingerprint,
+          evidenceBindings: [
+            evidenceBinding(current, { ref: "evidence://outcome" }),
+            // resultValidationRef unbound — only outcome bound
+          ],
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(succeededSnap, current, [
+          {
+            progressionDecisionRef: "progression://decision/1",
+            decision: succeededDecision,
+          },
+        ])
+      ).ok,
+    ).toBe(false);
+
+    const succeededOk = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          coordinationProgressionStatus: "SUCCEEDED",
+          workerId: "worker-1",
+          workerAuthorityFingerprint: FPW,
+          routingDecisionFingerprint: FPE,
+          executionAuthorizationRef: "evidence://auth",
+          executionAttemptId: "attempt-1",
+          executionOutcomeRef: "evidence://outcome",
+          resultValidationRef: "evidence://result",
+          progressionDecisionFingerprint: succeededFingerprint,
+          evidenceBindings: [
+            evidenceBinding(current, { ref: "evidence://outcome", sourceId: "source-outcome" }),
+            evidenceBinding(current, { ref: "evidence://result", sourceId: "source-result" }),
+          ],
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(succeededOk, current, [
+          {
+            progressionDecisionRef: "progression://decision/1",
+            decision: succeededDecision,
+          },
+        ])
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("C41 task evidenceBindings reject COORDINATION-owned records", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, {
+          progressionDecisionFingerprint: fingerprint,
+          evidenceBindings: [
+            evidenceBinding(current, {
+              ownerScope: "COORDINATION",
+              taskId: null,
+            }),
+          ],
+        }),
+      ],
+    });
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(snap, current, [
+          { progressionDecisionRef: "progression://decision/1", decision },
+        ])
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("C42 snapshotDigest recomputation excludes pre-existing digest; duplicate progressionDecisionRef rejects", async () => {
+    const current = await binding();
+    const decision = progressionDecision(current);
+    const fingerprint = await computeCoordinationProgressionDecisionFingerprint(decision);
+    const snap = await snapshotPayload(current, {
+      taskStates: [
+        plannedTaskState(current, { progressionDecisionFingerprint: fingerprint }),
+      ],
+    });
+    const recomputed = await computeCoordinationSharedStateSnapshotDigest(snap);
+    expect(recomputed).toBe(snap.snapshotDigest);
+    const mutated = {
+      ...snap,
+      snapshotDigest: FPA,
+    };
+    const recomputedFromMutated = await computeCoordinationSharedStateSnapshotDigest(mutated);
+    expect(recomputedFromMutated).toBe(snap.snapshotDigest);
+
+    expect(
+      (
+        await validateCoordinationSharedStateSnapshotV1(snap, current, [
+          { progressionDecisionRef: "progression://decision/1", decision },
+          {
+            progressionDecisionRef: "progression://decision/1",
+            decision: progressionDecision(current, {
+              coordinationProgressionStatus: "READY",
+              coordinationProgressionReason: "READY_FOR_AUTHORIZATION",
+            }),
+          },
+        ])
+      ).ok,
+    ).toBe(false);
   });
 });
