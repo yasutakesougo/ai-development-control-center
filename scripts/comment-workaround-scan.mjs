@@ -99,9 +99,29 @@ function scriptKindFor(filePath) {
   return ts.ScriptKind.TS;
 }
 
-function languageVariantFor(filePath) {
-  const extension = path.extname(filePath).toLowerCase();
-  return extension === ".tsx" || extension === ".jsx" ? ts.LanguageVariant.JSX : ts.LanguageVariant.Standard;
+function collectCommentRanges(sourceFile, text) {
+  const ranges = new Map();
+
+  function addRanges(position, leading) {
+    const visitRange = (start, end, tokenKind) => {
+      ranges.set(`${start}:${end}`, { start, end, tokenKind });
+    };
+    if (leading) ts.forEachLeadingCommentRange(text, position, visitRange);
+    else ts.forEachTrailingCommentRange(text, position, visitRange);
+  }
+
+  function visit(node) {
+    addRanges(node.getFullStart(), true);
+    addRanges(node.getStart(sourceFile, false), true);
+    addRanges(node.getEnd(), false);
+    for (const child of node.getChildren(sourceFile)) visit(child);
+  }
+
+  addRanges(0, true);
+  visit(sourceFile);
+  addRanges(text.length, false);
+
+  return [...ranges.values()].sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
 function tokenIntersectsChangedLines(startLine, endLine, ranges) {
@@ -109,14 +129,6 @@ function tokenIntersectsChangedLines(startLine, endLine, ranges) {
 }
 
 function scanFileComments(filePath, text, ranges) {
-  const lexicalErrors = [];
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    languageVariantFor(filePath),
-    text,
-    (message, length) => lexicalErrors.push({ message: String(message), length: length ?? null }),
-  );
   const sourceFile = ts.createSourceFile(filePath, text, ts.ScriptTarget.Latest, false, scriptKindFor(filePath));
   const parseErrors = sourceFile.parseDiagnostics.map((diagnostic) => ({
     code: diagnostic.code,
@@ -124,26 +136,21 @@ function scanFileComments(filePath, text, ranges) {
     length: diagnostic.length ?? null,
     message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
   }));
+  if (parseErrors.length > 0) return { findings: [], parseErrors };
+
   const findings = [];
-
-  while (true) {
-    const token = scanner.scan();
-    if (token === ts.SyntaxKind.EndOfFileToken) break;
-    if (token !== ts.SyntaxKind.SingleLineCommentTrivia && token !== ts.SyntaxKind.MultiLineCommentTrivia) continue;
-
-    const start = scanner.getTokenPos();
-    const end = scanner.getTextPos();
-    const startPosition = sourceFile.getLineAndCharacterOfPosition(start);
-    const endPosition = sourceFile.getLineAndCharacterOfPosition(Math.max(start, end - 1));
+  for (const comment of collectCommentRanges(sourceFile, text)) {
+    const startPosition = sourceFile.getLineAndCharacterOfPosition(comment.start);
+    const endPosition = sourceFile.getLineAndCharacterOfPosition(Math.max(comment.start, comment.end - 1));
     const startLine = startPosition.line + 1;
     const endLine = endPosition.line + 1;
     if (!tokenIntersectsChangedLines(startLine, endLine, ranges)) continue;
 
-    const commentText = text.slice(start, end);
+    const commentText = text.slice(comment.start, comment.end);
     findings.push({
       path: filePath,
       kind: directivePattern.test(commentText) ? "DIRECTIVE_REVIEW" : "COMMENT",
-      tokenKind: token === ts.SyntaxKind.SingleLineCommentTrivia ? "SINGLE_LINE" : "MULTI_LINE",
+      tokenKind: comment.tokenKind === ts.SyntaxKind.SingleLineCommentTrivia ? "SINGLE_LINE" : "MULTI_LINE",
       startLine,
       startColumn: startPosition.character + 1,
       endLine,
@@ -152,7 +159,7 @@ function scanFileComments(filePath, text, ranges) {
     });
   }
 
-  return { findings, lexicalErrors, parseErrors };
+  return { findings, parseErrors };
 }
 
 function gitError(error) {
@@ -256,14 +263,6 @@ export function scanCommentWorkaround({ baseSha, headSha, cwd = process.cwd() })
     }
 
     const scanned = scanFileComments(change.path, text, changedLines.ranges);
-    if (scanned.lexicalErrors.length > 0) {
-      errors.push({
-        path: change.path,
-        reasonCode: "LEXICAL_SCAN_FAILED",
-        detail: JSON.stringify(scanned.lexicalErrors),
-      });
-      continue;
-    }
     if (scanned.parseErrors.length > 0) {
       errors.push({
         path: change.path,
