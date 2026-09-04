@@ -44,6 +44,8 @@ Human Implementation Start GO.
 
 - `docs/status/production-observation-budget-repair-1-historical-failure.md`
 - `docs/status/production-observation-budget-repair-1.md`
+- `docs/status/production-observation-budget-repair-1-failure-semantics.md`
+- `docs/status/production-observation-budget-repair-1-bounded-observation.md`
 
 ## Historical failure (immutable)
 
@@ -107,8 +109,9 @@ Parent: PRODUCTION-OBSERVATION-BUDGET-REPAIR-1
 ## Current gate
 
 ```text
-Human Definition Lock GO:            AWAITING / NOT CONSUMED on parent
-Failure Semantics Definition:        NOT STARTED
+Human Definition Lock GO:            CONSUMED (parent)
+Failure Semantics Definition:        DEFINED
+Bounded Observation Design:          DEFINED
 Implementation Scope Definition:     NOT STARTED
 Human Implementation Start GO:       NOT AUTHORIZED
 Code / tests:                        NOT AUTHORIZED
