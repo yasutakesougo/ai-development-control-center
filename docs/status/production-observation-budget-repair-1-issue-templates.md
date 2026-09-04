@@ -25,17 +25,20 @@ PRODUCTION-OBSERVATION-BUDGET-REPAIR-1 — bounded observation so Open PR count 
 
 ```text
 PHASE 0 Historical Failure Fixation = FIXED
-PHASE 1 Definition                  = REVIEW-CLEARED
+PHASE 1 Definition                  = LOCKED
 Independent Definition Review-1     = REVIEW-CLEARED
-Human Definition Lock GO            = AWAITING
+Human Definition Lock GO            = CONSUMED
+PHASE 2 Failure Semantics           = DEFINED
+PHASE 3 Bounded Observation Design  = DEFINED
+PHASE 4 Implementation Scope        = NOT STARTED
 Implementation Start                = NOT AUTHORIZED
 Ready / Merge / Deploy              = NOT AUTHORIZED
 ```
 
-PHASE 1 locks only the seven invariants (bounded cost; do not blind repo/main;
-PARTIAL ≠ CONFIRMED; omitted PRs explicit; PARTIAL fail-closed for Human Gate;
-deterministic selection; auditability). It does **not** lock SAFE_BUDGET,
-MAX_DETAILED_PRS, exact prioritizer order, or Tier membership rules.
+PHASE 1 locked the seven invariants. PHASE 2 locked CONFIRMED/PARTIAL/ERROR and
+PARTIAL → HumanAction UNKNOWN. PHASE 3 locked SAFE_BUDGET=45, MAX_DETAILED_PRS=14,
+Tier model, and deterministic prioritizer. Coding still requires PHASE 4 Scope +
+Human Implementation Start GO.
 
 ## Docs
 

@@ -3,19 +3,26 @@
 ## Phase
 
 ```text
-PHASE 1 — Definition
+PHASE 1 — Definition (LOCKED)
+PHASE 2 — Failure Semantics Definition (DEFINED)
+PHASE 3 — Bounded Observation Design (DEFINED)
 ```
 
 ## Status
 
 ```text
-DEFINITION REVIEW-CLEARED (Independent Definition Review-1)
-Human Definition Lock GO: NOT CONSUMED / AWAITING
+DEFINITION LOCKED
+Independent Definition Review-1: REVIEW-CLEARED
+Human Definition Lock GO: CONSUMED
+PHASE 2 Failure Semantics: DEFINED
+  docs/status/production-observation-budget-repair-1-failure-semantics.md
+PHASE 3 Bounded Observation Design: DEFINED
+  docs/status/production-observation-budget-repair-1-bounded-observation.md
+PHASE 4 Implementation Scope: NOT STARTED
 Implementation Start: NOT AUTHORIZED
 Ready / Merge / Deploy: NOT AUTHORIZED
-Mutation: 0 (docs-only Definition track)
+Mutation: 0 (docs-only track through PHASE 3)
 ```
-
 ## Parent / child structure
 
 ```text
@@ -136,22 +143,19 @@ Also locked with Definition:
 | Parent / child structure | Parent repair program + `BOUNDED-GITHUB-OBSERVATION-V1` implementation child |
 | Next phase after Lock | PHASE 2 Failure Semantics Definition (**not** coding) |
 
-### DO NOT LOCK YET (defer to PHASE 2 / PHASE 3)
+### Deferred at PHASE 1 Lock; now defined in later phases
 
-```text
-❌ SAFE_BUDGET exact value
-❌ MAX_DETAILED_PRS exact value
-❌ Exact prioritizer order
-❌ Detailed Tier membership rules
-❌ Exact evidenceState enum migration / field schema
-❌ Exact UI/readback copy
-❌ Exact verification N-matrix thresholds beyond the invariant
-   “budget pressure must not yield repository-wide ERROR when Tier-0 succeeded”
-```
+| Item | Where defined |
+|---|---|
+| `CONFIRMED` / `PARTIAL` / `ERROR` meanings | PHASE 2 — DEFINED |
+| PARTIAL Human Gate fail-closed rules | PHASE 2 — DEFINED |
+| `SAFE_BUDGET` / `MAX_DETAILED_PRS` | PHASE 3 — DEFINED (`45` / `14`) |
+| Exact prioritizer order + Tier membership | PHASE 3 — DEFINED |
+| Exact TypeScript field / file Scope | PHASE 4 — NOT STARTED |
+| Exact UI/readback copy | PHASE 4 / implementation — NOT STARTED |
 
-Any numbers or priority lists appearing later in this document are **design
-intent for review only**, not PHASE 1 Lock content.
-
+PHASE 1 no longer leaves these as open design intent once PHASE 2/3 docs exist.
+Pre-Lock “example only” numbers in older sections are superseded by PHASE 3.
 ## Principles (map to LOCK items)
 
 | Principle | LOCK # | Content |
@@ -370,7 +374,7 @@ P2:          0 (clarity note applied: PHASE 1 Lock vs PHASE 2/3 design intent)
 
 ```text
 Correction-1 required for P0/P1: NO
-Human Definition Lock GO: still NOT CONSUMED (Human only)
+Human Definition Lock GO: later CONSUMED by explicit Human authorization
 Implementation Start: NO
 Ready / Merge / Deploy: NO
 ```
@@ -379,11 +383,11 @@ Ready / Merge / Deploy: NO
 
 ```text
 PHASE 0 Historical Failure Fixation     = FIXED
-PHASE 1 Definition                      = REVIEW-CLEARED
+PHASE 1 Definition                      = LOCKED
 Independent Definition Review-1         = REVIEW-CLEARED
-Human Definition Lock GO                = AWAITING
-PHASE 2 Failure Semantics Definition    = NOT STARTED
-PHASE 3 Bounded Observation Design      = NOT STARTED
+Human Definition Lock GO                = CONSUMED
+PHASE 2 Failure Semantics Definition    = DEFINED
+PHASE 3 Bounded Observation Design      = DEFINED
 PHASE 4 Implementation Scope Definition = NOT STARTED
 Independent Scope Review                = NOT STARTED
 Human Implementation Start GO           = NOT AUTHORIZED
@@ -393,24 +397,21 @@ Ready / Merge / Deploy                  = NOT AUTHORIZED
 
 ## Human Definition Lock GO
 
-Lock this Definition only by explicit Human GO.
-
-Consuming Human Definition Lock GO means agreement on **PHASE 1 Lock
-boundary** above (LOCK items 1–7 + historical failure / Objective / rejects /
-parent-child / next=PHASE 2), and explicit non-agreement yet on DO NOT LOCK
-items (SAFE_BUDGET, MAX_DETAILED_PRS, exact prioritizer, Tier membership
-rules, exact schema).
-
 ```text
-Human Definition Lock GO: NOT CONSUMED
+Human Definition Lock GO: CONSUMED
+Consumed on: Human authorization to proceed
+  Human Definition Lock GO
+  → PHASE 2 Failure Semantics Definition
+  → PHASE 3 Bounded Observation Design
+Locked content: PHASE 1 Lock items 1–7 + Objective / rejects / parent-child
+Next after PHASE 3: PHASE 4 Implementation Scope Definition
+  (still requires Scope Review + Human Implementation Start GO before code)
 ```
 
 ## Authority boundary
 
 ```text
-This document authorizes Definition review completion recording and awaits
-Human Definition Lock only.
-It does not authorize Implementation Scope as complete, Implementation coding,
+Definition is locked. PHASE 2 semantics and PHASE 3 bounded design are defined.
+This does not authorize Implementation Scope as complete, Implementation coding,
 Ready, Merge, or Deploy.
-It does not itself consume Human Definition Lock GO.
 ```
