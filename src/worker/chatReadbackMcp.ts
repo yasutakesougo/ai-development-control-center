@@ -107,7 +107,7 @@ function toolDefinition() {
             sourceRefs: { type: "array", items: { type: "string" } },
           },
         },
-        evidenceState: { enum: ["CONFIRMED", "MISSING", "CONTRADICTORY", "ERROR"] },
+        evidenceState: { enum: ["CONFIRMED", "PARTIAL", "MISSING", "CONTRADICTORY", "ERROR"] },
         decisionCandidate: { enum: ["PRESENT", "NOT_PRESENT", "UNKNOWN"] },
         observedAt: { type: "string" },
         state: { enum: ["SOURCE_UNAVAILABLE", "INVALID_PAYLOAD"] },

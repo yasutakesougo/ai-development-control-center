@@ -64,6 +64,12 @@ function makeFacts(overrides: Partial<ObservedFacts> = {}): ObservedFacts {
     relevantIssueStates: {},
     errors: [],
     sourceRefs: ["github:repo:yasutakesougo/severe-behavior-support-spfx"],
+    openPullRequestCount: null,
+    observedPullRequestCount: null,
+    omittedPullRequestCount: null,
+    warnings: [],
+    observationBudget: null,
+    omittedPullRequests: null,
     ...overrides,
   };
 }

@@ -52,6 +52,9 @@ type StatusResponse = {
     main: string;
     openPrCount: number | null;
     evidenceState: string;
+    observedPullRequestCount?: number | null;
+    omittedPullRequestCount?: number | null;
+    warnings?: string[];
   };
   evidence: PrEvidence[] | null;
   observedAt: string;
@@ -231,6 +234,18 @@ export function App({
           <div><dt>Main</dt><dd>{data?.developmentStatus.main ?? "確認中"}</dd></div>
           <div><dt>Open PR</dt><dd>{data?.developmentStatus.openPrCount ?? "—"}</dd></div>
           <div><dt>Evidence</dt><dd>{data?.developmentStatus.evidenceState ?? "確認中"}</dd></div>
+          {data?.developmentStatus.evidenceState === "PARTIAL" && (
+            <>
+              <div>
+                <dt>Observed PR</dt>
+                <dd>{data.developmentStatus.observedPullRequestCount ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>Omitted PR</dt>
+                <dd>{data.developmentStatus.omittedPullRequestCount ?? "—"}</dd>
+              </div>
+            </>
+          )}
           <div><dt>observedAt</dt><dd>{data?.observedAt ?? "確認中"}</dd></div>
         </dl>
       </section>

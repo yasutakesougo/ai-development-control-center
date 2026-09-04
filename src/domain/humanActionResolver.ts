@@ -24,6 +24,13 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
     return unknown("観測した証拠に矛盾があります。", facts.sourceRefs);
   }
 
+  if (facts.evidenceState === "PARTIAL") {
+    return unknown(
+      "必要なPull Request evidenceの一部が観測予算上限により未確認です。",
+      facts.sourceRefs,
+    );
+  }
+
   if (!facts.currentMain || facts.openPullRequests === null) {
     return unknown("repository stateを確定できません。", facts.sourceRefs);
   }

@@ -20,8 +20,12 @@ export async function buildStatusPayload(
     developmentStatus: {
       repository: facts.repository,
       main: facts.currentMain ? "Observed" : "Unknown",
-      openPrCount: facts.openPullRequests?.length ?? null,
+      openPrCount: facts.openPullRequestCount,
       evidenceState: facts.evidenceState,
+      observedPullRequestCount: facts.observedPullRequestCount,
+      omittedPullRequestCount: facts.omittedPullRequestCount,
+      observationBudget: facts.observationBudget,
+      warnings: facts.warnings,
     },
     evidence:
       facts.openPullRequests?.map((pr) => ({

@@ -9,6 +9,7 @@ export type ChatReadbackHumanActionStatus =
 
 export type ChatReadbackEvidenceState =
   | "CONFIRMED"
+  | "PARTIAL"
   | "MISSING"
   | "CONTRADICTORY"
   | "ERROR";
@@ -51,6 +52,7 @@ const HUMAN_ACTION_STATUSES = new Set<ChatReadbackHumanActionStatus>([
 
 const EVIDENCE_STATES = new Set<ChatReadbackEvidenceState>([
   "CONFIRMED",
+  "PARTIAL",
   "MISSING",
   "CONTRADICTORY",
   "ERROR",

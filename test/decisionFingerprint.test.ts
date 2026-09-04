@@ -37,6 +37,12 @@ function makeFacts(overrides: Partial<ObservedFacts> = {}): ObservedFacts {
     relevantIssueStates: {},
     errors: [],
     sourceRefs: ["github:repo:yasutakesougo/severe-behavior-support-spfx"],
+    openPullRequestCount: null,
+    observedPullRequestCount: null,
+    omittedPullRequestCount: null,
+    warnings: [],
+    observationBudget: null,
+    omittedPullRequests: null,
     ...overrides,
   };
 }
@@ -155,7 +161,7 @@ describe("decision fingerprint canonicalization", () => {
   });
 
   it("non-CONFIRMED evidence ⇒ no recordable fingerprint", () => {
-    for (const evidenceState of ["MISSING", "CONTRADICTORY", "ERROR"] as const) {
+    for (const evidenceState of ["MISSING", "CONTRADICTORY", "ERROR", "PARTIAL"] as const) {
       expect(buildDecisionFacts(makeFacts({ evidenceState }), makeAction())).toBeNull();
     }
   });

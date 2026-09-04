@@ -70,6 +70,23 @@ describe("CHAT-READBACK-V1 projection", () => {
     });
   });
 
+  it("accepts PARTIAL evidence without a decision candidate", () => {
+    const payload = validPayload();
+    payload.developmentStatus.evidenceState = "PARTIAL";
+    delete (payload as Partial<typeof payload>).decisionFingerprint;
+    payload.action.status = "UNKNOWN";
+    payload.action.title = "判定できません";
+    payload.action.instruction = "安全のため判断を保留しています。";
+    payload.action.reason = "必要なPull Request evidenceの一部が観測予算上限により未確認です。";
+
+    expect(projectChatReadbackPayload(payload)).toMatchObject({
+      ok: true,
+      evidenceState: "PARTIAL",
+      decisionCandidate: "NOT_PRESENT",
+      humanAction: { status: "UNKNOWN" },
+    });
+  });
+
   it("fails closed for an unknown EvidenceState value", () => {
     const payload = validPayload();
     payload.developmentStatus.evidenceState = "HEALTHY";

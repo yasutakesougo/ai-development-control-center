@@ -45,6 +45,12 @@ function facts(overrides: Partial<ObservedFacts> = {}): ObservedFacts {
     relevantIssueStates: {},
     errors: [],
     sourceRefs: ["github:repo"],
+    openPullRequestCount: null,
+    observedPullRequestCount: null,
+    omittedPullRequestCount: null,
+    warnings: [],
+    observationBudget: null,
+    omittedPullRequests: null,
     ...overrides,
   };
 }
@@ -160,6 +166,22 @@ describe("resolveHumanAction", () => {
       }),
     );
     expect(result.status).toBe("UNKNOWN");
+  });
+
+  it("returns UNKNOWN for PARTIAL budget-bounded observation", () => {
+    const result = resolveHumanAction(
+      facts({
+        evidenceState: "PARTIAL",
+        openPullRequestCount: 19,
+        observedPullRequestCount: 14,
+        omittedPullRequestCount: 5,
+        openPullRequests: [
+          pr({ humanDecisionRequired: true, humanDecisionEvidence: requiredEvidence }),
+        ],
+      }),
+    );
+    expect(result.status).toBe("UNKNOWN");
+    expect(result.reason).toContain("観測予算上限");
   });
 
   it("never upgrades insufficient evidence to ACTION_REQUIRED", () => {

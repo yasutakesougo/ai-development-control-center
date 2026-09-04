@@ -39,6 +39,7 @@ describe("approval intent UI visibility", () => {
     expect(isApprovalIntentUiAllowed("ACTION_REQUIRED", "MISSING")).toBe(false);
     expect(isApprovalIntentUiAllowed("ACTION_REQUIRED", "CONTRADICTORY")).toBe(false);
     expect(isApprovalIntentUiAllowed("ACTION_REQUIRED", "ERROR")).toBe(false);
+    expect(isApprovalIntentUiAllowed("ACTION_REQUIRED", "PARTIAL")).toBe(false);
     expect(isApprovalIntentUiAllowed("ACTION_REQUIRED", null)).toBe(false);
   });
 });
