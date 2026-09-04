@@ -1,4 +1,8 @@
 import type { HumanAction } from "./humanAction";
+import {
+  MULTIPLE_GATE_CANDIDATES,
+  NO_GATE_CANDIDATE,
+} from "./observedFacts";
 import type { ObservedFacts, ObservedPullRequest } from "./observedFacts";
 
 function unknown(reason: string, sourceRefs: string[] = []): HumanAction {
@@ -24,7 +28,7 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
     return unknown("観測した証拠に矛盾があります。", facts.sourceRefs);
   }
 
-  if (facts.evidenceState === "PARTIAL") {
+  if (facts.evidenceState === "PARTIAL" && facts.gateCompleteness !== "COMPLETE") {
     return unknown(
       "必要なPull Request evidenceの一部が観測予算上限により未確認です。",
       facts.sourceRefs,
@@ -45,14 +49,36 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
     };
   }
 
+  if (facts.gateCompleteness === "PARTIAL") {
+    if (facts.errors.includes(NO_GATE_CANDIDATE)) {
+      return unknown("Human Decision待ちのPR候補がありません。", facts.sourceRefs);
+    }
+    if (facts.errors.includes(MULTIPLE_GATE_CANDIDATES)) {
+      return unknown("Human Decision待ちのPR候補を一意に特定できません。", facts.sourceRefs);
+    }
+    return unknown("Human Action判定に必要な候補PRの証拠が不足しています。", facts.sourceRefs);
+  }
+
+  let gatePullRequests = facts.openPullRequests;
+  if (facts.gateCompleteness === "COMPLETE") {
+    const candidates = facts.openPullRequests.filter(
+      (pr) => pr.gateCandidate === true || pr.humanDecisionEvidence.state === "REQUIRED",
+    );
+    if (candidates.length !== 1) {
+      return unknown("Human Decision待ちのPR候補を一意に特定できません。", facts.sourceRefs);
+    }
+
+    gatePullRequests = candidates;
+  }
+
   // Prefer UNKNOWN over WAIT: insufficient or inconsistent evidence must not be
   // reported as waiting or actionable.
-  const unresolved = facts.openPullRequests.find(hasUnknownEvidence);
+  const unresolved = gatePullRequests.find(hasUnknownEvidence);
   if (unresolved) {
     return unknown(`PR #${unresolved.number} の判定規則に必要な情報を確定できません。`, unresolved.sourceRefs);
   }
 
-  const pending = facts.openPullRequests.find((pr) => pr.ci === "PENDING" || pr.review === "PENDING");
+  const pending = gatePullRequests.find((pr) => pr.ci === "PENDING" || pr.review === "PENDING");
   if (pending) {
     return {
       status: "WAIT",
@@ -63,7 +89,7 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
     };
   }
 
-  const actionable = facts.openPullRequests.find(
+  const actionable = gatePullRequests.find(
     (pr) =>
       pr.humanDecisionEvidence.state === "REQUIRED" &&
       pr.humanDecisionRequired === true &&
@@ -82,7 +108,7 @@ export function resolveHumanAction(facts: ObservedFacts): HumanAction {
   }
 
   if (
-    facts.openPullRequests.every(
+    gatePullRequests.every(
       (pr) => pr.humanDecisionEvidence.state === "NONE" && pr.humanDecisionRequired === false,
     )
   ) {

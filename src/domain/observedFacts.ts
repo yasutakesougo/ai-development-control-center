@@ -1,6 +1,12 @@
 import type { HumanDecisionEvidence } from "./humanDecisionEvidence";
 
 export type EvidenceState = "CONFIRMED" | "PARTIAL" | "MISSING" | "CONTRADICTORY" | "ERROR";
+export type ObservationCompleteness = "COMPLETE" | "PARTIAL";
+
+export const NO_GATE_CANDIDATE = "NO_GATE_CANDIDATE";
+export const MULTIPLE_GATE_CANDIDATES = "MULTIPLE_GATE_CANDIDATES";
+export const DISCOVERY_INCOMPLETE = "DISCOVERY_INCOMPLETE";
+export const GATE_CRITICAL_OBSERVATION_INCOMPLETE = "GATE_CRITICAL_OBSERVATION_INCOMPLETE";
 
 export type CiState = "PASS" | "PENDING" | "FAIL" | "UNKNOWN";
 export type ReviewState = "PASS" | "PENDING" | "CHANGES_REQUESTED" | "UNKNOWN";
@@ -27,6 +33,8 @@ export interface ObservedPullRequest {
   number: number;
   title: string;
   draft: boolean;
+  headSha?: string | null;
+  gateCandidate?: boolean;
   ci: CiState;
   review: ReviewState;
   mergeState: MergeState;
@@ -50,6 +58,8 @@ export interface ObservedFacts {
   warnings: string[];
   observationBudget: ObservationBudget | null;
   omittedPullRequests: OmittedPullRequest[] | null;
+  fleetCompleteness?: ObservationCompleteness;
+  gateCompleteness?: ObservationCompleteness;
 }
 
 /** Defaults for constructors that predate BOUNDED-GITHUB-OBSERVATION-V1 fields. */

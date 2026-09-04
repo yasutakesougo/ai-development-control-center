@@ -1,17 +1,4 @@
-import {
-  BASE_COST,
-  estimatedObservationCost,
-  GITHUB_SUBREQUEST_BUDGET_EXCEEDED,
-  isOpenPullListPageTruncated,
-  MAX_DETAILED_PRS,
-  OPEN_PR_DETAIL_OBSERVATION_TRUNCATED,
-  OPEN_PR_LIST_PAGE_TRUNCATED,
-  PER_DETAILED_PR_COST,
-  prioritizeOpenPulls,
-  SAFE_BUDGET,
-  selectDetailedPulls,
-  SUBREQUEST_LIMIT,
-} from "../../domain/boundedGithubObservation";
+import { isOpenPullListPageTruncated } from "../../domain/boundedGithubObservation";
 import {
   collectHumanDecisionEvidence,
   toHumanDecisionRequired,
@@ -19,31 +6,44 @@ import {
 import type {
   CiState,
   MergeState,
+  ObservationCompleteness,
   ObservedFacts,
   ObservedPullRequest,
-  OmittedPullRequest,
   ReviewState,
 } from "../../domain/observedFacts";
-import { emptyObservationExtensions } from "../../domain/observedFacts";
+import {
+  DISCOVERY_INCOMPLETE,
+  GATE_CRITICAL_OBSERVATION_INCOMPLETE,
+  MULTIPLE_GATE_CANDIDATES,
+  NO_GATE_CANDIDATE,
+  emptyObservationExtensions,
+} from "../../domain/observedFacts";
 
 const API = "https://api.github.com";
 
-export {
-  BASE_COST,
-  GITHUB_SUBREQUEST_BUDGET_EXCEEDED,
-  MAX_DETAILED_PRS,
-  OPEN_PR_DETAIL_OBSERVATION_TRUNCATED,
-  OPEN_PR_LIST_PAGE_TRUNCATED,
-  PER_DETAILED_PR_COST,
-  SAFE_BUDGET,
-  SUBREQUEST_LIMIT,
-};
+/**
+ * The HUMAN-GATE observer uses the existing safe headroom with a narrower
+ * read model: one detail read per open PR, then status and reviews only for
+ * the uniquely identified candidate.
+ */
+export const GITHUB_SUBREQUEST_BUDGET_EXCEEDED = "GITHUB_SUBREQUEST_BUDGET_EXCEEDED";
+export const SUBREQUEST_LIMIT = 50;
+export const SAFE_BUDGET = 45;
+export const BASE_COST = 3;
+export const DETAIL_ONLY_COST = 1;
+export const SELECTED_CANDIDATE_COST = 2;
+export const OPEN_PR_DETAIL_OBSERVATION_TRUNCATED = "OPEN_PR_DETAIL_OBSERVATION_TRUNCATED";
+export const OPEN_PR_LIST_PAGE_TRUNCATED = "OPEN_PR_LIST_PAGE_TRUNCATED";
 
-/** @deprecated Use PER_DETAILED_PR_COST; retained for older test imports. */
-export const PER_PR_COST = PER_DETAILED_PR_COST;
+/** @deprecated Use DETAIL_ONLY_COST; retained for the focused budget test. */
+export const PER_PR_COST = DETAIL_ONLY_COST;
 
 export function requiredCost(openPullRequestCount: number): number {
-  return estimatedObservationCost(openPullRequestCount);
+  return (
+    BASE_COST +
+    DETAIL_ONLY_COST * openPullRequestCount +
+    (openPullRequestCount > 0 ? SELECTED_CANDIDATE_COST : 0)
+  );
 }
 
 type GitHubEnv = { GITHUB_TOKEN?: string };
@@ -59,8 +59,6 @@ type PullResponse = {
   mergeable_state?: string;
   html_url?: string;
   head?: { sha?: string };
-  base?: { ref?: string };
-  updated_at?: string;
 };
 type ReviewResponse = { user?: { login?: string }; state?: string; submitted_at?: string };
 type CheckRunsResponse = {
@@ -89,60 +87,74 @@ export async function observeRepository(
       `/repos/${repository}/pulls?state=open&per_page=30`,
       env,
     );
+    if (requiredCost(pulls.length) > SAFE_BUDGET) {
+      return budgetExceeded(repository, sourceRefs);
+    }
 
     const listPageTruncated = isOpenPullListPageTruncated(pulls.length);
-    const ordered = prioritizeOpenPulls(pulls, { defaultBranch: repo.default_branch });
-    const { selected, omittedFromCap } = selectDetailedPulls(ordered);
-
     const warnings: string[] = [];
     const observedPullRequests: ObservedPullRequest[] = [];
+    let discoveryComplete = true;
 
-    for (const pull of selected) {
+    for (const pull of pulls) {
       try {
-        observedPullRequests.push(await observePull(repository, pull, env));
+        observedPullRequests.push(await observePullInventory(repository, pull, env));
       } catch {
+        discoveryComplete = false;
         warnings.push(`DETAIL_FETCH_FAILED:#${pull.number}`);
-        observedPullRequests.push(unknownPullFromSummary(pull));
+        observedPullRequests.push(unobservedPull(pull));
       }
     }
 
-    const omittedPullRequests: OmittedPullRequest[] = omittedFromCap.map((pull) => ({
-      number: pull.number,
-      reason: "BUDGET_DETAIL_CAP" as const,
-    }));
+    if (listPageTruncated) warnings.push(OPEN_PR_LIST_PAGE_TRUNCATED);
 
-    if (omittedFromCap.length > 0) {
-      warnings.push(OPEN_PR_DETAIL_OBSERVATION_TRUNCATED);
+    const fleetCompleteness: ObservationCompleteness =
+      discoveryComplete && !listPageTruncated ? "COMPLETE" : "PARTIAL";
+    const candidatePulls = observedPullRequests.filter(
+      (pull) => pull.humanDecisionEvidence.state === "REQUIRED",
+    );
+    const errors = discoveryComplete ? [] : [DISCOVERY_INCOMPLETE];
+    let gateCompleteness: ObservationCompleteness = "PARTIAL";
+
+    if (candidatePulls.length === 0) {
+      errors.push(NO_GATE_CANDIDATE);
+    } else if (candidatePulls.length > 1) {
+      errors.push(MULTIPLE_GATE_CANDIDATES);
+    } else if (!listPageTruncated) {
+      const candidate = candidatePulls[0];
+      const enriched = await enrichGateCandidate(repository, candidate, env);
+      Object.assign(candidate, enriched.pull);
+      if (enriched.complete) {
+        gateCompleteness = "COMPLETE";
+      } else {
+        errors.push(GATE_CRITICAL_OBSERVATION_INCOMPLETE);
+      }
+    } else {
+      errors.push(GATE_CRITICAL_OBSERVATION_INCOMPLETE);
     }
-    if (listPageTruncated) {
-      warnings.push(OPEN_PR_LIST_PAGE_TRUNCATED);
-    }
-
-    const evidenceState =
-      listPageTruncated || omittedFromCap.length > 0 ? "PARTIAL" : "CONFIRMED";
-
-    const estimatedUsed = estimatedObservationCost(selected.length);
 
     return {
       repository,
       observedAt: new Date().toISOString(),
-      evidenceState,
+      evidenceState: listPageTruncated ? "PARTIAL" : "CONFIRMED",
       currentMain: branch.sha,
       openPullRequests: observedPullRequests,
       relevantIssueStates: {},
-      errors: [],
+      errors,
       sourceRefs,
       openPullRequestCount: pulls.length,
       observedPullRequestCount: observedPullRequests.length,
-      omittedPullRequestCount: omittedPullRequests.length,
+      omittedPullRequestCount: 0,
       warnings,
       observationBudget: {
         limit: SUBREQUEST_LIMIT,
         safeBudget: SAFE_BUDGET,
-        estimatedUsed,
+        estimatedUsed: requiredCost(pulls.length),
         bounded: true,
       },
-      omittedPullRequests: omittedPullRequests.length > 0 ? omittedPullRequests : [],
+      omittedPullRequests: [],
+      fleetCompleteness,
+      gateCompleteness,
     };
   } catch {
     return {
@@ -172,22 +184,7 @@ export function selectAuthoritativePullBody(
   return summaryBody;
 }
 
-function unknownPullFromSummary(summary: PullResponse): ObservedPullRequest {
-  const humanDecisionEvidence = collectHumanDecisionEvidence(summary.body);
-  return {
-    number: summary.number,
-    title: summary.title,
-    draft: Boolean(summary.draft),
-    ci: "UNKNOWN",
-    review: "UNKNOWN",
-    mergeState: "UNKNOWN",
-    humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
-    humanDecisionEvidence,
-    sourceRefs: [summary.html_url ?? `github:pr:${summary.number}`],
-  };
-}
-
-async function observePull(
+async function observePullInventory(
   repository: string,
   summary: PullResponse,
   env: GitHubEnv,
@@ -199,38 +196,63 @@ async function observePull(
     selectAuthoritativePullBody(pull.body, summary.body),
   );
 
-  if (!sha) {
-    return {
-      number: summary.number,
-      title: summary.title,
-      draft: Boolean(summary.draft ?? pull.draft),
-      ci: "UNKNOWN",
-      review: "UNKNOWN",
-      mergeState: "UNKNOWN",
-      humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
-      humanDecisionEvidence,
-      sourceRefs,
-    };
-  }
-
-  const [status, reviews] = await Promise.all([
-    githubGet<StatusResponse>(`/repos/${repository}/commits/${sha}/status`, env),
-    githubGet<ReviewResponse[]>(
-      `/repos/${repository}/pulls/${summary.number}/reviews?per_page=100`,
-      env,
-    ),
-  ]);
-
   return {
     number: summary.number,
-    title: summary.title,
-    draft: Boolean(summary.draft ?? pull.draft),
-    ci: normalizeCi(null, status),
-    review: normalizeReview(reviews),
+    title: pull.title ?? summary.title,
+    draft: Boolean(pull.draft ?? summary.draft),
+    headSha: sha ?? null,
+    gateCandidate: false,
+    ci: "UNKNOWN",
+    review: "UNKNOWN",
     mergeState: normalizeMergeState(pull),
     humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
     humanDecisionEvidence,
     sourceRefs,
+  };
+}
+
+function unobservedPull(summary: PullResponse): ObservedPullRequest {
+  const sourceRefs = [`github:pr:${summary.number}`];
+  const humanDecisionEvidence = collectHumanDecisionEvidence(undefined);
+  return {
+    number: summary.number,
+    title: summary.title,
+    draft: Boolean(summary.draft),
+    headSha: null,
+    gateCandidate: false,
+    ci: "UNKNOWN",
+    review: "UNKNOWN",
+    mergeState: "UNKNOWN",
+    humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
+    humanDecisionEvidence,
+    sourceRefs,
+  };
+}
+
+async function enrichGateCandidate(
+  repository: string,
+  candidate: ObservedPullRequest,
+  env: GitHubEnv,
+): Promise<{ pull: ObservedPullRequest; complete: boolean }> {
+  const sha = candidate.headSha;
+  const pull = { ...candidate, gateCandidate: true };
+  if (!sha) return { pull, complete: false };
+
+  const [statusResult, reviewsResult] = await Promise.allSettled([
+    githubGet<StatusResponse>(`/repos/${repository}/commits/${sha}/status`, env),
+    githubGet<ReviewResponse[]>(
+      `/repos/${repository}/pulls/${candidate.number}/reviews?per_page=100`,
+      env,
+    ),
+  ]);
+
+  pull.ci = statusResult.status === "fulfilled" ? normalizeCi(null, statusResult.value) : "UNKNOWN";
+  pull.review =
+    reviewsResult.status === "fulfilled" ? normalizeReview(reviewsResult.value) : "UNKNOWN";
+
+  return {
+    pull,
+    complete: statusResult.status === "fulfilled" && reviewsResult.status === "fulfilled",
   };
 }
 
@@ -303,6 +325,20 @@ async function githubFetch(path: string, env: GitHubEnv): Promise<Response> {
   });
   if (env.GITHUB_TOKEN) headers.set("Authorization", `Bearer ${env.GITHUB_TOKEN}`);
   return fetch(`${API}${path}`, { method: "GET", headers });
+}
+
+function budgetExceeded(repository: string, sourceRefs: string[]): ObservedFacts {
+  return {
+    repository,
+    observedAt: new Date().toISOString(),
+    evidenceState: "ERROR",
+    currentMain: null,
+    openPullRequests: null,
+    relevantIssueStates: null,
+    errors: [GITHUB_SUBREQUEST_BUDGET_EXCEEDED],
+    sourceRefs,
+    ...emptyObservationExtensions(),
+  };
 }
 
 function missing(repository: string, sourceRefs: string[], message: string): ObservedFacts {
