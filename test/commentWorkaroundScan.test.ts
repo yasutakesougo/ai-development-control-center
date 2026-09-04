@@ -129,6 +129,24 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     expect(result.findings[0].kind).toBe("DIRECTIVE_REVIEW");
   });
 
+  it("classifies TypeScript triple-slash compiler directives for review", () => {
+    const cwd = createRepository();
+    write(cwd, "a.ts", "export const value = 1;\n");
+    const baseSha = commit(cwd, "base");
+    write(cwd, "a.ts", '/// <reference types="node" />\nexport const value = 1;\n');
+    const headSha = commit(cwd, "head");
+
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
+
+    expect(exitCode).toBe(0);
+    expect(result.status).toBe("REVIEW_REQUIRED");
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({
+      kind: "DIRECTIVE_REVIEW",
+      text: '/// <reference types="node" />',
+    });
+  });
+
   it("orders findings deterministically by path and position", () => {
     const cwd = createRepository();
     write(cwd, "seed.ts", "export const seed = 1;\n");
@@ -184,6 +202,36 @@ describe("COMMENT-WORKAROUND-HARNESS-V1 scanner", () => {
     expect(exitCode).toBe(2);
     expect(result.status).toBe("HOLD");
     expect(result.errors[0].reasonCode).toBe("RENAMED_OR_COPIED_FILE");
+  });
+
+  it("fails closed on copied source files", () => {
+    const cwd = createRepository();
+    const content = "export const alpha = 1;\nexport const beta = 2;\n";
+    write(cwd, "a.ts", content);
+    const baseSha = commit(cwd, "base");
+    write(cwd, "b.ts", content);
+    const headSha = commit(cwd, "head");
+
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
+
+    expect(exitCode).toBe(2);
+    expect(result.status).toBe("HOLD");
+    expect(result.errors[0].reasonCode).toBe("RENAMED_OR_COPIED_FILE");
+  });
+
+  it("fails closed on delete-plus-add source ambiguity", () => {
+    const cwd = createRepository();
+    write(cwd, "a.ts", "export const alpha = 1;\n");
+    const baseSha = commit(cwd, "base");
+    renameSync(path.join(cwd, "a.ts"), path.join(cwd, "b.ts"));
+    write(cwd, "b.ts", "export function completelyDifferent() { return { value: 99 }; }\n");
+    const headSha = commit(cwd, "head");
+
+    const { exitCode, result } = runScanner(cwd, baseSha, headSha);
+
+    expect(exitCode).toBe(2);
+    expect(result.status).toBe("HOLD");
+    expect(result.errors.some((error) => error.reasonCode === "POSSIBLE_UNDETECTED_RENAME_OR_COPY")).toBe(true);
   });
 
   it("detects multiline comment tokens that intersect changed lines", () => {
