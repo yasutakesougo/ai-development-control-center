@@ -28,6 +28,7 @@ export function isApprovalIntentUiAllowed(
     evidenceState === "ERROR" ||
     evidenceState === "MISSING" ||
     evidenceState === "CONTRADICTORY" ||
+    evidenceState === "PARTIAL" ||
     evidenceState == null
   ) {
     return false;

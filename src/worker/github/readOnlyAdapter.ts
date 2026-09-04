@@ -1,4 +1,18 @@
 import {
+  BASE_COST,
+  estimatedObservationCost,
+  GITHUB_SUBREQUEST_BUDGET_EXCEEDED,
+  isOpenPullListPageTruncated,
+  MAX_DETAILED_PRS,
+  OPEN_PR_DETAIL_OBSERVATION_TRUNCATED,
+  OPEN_PR_LIST_PAGE_TRUNCATED,
+  PER_DETAILED_PR_COST,
+  prioritizeOpenPulls,
+  SAFE_BUDGET,
+  selectDetailedPulls,
+  SUBREQUEST_LIMIT,
+} from "../../domain/boundedGithubObservation";
+import {
   collectHumanDecisionEvidence,
   toHumanDecisionRequired,
 } from "../../domain/humanDecisionEvidence";
@@ -7,18 +21,29 @@ import type {
   MergeState,
   ObservedFacts,
   ObservedPullRequest,
+  OmittedPullRequest,
   ReviewState,
 } from "../../domain/observedFacts";
+import { emptyObservationExtensions } from "../../domain/observedFacts";
 
 const API = "https://api.github.com";
 
-export const GITHUB_SUBREQUEST_BUDGET_EXCEEDED = "GITHUB_SUBREQUEST_BUDGET_EXCEEDED";
-export const SUBREQUEST_LIMIT = 50;
-export const BASE_COST = 3;
-export const PER_PR_COST = 3;
+export {
+  BASE_COST,
+  GITHUB_SUBREQUEST_BUDGET_EXCEEDED,
+  MAX_DETAILED_PRS,
+  OPEN_PR_DETAIL_OBSERVATION_TRUNCATED,
+  OPEN_PR_LIST_PAGE_TRUNCATED,
+  PER_DETAILED_PR_COST,
+  SAFE_BUDGET,
+  SUBREQUEST_LIMIT,
+};
+
+/** @deprecated Use PER_DETAILED_PR_COST; retained for older test imports. */
+export const PER_PR_COST = PER_DETAILED_PR_COST;
 
 export function requiredCost(openPullRequestCount: number): number {
-  return BASE_COST + PER_PR_COST * openPullRequestCount;
+  return estimatedObservationCost(openPullRequestCount);
 }
 
 type GitHubEnv = { GITHUB_TOKEN?: string };
@@ -34,6 +59,8 @@ type PullResponse = {
   mergeable_state?: string;
   html_url?: string;
   head?: { sha?: string };
+  base?: { ref?: string };
+  updated_at?: string;
 };
 type ReviewResponse = { user?: { login?: string }; state?: string; submitted_at?: string };
 type CheckRunsResponse = {
@@ -58,25 +85,64 @@ export async function observeRepository(
     );
     if (!branch.sha) return missing(repository, sourceRefs, "main commit SHA missing");
 
-    const pulls = await githubGet<PullResponse[]>(`/repos/${repository}/pulls?state=open&per_page=30`, env);
-    if (requiredCost(pulls.length) > SUBREQUEST_LIMIT) {
-      return budgetExceeded(repository, sourceRefs);
+    const pulls = await githubGet<PullResponse[]>(
+      `/repos/${repository}/pulls?state=open&per_page=30`,
+      env,
+    );
+
+    const listPageTruncated = isOpenPullListPageTruncated(pulls.length);
+    const ordered = prioritizeOpenPulls(pulls, { defaultBranch: repo.default_branch });
+    const { selected, omittedFromCap } = selectDetailedPulls(ordered);
+
+    const warnings: string[] = [];
+    const observedPullRequests: ObservedPullRequest[] = [];
+
+    for (const pull of selected) {
+      try {
+        observedPullRequests.push(await observePull(repository, pull, env));
+      } catch {
+        warnings.push(`DETAIL_FETCH_FAILED:#${pull.number}`);
+        observedPullRequests.push(unknownPullFromSummary(pull));
+      }
     }
 
-    const observedPullRequests: ObservedPullRequest[] = [];
-    for (const pull of pulls) {
-      observedPullRequests.push(await observePull(repository, pull, env));
+    const omittedPullRequests: OmittedPullRequest[] = omittedFromCap.map((pull) => ({
+      number: pull.number,
+      reason: "BUDGET_DETAIL_CAP" as const,
+    }));
+
+    if (omittedFromCap.length > 0) {
+      warnings.push(OPEN_PR_DETAIL_OBSERVATION_TRUNCATED);
     }
+    if (listPageTruncated) {
+      warnings.push(OPEN_PR_LIST_PAGE_TRUNCATED);
+    }
+
+    const evidenceState =
+      listPageTruncated || omittedFromCap.length > 0 ? "PARTIAL" : "CONFIRMED";
+
+    const estimatedUsed = estimatedObservationCost(selected.length);
 
     return {
       repository,
       observedAt: new Date().toISOString(),
-      evidenceState: "CONFIRMED",
+      evidenceState,
       currentMain: branch.sha,
       openPullRequests: observedPullRequests,
       relevantIssueStates: {},
       errors: [],
       sourceRefs,
+      openPullRequestCount: pulls.length,
+      observedPullRequestCount: observedPullRequests.length,
+      omittedPullRequestCount: omittedPullRequests.length,
+      warnings,
+      observationBudget: {
+        limit: SUBREQUEST_LIMIT,
+        safeBudget: SAFE_BUDGET,
+        estimatedUsed,
+        bounded: true,
+      },
+      omittedPullRequests: omittedPullRequests.length > 0 ? omittedPullRequests : [],
     };
   } catch {
     return {
@@ -88,6 +154,7 @@ export async function observeRepository(
       relevantIssueStates: null,
       errors: ["GitHub API request failed"],
       sourceRefs,
+      ...emptyObservationExtensions(),
     };
   }
 }
@@ -103,6 +170,21 @@ export function selectAuthoritativePullBody(
 ): string | null | undefined {
   if (detailBody !== undefined) return detailBody;
   return summaryBody;
+}
+
+function unknownPullFromSummary(summary: PullResponse): ObservedPullRequest {
+  const humanDecisionEvidence = collectHumanDecisionEvidence(summary.body);
+  return {
+    number: summary.number,
+    title: summary.title,
+    draft: Boolean(summary.draft),
+    ci: "UNKNOWN",
+    review: "UNKNOWN",
+    mergeState: "UNKNOWN",
+    humanDecisionRequired: toHumanDecisionRequired(humanDecisionEvidence),
+    humanDecisionEvidence,
+    sourceRefs: [summary.html_url ?? `github:pr:${summary.number}`],
+  };
 }
 
 async function observePull(
@@ -121,7 +203,7 @@ async function observePull(
     return {
       number: summary.number,
       title: summary.title,
-      draft: Boolean(summary.draft),
+      draft: Boolean(summary.draft ?? pull.draft),
       ci: "UNKNOWN",
       review: "UNKNOWN",
       mergeState: "UNKNOWN",
@@ -133,13 +215,16 @@ async function observePull(
 
   const [status, reviews] = await Promise.all([
     githubGet<StatusResponse>(`/repos/${repository}/commits/${sha}/status`, env),
-    githubGet<ReviewResponse[]>(`/repos/${repository}/pulls/${summary.number}/reviews?per_page=100`, env),
+    githubGet<ReviewResponse[]>(
+      `/repos/${repository}/pulls/${summary.number}/reviews?per_page=100`,
+      env,
+    ),
   ]);
 
   return {
     number: summary.number,
     title: summary.title,
-    draft: Boolean(summary.draft),
+    draft: Boolean(summary.draft ?? pull.draft),
     ci: normalizeCi(null, status),
     review: normalizeReview(reviews),
     mergeState: normalizeMergeState(pull),
@@ -159,7 +244,11 @@ export function normalizeCi(checks: CheckRunsResponse | null, status: StatusResp
   const runs = checks?.check_runs ?? [];
   if (runs.length > 0) {
     if (runs.some((run) => run.status !== "completed")) return "PENDING";
-    if (runs.some((run) => run.conclusion && !["success", "neutral", "skipped"].includes(run.conclusion))) {
+    if (
+      runs.some(
+        (run) => run.conclusion && !["success", "neutral", "skipped"].includes(run.conclusion),
+      )
+    ) {
       return "FAIL";
     }
     return "PASS";
@@ -190,7 +279,10 @@ function normalizeReview(reviews: ReviewResponse[]): ReviewState {
 }
 
 function normalizeMergeState(pull: PullResponse): MergeState {
-  if (pull.mergeable === true && ["clean", "unstable", "has_hooks"].includes(pull.mergeable_state ?? "")) {
+  if (
+    pull.mergeable === true &&
+    ["clean", "unstable", "has_hooks"].includes(pull.mergeable_state ?? "")
+  ) {
     return "CLEAN";
   }
   if (pull.mergeable === false) return "BLOCKED";
@@ -213,19 +305,6 @@ async function githubFetch(path: string, env: GitHubEnv): Promise<Response> {
   return fetch(`${API}${path}`, { method: "GET", headers });
 }
 
-function budgetExceeded(repository: string, sourceRefs: string[]): ObservedFacts {
-  return {
-    repository,
-    observedAt: new Date().toISOString(),
-    evidenceState: "ERROR",
-    currentMain: null,
-    openPullRequests: null,
-    relevantIssueStates: null,
-    errors: [GITHUB_SUBREQUEST_BUDGET_EXCEEDED],
-    sourceRefs,
-  };
-}
-
 function missing(repository: string, sourceRefs: string[], message: string): ObservedFacts {
   return {
     repository,
@@ -236,5 +315,6 @@ function missing(repository: string, sourceRefs: string[], message: string): Obs
     relevantIssueStates: null,
     errors: [message],
     sourceRefs,
+    ...emptyObservationExtensions(),
   };
 }
