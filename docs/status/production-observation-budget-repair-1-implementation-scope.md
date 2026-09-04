@@ -1,7 +1,7 @@
 # PRODUCTION-OBSERVATION-BUDGET-REPAIR-1
 ## Implementation Scope Definition — BOUNDED-GITHUB-OBSERVATION-V1
 
-**Status: IMPLEMENTATION SCOPE DEFINED · IMPLEMENTATION START NOT AUTHORIZED**
+**Status: IMPLEMENTATION SCOPE REVIEW-CLEARED · IMPLEMENTATION START NOT AUTHORIZED**
 
 Bound upstream:
 
@@ -313,36 +313,66 @@ part of Implementation Start.
 | AC-11 | `npm run verify` PASS |
 | AC-12 | Diff confined to Exact mutable files |
 
-## 10. Delivery gate
+## 10. Independent Scope Review-1
 
 ```text
-PHASE 4 Implementation Scope Definition = DEFINED (this document)
-Independent Scope Review-1              = NOT STARTED / AWAITING
-Scope Correction-1                      = NOT REQUIRED YET
-Human Implementation Start GO           = NOT AUTHORIZED
+Subject:  BOUNDED-GITHUB-OBSERVATION-V1 Implementation Scope
+Scope HEAD: ebdb3d293290b6e1b0f844e933623f2f77ced8c4
+Exact re-read: PASS
+VERDICT: REVIEW-CLEARED
+P0: 0
+P1: 0
+P2: 0
+Scope Correction-1: NOT REQUIRED
+```
+
+### P0 checks
+
+| Check | Result | Notes |
+|---|---|---|
+| PARTIAL cannot generate Human GO | PASS | §6: PARTIAL → UNKNOWN only; fingerprint CONFIRMED-only; approval UI false; ledger stays CONFIRMED-gated |
+| Tier-0 failure not demoted to PARTIAL | PASS | §5.7: Tier-0 fail → ERROR; PARTIAL only via truncation or detail-cap omission |
+| Design does not exceed SUBREQUEST_LIMIT 50 | PASS | SAFE_BUDGET 45 / MAX_DETAILED_PRS 14 → estimatedUsed ≤ 45; tests require runtime fetches ≤ 50 |
+
+### P1 checks
+
+| Check | Result | Notes |
+|---|---|---|
+| Pagination incomplete cannot become CONFIRMED | PASS | `pulls.length === 30` ⇒ `listPageTruncated` ⇒ PARTIAL + `OPEN_PR_LIST_PAGE_TRUNCATED` |
+| `openPrCount` not derived from detailed array length | PASS | §7: `openPrCount = facts.openPullRequestCount`; AC-9 + `statusApiBudgetRepair` test |
+| `omittedPullRequests` deterministic | PASS | Pure prioritizer total order + `ordered.slice(MAX_DETAILED_PRS)` |
+| No allowlist escape | PASS | Exact mutable paths + STOP → Scope Correction-1 |
+| UI must not present PARTIAL as CONFIRMED | PASS | §7: show PARTIAL; no remap; approval stays hidden |
+| N=14 / 15 / 19 / 30 boundary coverage | PASS | §8 mandatory matrix includes 14, 15, 16, 19, 30 (+ 0,1,100) |
+
+```text
+Human Implementation Start GO: NOT CONSUMED (Human only)
+Implementation / Ready / Merge / Deploy: NO
+```
+
+## 11. Delivery gate
+
+```text
+PHASE 4 Implementation Scope Definition = DEFINED
+Independent Scope Review-1              = REVIEW-CLEARED @ ebdb3d2
+Scope Correction-1                      = NOT REQUIRED
+Human Implementation Start GO           = NOT AUTHORIZED / AWAITING
 Code mutation                           = NOT AUTHORIZED
 Ready / Merge / Deploy                  = NOT AUTHORIZED
 ```
 
-## 11. Next
+## 12. Next
 
 ```text
-Independent Scope Review-1
-  focus:
-    - file allowlist sufficiency vs leakage
-    - pagination length==30 rule
-    - PARTIAL payload / openPrCount projection
-    - Human Gate + approval/fingerprint fail-closed
-    - request-count tests not formula-only
-→ P0/P1 → Scope Correction-1 → re-review
-→ P0/P1 none → Human Implementation Start GO
+exact Scope re-read @ ebdb3d2 = DONE (this Review-1)
+→ Human Implementation Start GO
 → Minimal implementation on authorized files only
 ```
 
-## 12. Authority boundary
+## 13. Authority boundary
 
 ```text
-This document defines Implementation Scope only.
-It does not consume Human Implementation Start GO.
+Scope is REVIEW-CLEARED.
+This document still does not consume Human Implementation Start GO.
 It does not authorize coding, Ready, Merge, or Deploy.
 ```

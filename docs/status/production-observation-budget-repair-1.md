@@ -21,11 +21,11 @@ PHASE 3 Bounded Observation Design: DEFINED
   docs/status/production-observation-budget-repair-1-bounded-observation.md
 PHASE 4 Implementation Scope: DEFINED
   docs/status/production-observation-budget-repair-1-implementation-scope.md
-Independent Scope Review-1: NOT STARTED / AWAITING
-Human Implementation Start GO: NOT AUTHORIZED
+Independent Scope Review-1: REVIEW-CLEARED @ ebdb3d2
+Human Implementation Start GO: NOT AUTHORIZED / AWAITING
 Implementation Start: NOT AUTHORIZED
 Ready / Merge / Deploy: NOT AUTHORIZED
-Mutation: 0 (docs-only track through PHASE 4 Scope)
+Mutation: 0 (docs-only; Scope Review recorded; code not authorized)
 ```
 ## Parent / child structure
 
@@ -376,8 +376,8 @@ Human Definition Lock GO                = CONSUMED
 PHASE 2 Failure Semantics Definition    = DEFINED
 PHASE 3 Bounded Observation Design      = DEFINED
 PHASE 4 Implementation Scope Definition = DEFINED
-Independent Scope Review                = NOT STARTED / AWAITING
-Human Implementation Start GO           = NOT AUTHORIZED
+Independent Scope Review                = REVIEW-CLEARED @ ebdb3d2
+Human Implementation Start GO           = NOT AUTHORIZED / AWAITING
 BOUNDED-GITHUB-OBSERVATION-V1 code      = NOT AUTHORIZED
 Ready / Merge / Deploy                  = NOT AUTHORIZED
 ```
@@ -391,8 +391,8 @@ Consumed on: Human authorization to proceed
   → PHASE 2 Failure Semantics Definition
   → PHASE 3 Bounded Observation Design
 Locked content: PHASE 1 Lock items 1–7 + Objective / rejects / parent-child
-Next: Independent Scope Review-1
-  → Human Implementation Start GO (required before code)
+Next: Human Implementation Start GO
+  (Independent Scope Review-1 = REVIEW-CLEARED @ ebdb3d2)
 ```
 
 ## Authority boundary
@@ -400,7 +400,7 @@ Next: Independent Scope Review-1
 ```text
 Definition is locked. PHASE 2 semantics, PHASE 3 bounded design, and PHASE 4
 Implementation Scope are defined.
-Independent Scope Review-1 and Human Implementation Start GO are still required
-before any BOUNDED-GITHUB-OBSERVATION-V1 code mutation.
+Independent Scope Review-1 = REVIEW-CLEARED @ ebdb3d2.
+Human Implementation Start GO remains NOT CONSUMED.
 Ready / Merge / Deploy remain NOT AUTHORIZED.
 ```

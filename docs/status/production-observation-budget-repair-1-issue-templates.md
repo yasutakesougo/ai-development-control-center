@@ -31,15 +31,13 @@ Human Definition Lock GO            = CONSUMED
 PHASE 2 Failure Semantics           = DEFINED
 PHASE 3 Bounded Observation Design  = DEFINED
 PHASE 4 Implementation Scope        = DEFINED
-Independent Scope Review-1          = AWAITING
+Independent Scope Review-1          = REVIEW-CLEARED @ ebdb3d2
 Implementation Start                = NOT AUTHORIZED
 Ready / Merge / Deploy              = NOT AUTHORIZED
 ```
 
-PHASE 1–3 locked invariants / semantics / budgets. PHASE 4 locks the mutable file
-allowlist, ObservedFacts field names, pagination `length===30` rule, observer
-algorithm, and required tests. Coding still requires Independent Scope Review-1
-+ Human Implementation Start GO.
+PHASE 1–4 docs are locked through Scope Review-CLEARED. Coding still requires
+explicit Human Implementation Start GO.
 
 ## Docs
 
@@ -115,8 +113,8 @@ Human Definition Lock GO:            CONSUMED (parent)
 Failure Semantics Definition:        DEFINED
 Bounded Observation Design:          DEFINED
 Implementation Scope Definition:     DEFINED
-Independent Scope Review-1:          AWAITING
-Human Implementation Start GO:       NOT AUTHORIZED
+Independent Scope Review-1:          REVIEW-CLEARED @ ebdb3d2
+Human Implementation Start GO:       NOT AUTHORIZED / AWAITING
 Code / tests:                        NOT AUTHORIZED
 Ready / Merge / Deploy:              NOT AUTHORIZED
 ```
