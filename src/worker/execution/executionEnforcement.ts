@@ -3,7 +3,7 @@ import {
   verifyAuthorizationReceipt,
   type AuthorizationReceiptV1,
   type CanonicalApprovalPayloadV1,
-} from "../domain/authorityApproval";
+} from "../../domain/authorityApproval";
 
 export interface ReceiptConsumptionStore {
   consume(args: {
