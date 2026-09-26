@@ -5,6 +5,7 @@ import {
   parseReceiptHmacKey,
   verifyAuthorizationReceipt,
 } from "../src/domain/authorityApproval";
+import { D1ReceiptConsumptionStore } from "../src/worker/authority/authorityStore";
 import {
   handleAuthorityApprovalPost,
   type AuthorityRecorderEnv,
@@ -177,5 +178,26 @@ describe("Trusted Authority Recorder", () => {
     const conflict = await handleAuthorityApprovalPost(request(token, body("publish")), testEnv, deps);
     expect(conflict.status).toBe(409);
     expect(((await conflict.json()) as any).error).toBe("HUMAN_DECISION_REF_CONFLICT");
+  });
+  it("consumes a single-use receipt once in D1 and keeps consumption append-only", async () => {
+    const db = createLedgerTestDb();
+    const store = new D1ReceiptConsumptionStore(db);
+    const input = {
+      receiptId: "receipt-once",
+      approvalRecordId: "approval-once",
+      payloadDigest: "a".repeat(64),
+      consumedAt: "2026-09-26T01:00:00.000Z",
+      executionRef: "execution-1",
+    };
+
+    expect(await store.consume(input)).toBe("CONSUMED");
+    expect(await store.consume({ ...input, executionRef: "execution-2" })).toBe("REPLAYED");
+
+    expect(() =>
+      db.raw
+        .prepare("UPDATE authority_receipt_consumptions SET execution_ref = 'changed'")
+        .run(),
+    ).toThrow(/append-only/);
+    expect(() => db.raw.prepare("DELETE FROM authority_receipt_consumptions").run()).toThrow(/append-only/);
   });
 });
