@@ -7,6 +7,8 @@ import {
 export const GITHUB_ACTIONS_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 export const GITHUB_ACTIONS_OIDC_JWKS = "https://token.actions.githubusercontent.com/.well-known/jwks";
 
+export type GithubActionsOidcKeyResolver = JWTVerifyGetKey | CryptoKey | Uint8Array;
+
 export type GithubActionsOidcConfig = {
   expectedAudience: string;
   expectedRepository: string;
@@ -76,7 +78,7 @@ export function getGithubActionsOidcJwksResolver(): JWTVerifyGetKey {
 export async function verifyGithubActionsOidc(
   token: string | null | undefined,
   config: GithubActionsOidcConfig,
-  keyResolver: JWTVerifyGetKey | CryptoKey | Uint8Array = getGithubActionsOidcJwksResolver(),
+  keyResolver: GithubActionsOidcKeyResolver = getGithubActionsOidcJwksResolver(),
 ): Promise<GithubActionsOidcResult> {
   if (!token?.trim()) return { ok: false, reason: "MISSING_TOKEN" };
 
