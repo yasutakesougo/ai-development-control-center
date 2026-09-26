@@ -4,7 +4,7 @@ import {
   computeCanonicalApprovalDigest,
   issueAuthorizationReceipt,
   parseCanonicalApprovalPayload,
-  parseReceiptHmacKey,
+  parseReceiptSigningKeyPkcs8,
   type CanonicalApprovalPayloadV1,
 } from "../../domain/authorityApproval";
 import {
@@ -25,10 +25,10 @@ export type AuthorityRecorderEnv = {
   ACCESS_AUD?: string;
   /** Explicit opt-in. Anything else fails closed. */
   AUTHORITY_AUTHZ_MODE?: string;
-  /** Existing staging D1 binding used for append-only authority records. */
-  LEDGER_DB?: D1DatabaseLike;
-  /** Base64url-encoded HMAC key, minimum 256 bits. */
-  AUTHORIZATION_RECEIPT_HMAC_KEY?: string;
+  /** Dedicated approval-record D1. Never shared with the Execution Enforcer. */
+  APPROVAL_DB?: D1DatabaseLike;
+  /** Base64url PKCS#8 ECDSA P-256 private signing key. Recorder only. */
+  AUTHORIZATION_RECEIPT_SIGNING_KEY_PKCS8_B64?: string;
 };
 
 export interface AuthorityRecorderDeps {
@@ -82,8 +82,11 @@ function serializeRecord(record: AuthorityApprovalRecord): Record<string, unknow
  * Trusted Authority Recorder.
  *
  * Human APPROVE is authenticated with a Cloudflare Access Human JWT. The
- * recorder writes an append-only record and signs a receipt; it never performs
- * the approved state change itself.
+ * recorder writes an append-only approval record and signs a receipt with a
+ * private key that is not present in the Execution Enforcer.
+ *
+ * This component has no production execution credential and no receipt
+ * consumption store.
  */
 export async function handleAuthorityApprovalPost(
   request: Request,
@@ -102,9 +105,11 @@ export async function handleAuthorityApprovalPost(
   const verified = await verifyAccessHumanJwt(token, verifierConfig, resolver);
   if (!verified.ok) return errorResponse(401, "UNAUTHENTICATED");
 
-  const db = env.LEDGER_DB;
-  const receiptKey = parseReceiptHmacKey(env.AUTHORIZATION_RECEIPT_HMAC_KEY);
-  if (!db || !receiptKey) return errorResponse(503, "AUTHORITY_RECORDER_UNAVAILABLE");
+  const db = env.APPROVAL_DB;
+  const signingKey = parseReceiptSigningKeyPkcs8(
+    env.AUTHORIZATION_RECEIPT_SIGNING_KEY_PKCS8_B64,
+  );
+  if (!db || !signingKey) return errorResponse(503, "AUTHORITY_RECORDER_UNAVAILABLE");
 
   let rawBody: unknown;
   try {
@@ -135,7 +140,7 @@ export async function handleAuthorityApprovalPost(
       issued_at: issuedAt,
       replay_mode: "SINGLE_USE",
     },
-    receiptKey,
+    signingKey,
   );
 
   const stored = await appendAuthorityApprovalRecord(db, {
