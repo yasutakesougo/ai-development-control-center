@@ -32,6 +32,10 @@ export type ExecutionEnforcementFailure =
   | "MUTABLE_REFERENCE"
   | "REPLAYED_RECEIPT";
 
+export type ExecutionPreflightResult =
+  | { ok: true }
+  | { ok: false; reason: Exclude<ExecutionEnforcementFailure, "REPLAYED_RECEIPT"> };
+
 export type ExecutionEnforcementResult<T> =
   | { ok: true; result: T }
   | { ok: false; reason: ExecutionEnforcementFailure };
@@ -47,26 +51,15 @@ function isImmutableReference(value: string): boolean {
 }
 
 /**
- * Single authoritative execution boundary.
- *
- * The Enforcer receives only a public verification key. It cannot mint a valid
- * Authorization Receipt. Verification and execution are composed in one
- * function so the exact verified object is the one handed to the executor.
+ * Non-mutating verification used for read-only/no-deploy acceptance evidence.
+ * It MUST NOT consume a single-use Receipt.
  */
-export async function enforceAuthorizedExecution<TObject, TResult>(args: {
+export async function verifyAuthorizedExecution<TObject>(args: {
   payload: CanonicalApprovalPayloadV1;
   receipt: AuthorizationReceiptV1;
   receiptVerificationKey: ReceiptVerificationKey;
   verifiedObject: VerifiedExecutionObject<TObject>;
-  consumptionStore: ReceiptConsumptionStore;
-  executionRef: string;
-  now?: () => Date;
-  execute: (context: {
-    payload: CanonicalApprovalPayloadV1;
-    verifiedObject: VerifiedExecutionObject<TObject>;
-    receipt: AuthorizationReceiptV1;
-  }) => Promise<TResult>;
-}): Promise<ExecutionEnforcementResult<TResult>> {
+}): Promise<ExecutionPreflightResult> {
   const verifiedReceipt = await verifyAuthorizationReceipt(
     args.receipt,
     args.receiptVerificationKey,
@@ -86,10 +79,38 @@ export async function enforceAuthorizedExecution<TObject, TResult>(args: {
     return { ok: false, reason: "MUTABLE_REFERENCE" };
   }
 
+  return { ok: true };
+}
+
+/**
+ * Single authoritative execution boundary.
+ *
+ * The Enforcer receives only a public verification key. It cannot mint a valid
+ * Authorization Receipt. Verification and execution are composed so the exact
+ * verified object is handed to the executor. Receipt consumption happens only
+ * on the mutating execution path, never during preflight.
+ */
+export async function enforceAuthorizedExecution<TObject, TResult>(args: {
+  payload: CanonicalApprovalPayloadV1;
+  receipt: AuthorizationReceiptV1;
+  receiptVerificationKey: ReceiptVerificationKey;
+  verifiedObject: VerifiedExecutionObject<TObject>;
+  consumptionStore: ReceiptConsumptionStore;
+  executionRef: string;
+  now?: () => Date;
+  execute: (context: {
+    payload: CanonicalApprovalPayloadV1;
+    verifiedObject: VerifiedExecutionObject<TObject>;
+    receipt: AuthorizationReceiptV1;
+  }) => Promise<TResult>;
+}): Promise<ExecutionEnforcementResult<TResult>> {
+  const preflight = await verifyAuthorizedExecution(args);
+  if (!preflight.ok) return preflight;
+
   const consumed = await args.consumptionStore.consume({
-    receiptId: verifiedReceipt.body.receipt_id,
-    approvalRecordId: verifiedReceipt.body.approval_record_id,
-    payloadDigest: verifiedReceipt.body.payload_digest,
+    receiptId: args.receipt.receipt_id,
+    approvalRecordId: args.receipt.approval_record_id,
+    payloadDigest: args.receipt.payload_digest,
     consumedAt: (args.now?.() ?? new Date()).toISOString(),
     executionRef: args.executionRef,
   });
