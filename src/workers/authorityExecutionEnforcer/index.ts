@@ -13,6 +13,7 @@ import {
   githubActionsOidcConfigFromEnv,
   verifyGithubActionsOidc,
   type GithubActionsOidcConfig,
+  type GithubActionsOidcKeyResolver,
 } from "../../worker/execution/githubActionsOidc";
 import type { D1DatabaseLike } from "../../worker/ledger/ledgerStore";
 
@@ -94,9 +95,14 @@ function parseOidcConfig(env: AuthorityExecutionEnforcerEnv): GithubActionsOidcC
  * gateway. It verifies GitHub OIDC identity and the Human-bound Receipt without
  * consuming the Receipt. Production execution remains fail-closed.
  */
+export interface AuthorityExecutionEnforcerDeps {
+  oidcKeyResolver?: GithubActionsOidcKeyResolver;
+}
+
 export async function handleAuthorityExecutionPost(
   request: Request,
   env: AuthorityExecutionEnforcerEnv,
+  deps: AuthorityExecutionEnforcerDeps = {},
 ): Promise<Response> {
   const oidcConfig = parseOidcConfig(env);
   const verificationKey = parseReceiptVerificationKeySpki(
@@ -108,7 +114,11 @@ export async function handleAuthorityExecutionPost(
     return noStoreJson(503, { error: "EXECUTION_ENFORCER_UNAVAILABLE" });
   }
 
-  const oidc = await verifyGithubActionsOidc(extractBearerToken(request), oidcConfig);
+  const oidc = await verifyGithubActionsOidc(
+    extractBearerToken(request),
+    oidcConfig,
+    deps.oidcKeyResolver,
+  );
   if (!oidc.ok) {
     return noStoreJson(401, { error: "INVALID_GITHUB_OIDC", reason: oidc.reason });
   }
