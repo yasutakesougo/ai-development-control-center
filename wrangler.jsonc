@@ -7,18 +7,28 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+  // AC7: Main Worker has service-call capability only. It has no Production
+  // Authority D1 binding, no Receipt private key, and no deploy credential.
+  "services": [
+    {
+      "binding": "AUTHORITY_RECORDER",
+      "service": "authority-recorder"
+    },
+    {
+      "binding": "AUTHORITY_EXECUTOR",
+      "service": "authority-execution-enforcer"
+    }
+  ],
   "env": {
     // Isolated staging pilot (MVP-3-APPROVAL-LEDGER-STAGING-PILOT-V1).
-    // Deployed only via: CLOUDFLARE_ENV=staging vite build && wrangler deploy -c dist/...
-    // The top-level (production) configuration above remains untouched.
+    // This legacy LEDGER_DB is decision-support history (Record != Authority)
+    // and is NOT the AC7 production Authority Store.
     "staging": {
       "name": "ai-development-control-center-staging",
       "assets": {
         "binding": "ASSETS",
         "not_found_handling": "single-page-application"
       },
-      // Isolated staging-only Approval Ledger store (D1). Production config
-      // (top-level) intentionally has no D1 binding and stays untouched.
       "d1_databases": [
         {
           "binding": "LEDGER_DB",
@@ -27,14 +37,8 @@
         }
       ],
       "vars": {
-        // Coarse staging authorization boundary: Cloudflare Access application policy.
         "LEDGER_AUTHZ_MODE": "access-policy",
-        // Cloudflare Access issuer (JWT `iss`) for the momosantanuki team. Must
-        // include the https:// scheme: the Worker builds the JWKS URL from this
-        // value and matches it against the token issuer (bare domain fails closed).
         "ACCESS_TEAM_DOMAIN": "https://momosantanuki.cloudflareaccess.com",
-        // Audience tag of the staging Access application
-        // (ai-development-control-center-staging.momosantanuki.workers.dev).
         "ACCESS_AUD": "91270b9e145b0e0501447707795d6a75d7622c141da082e72d77c4fa02e1ac3c"
       }
     }
