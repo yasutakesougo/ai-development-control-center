@@ -160,9 +160,10 @@ export function parseReceiptHmacKey(encoded: string | null | undefined): Uint8Ar
 
 async function importHmacKey(key: Uint8Array): Promise<CryptoKey> {
   if (key.byteLength < 32) throw new Error("authorization receipt HMAC key must be at least 32 bytes");
+  const rawKey = Uint8Array.from(key).buffer;
   return crypto.subtle.importKey(
     "raw",
-    key,
+    rawKey,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"],
@@ -230,7 +231,7 @@ export async function verifyAuthorizationReceipt(
   const valid = await crypto.subtle.verify(
     "HMAC",
     cryptoKey,
-    signature,
+    Uint8Array.from(signature).buffer,
     new TextEncoder().encode(canonicalJson(body)),
   );
 
