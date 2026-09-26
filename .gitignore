@@ -11,3 +11,4 @@ docs/handoff/handoff.json
 docs/handoff/handoff.md
 docs/architecture/auto-refresh-pilot-result.json
 docs/architecture/persistent-auto-refresh-result.json
+.authority-keys/
