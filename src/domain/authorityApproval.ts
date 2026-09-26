@@ -2,7 +2,7 @@ import { canonicalJson } from "./decisionFingerprint";
 
 export const CANONICAL_APPROVAL_PAYLOAD_V1 = "CANONICAL-APPROVAL-PAYLOAD-V1" as const;
 export const AUTHORIZATION_RECEIPT_V1 = "AUTHORIZATION-RECEIPT-V1" as const;
-export const AUTHORIZATION_RECEIPT_ALG = "HMAC-SHA256" as const;
+export const AUTHORIZATION_RECEIPT_ALG = "ECDSA-P256-SHA256" as const;
 
 export type CanonicalJsonValue =
   | null
@@ -40,6 +40,9 @@ export interface AuthorizationReceiptBodyV1 {
 export interface AuthorizationReceiptV1 extends AuthorizationReceiptBodyV1 {
   signature: string;
 }
+
+export type ReceiptSigningKey = CryptoKey | Uint8Array;
+export type ReceiptVerificationKey = CryptoKey | Uint8Array;
 
 function normalizeNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -152,31 +155,47 @@ function base64UrlToBytes(value: string): Uint8Array | null {
   }
 }
 
-export function parseReceiptHmacKey(encoded: string | null | undefined): Uint8Array | null {
+export function parseReceiptSigningKeyPkcs8(encoded: string | null | undefined): Uint8Array | null {
   if (!encoded) return null;
   const bytes = base64UrlToBytes(encoded.trim());
-  return bytes && bytes.byteLength >= 32 ? bytes : null;
+  return bytes && bytes.byteLength > 0 ? bytes : null;
 }
 
-async function importHmacKey(key: Uint8Array): Promise<CryptoKey> {
-  if (key.byteLength < 32) throw new Error("authorization receipt HMAC key must be at least 32 bytes");
-  const rawKey = Uint8Array.from(key).buffer;
+export function parseReceiptVerificationKeySpki(encoded: string | null | undefined): Uint8Array | null {
+  if (!encoded) return null;
+  const bytes = base64UrlToBytes(encoded.trim());
+  return bytes && bytes.byteLength > 0 ? bytes : null;
+}
+
+async function resolveSigningKey(key: ReceiptSigningKey): Promise<CryptoKey> {
+  if (key instanceof CryptoKey) return key;
   return crypto.subtle.importKey(
-    "raw",
-    rawKey,
-    { name: "HMAC", hash: "SHA-256" },
+    "pkcs8",
+    Uint8Array.from(key).buffer,
+    { name: "ECDSA", namedCurve: "P-256" },
     false,
-    ["sign", "verify"],
+    ["sign"],
+  );
+}
+
+async function resolveVerificationKey(key: ReceiptVerificationKey): Promise<CryptoKey> {
+  if (key instanceof CryptoKey) return key;
+  return crypto.subtle.importKey(
+    "spki",
+    Uint8Array.from(key).buffer,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"],
   );
 }
 
 export async function issueAuthorizationReceipt(
   body: AuthorizationReceiptBodyV1,
-  key: Uint8Array,
+  privateSigningKey: ReceiptSigningKey,
 ): Promise<AuthorizationReceiptV1> {
-  const cryptoKey = await importHmacKey(key);
+  const cryptoKey = await resolveSigningKey(privateSigningKey);
   const signature = await crypto.subtle.sign(
-    "HMAC",
+    { name: "ECDSA", hash: "SHA-256" },
     cryptoKey,
     new TextEncoder().encode(canonicalJson(body)),
   );
@@ -199,7 +218,7 @@ export type ReceiptVerificationResult =
 
 export async function verifyAuthorizationReceipt(
   receipt: AuthorizationReceiptV1,
-  key: Uint8Array,
+  publicVerificationKey: ReceiptVerificationKey,
 ): Promise<ReceiptVerificationResult> {
   if (
     !receipt ||
@@ -227,9 +246,9 @@ export async function verifyAuthorizationReceipt(
   if (!signature) return { ok: false, reason: "INVALID_SIGNATURE" };
 
   const { signature: _signature, ...body } = receipt;
-  const cryptoKey = await importHmacKey(key);
+  const cryptoKey = await resolveVerificationKey(publicVerificationKey);
   const valid = await crypto.subtle.verify(
-    "HMAC",
+    { name: "ECDSA", hash: "SHA-256" },
     cryptoKey,
     Uint8Array.from(signature).buffer,
     new TextEncoder().encode(canonicalJson(body)),
