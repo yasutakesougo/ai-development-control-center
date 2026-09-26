@@ -7,9 +7,8 @@ import type {
 } from "../../src/worker/ledger/ledgerStore";
 
 /**
- * Test double for Cloudflare D1 backed by real SQLite (node:sqlite), so tests
- * exercise the actual migration SQL, CHECK constraints, unique indexes and
- * append-only triggers with genuine SQLite semantics (D1 is SQLite-based).
+ * Test double for the legacy staging Approval Ledger only.
+ * Record != Authority: AC7 production Authority stores are tested separately.
  */
 class SqlitePreparedStatement implements D1PreparedStatementLike {
   constructor(
@@ -38,19 +37,16 @@ class SqlitePreparedStatement implements D1PreparedStatementLike {
 }
 
 export interface SqliteLedgerTestDb extends D1DatabaseLike {
-  /** Direct handle for trigger/constraint assertions in tests. */
   raw: DatabaseSync;
 }
 
 export function createLedgerTestDb(): SqliteLedgerTestDb {
   const db = new DatabaseSync(":memory:");
-  for (const name of ["0001_approval_ledger.sql", "0002_authority_approval.sql"]) {
-    const migration = readFileSync(
-      fileURLToPath(new URL(`../../migrations/${name}`, import.meta.url)),
-      "utf8",
-    );
-    db.exec(migration);
-  }
+  const migration = readFileSync(
+    fileURLToPath(new URL("../../migrations/0001_approval_ledger.sql", import.meta.url)),
+    "utf8",
+  );
+  db.exec(migration);
 
   return {
     raw: db,
