@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify": "npm run typecheck && npm test && npm run build",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "authority:keygen": "node scripts/generate-authority-receipt-keypair.mjs"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "latest",
