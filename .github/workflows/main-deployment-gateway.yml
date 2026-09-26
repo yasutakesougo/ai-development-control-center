@@ -1,0 +1,79 @@
+# LOOP-GRAPH-AUTHORITY-MAPPING-V1
+# Target: pipeline: main-deployment-gateway
+# State: MATERIALIZED / FAIL-CLOSED / PRODUCTION EXECUTION NOT PROVISIONED
+#
+# This workflow intentionally contains NO deploy command and consumes NO
+# production credential. It is the designated future single authoritative
+# execution path, but remains non-operative until separate evidence proves the
+# production Authority Record Store, receipt-verification key, replay-consumption
+# path, and exclusive production credential binding.
+#
+# Materialization != Production Deploy authorization.
+
+name: main-deployment-gateway
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_ref:
+        description: "Exact immutable git commit SHA proposed for execution"
+        required: true
+        type: string
+      approval_payload_digest:
+        description: "Bound Canonical Approval Payload SHA-256 digest"
+        required: true
+        type: string
+      authorization_receipt_id:
+        description: "Authorization Receipt identifier"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  authority-sensitive-execution:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Reject mutable artifact references
+        shell: bash
+        env:
+          ARTIFACT_REF: ${{ inputs.artifact_ref }}
+          PAYLOAD_DIGEST: ${{ inputs.approval_payload_digest }}
+          RECEIPT_ID: ${{ inputs.authorization_receipt_id }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "FAIL_CLOSED: artifact_ref must be an exact 40-character git commit SHA"
+            exit 64
+          }
+          [[ "$PAYLOAD_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "FAIL_CLOSED: approval_payload_digest must be a SHA-256 hex digest"
+            exit 64
+          }
+          [[ -n "$RECEIPT_ID" ]] || {
+            echo "FAIL_CLOSED: authorization_receipt_id is required"
+            exit 64
+          }
+
+      - name: Checkout exact proposed artifact
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.artifact_ref }}
+          persist-credentials: false
+
+      - name: Assert exact checked-out object
+        shell: bash
+        env:
+          ARTIFACT_REF: ${{ inputs.artifact_ref }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$ARTIFACT_REF"
+
+      - name: Production execution remains disabled
+        shell: bash
+        run: |
+          echo "FAIL_CLOSED: PRODUCTION_EXECUTION_NOT_PROVISIONED"
+          echo "No deploy, publish, Definition Promotion, or production mutation is authorized."
+          exit 78
