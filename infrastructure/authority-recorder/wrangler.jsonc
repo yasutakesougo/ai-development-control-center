@@ -1,0 +1,25 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "authority-recorder",
+  "compatibility_date": "2026-08-11",
+  "main": "../../src/workers/authorityRecorder/index.ts",
+  "workers_dev": false,
+  "d1_databases": [
+    {
+      "binding": "APPROVAL_DB",
+      "database_name": "authority-approval-ledger-production",
+      "database_id": "BOOTSTRAP_REQUIRED_AUTHORITY_APPROVAL_DB_ID",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "vars": {
+    "AUTHORITY_AUTHZ_MODE": "access-policy",
+    "ACCESS_TEAM_DOMAIN": "https://momosantanuki.cloudflareaccess.com",
+    "ACCESS_AUD": "BOOTSTRAP_REQUIRED_MAIN_WORKER_ACCESS_AUD"
+  }
+}
+// Secret provisioned ONLY on this Worker after bootstrap:
+// AUTHORIZATION_RECEIPT_SIGNING_KEY_PKCS8_B64
+//
+// No CLOUDFLARE_API_TOKEN.
+// No RECEIPT_CONSUMPTION_DB.
