@@ -1,14 +1,10 @@
 # LOOP-GRAPH-AUTHORITY-MAPPING-V1
 # Target: pipeline: main-deployment-gateway
-# State: MATERIALIZED / FAIL-CLOSED / PRODUCTION EXECUTION NOT PROVISIONED
+# State: MATERIALIZED / OIDC-BOUND / NO PRODUCTION DEPLOY
 #
-# This workflow intentionally contains NO deploy command and consumes NO
-# production credential. It is the designated future single authoritative
-# execution path, but remains non-operative until separate evidence proves the
-# production Authority Record Store, receipt-verification key, replay-consumption
-# path, and exclusive production credential binding.
-#
-# Materialization != Production Deploy authorization.
+# GitHub OIDC is identity evidence only. This workflow owns no Cloudflare API
+# token. The target deploy credential belongs exclusively to the private
+# authority-execution-enforcer Worker.
 
 name: main-deployment-gateway
 
@@ -16,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       artifact_ref:
-        description: "Exact immutable git commit SHA proposed for execution"
+        description: "Exact immutable 40-character git commit SHA"
         required: true
         type: string
       approval_payload_digest:
@@ -27,35 +23,34 @@ on:
         description: "Authorization Receipt identifier"
         required: true
         type: string
+      execution_request_json:
+        description: "Canonical payload + signed receipt + artifact_ref + artifact_digest"
+        required: true
+        type: string
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   authority-sensitive-execution:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Reject mutable artifact references
+      - name: Validate immutable inputs
         shell: bash
         env:
           ARTIFACT_REF: ${{ inputs.artifact_ref }}
           PAYLOAD_DIGEST: ${{ inputs.approval_payload_digest }}
           RECEIPT_ID: ${{ inputs.authorization_receipt_id }}
+          EXECUTION_REQUEST_JSON: ${{ inputs.execution_request_json }}
         run: |
           set -euo pipefail
-          [[ "$ARTIFACT_REF" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "FAIL_CLOSED: artifact_ref must be an exact 40-character git commit SHA"
-            exit 64
-          }
-          [[ "$PAYLOAD_DIGEST" =~ ^[0-9a-f]{64}$ ]] || {
-            echo "FAIL_CLOSED: approval_payload_digest must be a SHA-256 hex digest"
-            exit 64
-          }
-          [[ -n "$RECEIPT_ID" ]] || {
-            echo "FAIL_CLOSED: authorization_receipt_id is required"
-            exit 64
-          }
+          [[ "$ARTIFACT_REF" =~ ^[0-9a-f]{40}$ ]] || exit 64
+          [[ "$PAYLOAD_DIGEST" =~ ^[0-9a-f]{64}$ ]] || exit 64
+          test "$(jq -r '.artifact_ref' <<<"$EXECUTION_REQUEST_JSON")" = "$ARTIFACT_REF"
+          test "$(jq -r '.receipt.payload_digest' <<<"$EXECUTION_REQUEST_JSON")" = "$PAYLOAD_DIGEST"
+          test "$(jq -r '.receipt.receipt_id' <<<"$EXECUTION_REQUEST_JSON")" = "$RECEIPT_ID"
 
       - name: Checkout exact proposed artifact
         uses: actions/checkout@v4
@@ -71,9 +66,35 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$ARTIFACT_REF"
 
-      - name: Production execution remains disabled
+      - name: Acquire GitHub OIDC identity assertion
+        id: oidc
         shell: bash
+        env:
+          OIDC_AUDIENCE: loop-graph-authority-deploy-v1
         run: |
-          echo "FAIL_CLOSED: PRODUCTION_EXECUTION_NOT_PROVISIONED"
-          echo "No deploy, publish, Definition Promotion, or production mutation is authorized."
-          exit 78
+          set -euo pipefail
+          RESPONSE="$(curl -fsS             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${OIDC_AUDIENCE}")"
+          TOKEN="$(jq -r '.value' <<<"$RESPONSE")"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Call isolated Execution Enforcer through Main Worker
+        shell: bash
+        env:
+          OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+          EXECUTION_REQUEST_JSON: ${{ inputs.execution_request_json }}
+          ENFORCER_INGRESS: https://ai-development-control-center.momosantanuki.workers.dev/api/authority/execute
+        run: |
+          set -euo pipefail
+          BODY_FILE="$(mktemp)"
+          STATUS="$(curl -sS -o "$BODY_FILE" -w '%{http_code}'             -X POST "$ENFORCER_INGRESS"             -H "Authorization: Bearer $OIDC_TOKEN"             -H "Content-Type: application/json"             --data "$EXECUTION_REQUEST_JSON")"
+
+          # Current authorized state is no-deploy. A successful identity + Receipt
+          # preflight MUST remain non-mutating and fail closed at production execute.
+          test "$STATUS" = "503"
+          test "$(jq -r '.error' "$BODY_FILE")" = "PRODUCTION_EXECUTION_NOT_PROVISIONED"
+          test "$(jq -r '.oidcVerified' "$BODY_FILE")" = "true"
+          test "$(jq -r '.receiptVerified' "$BODY_FILE")" = "true"
+          test "$(jq -r '.receiptConsumed' "$BODY_FILE")" = "false"
+          test "$(jq -r '.productionMutation' "$BODY_FILE")" = "false"
