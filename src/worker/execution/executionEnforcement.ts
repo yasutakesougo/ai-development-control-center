@@ -3,6 +3,7 @@ import {
   verifyAuthorizationReceipt,
   type AuthorizationReceiptV1,
   type CanonicalApprovalPayloadV1,
+  type ReceiptVerificationKey,
 } from "../../domain/authorityApproval";
 
 export interface ReceiptConsumptionStore {
@@ -48,15 +49,14 @@ function isImmutableReference(value: string): boolean {
 /**
  * Single authoritative execution boundary.
  *
- * Verification and execution are deliberately composed in one function so the
- * executor receives the same VerifiedExecutionObject instance that was checked.
- * Callers cannot substitute a later mutable artifact reference between VERIFY
- * and EXECUTE.
+ * The Enforcer receives only a public verification key. It cannot mint a valid
+ * Authorization Receipt. Verification and execution are composed in one
+ * function so the exact verified object is the one handed to the executor.
  */
 export async function enforceAuthorizedExecution<TObject, TResult>(args: {
   payload: CanonicalApprovalPayloadV1;
   receipt: AuthorizationReceiptV1;
-  receiptHmacKey: Uint8Array;
+  receiptVerificationKey: ReceiptVerificationKey;
   verifiedObject: VerifiedExecutionObject<TObject>;
   consumptionStore: ReceiptConsumptionStore;
   executionRef: string;
@@ -67,7 +67,10 @@ export async function enforceAuthorizedExecution<TObject, TResult>(args: {
     receipt: AuthorizationReceiptV1;
   }) => Promise<TResult>;
 }): Promise<ExecutionEnforcementResult<TResult>> {
-  const verifiedReceipt = await verifyAuthorizationReceipt(args.receipt, args.receiptHmacKey);
+  const verifiedReceipt = await verifyAuthorizationReceipt(
+    args.receipt,
+    args.receiptVerificationKey,
+  );
   if (!verifiedReceipt.ok) return { ok: false, reason: "INVALID_RECEIPT" };
 
   const currentPayloadDigest = await computeCanonicalApprovalDigest(args.payload);
