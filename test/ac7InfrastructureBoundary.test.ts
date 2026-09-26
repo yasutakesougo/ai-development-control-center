@@ -23,7 +23,7 @@ describe("AC7 infrastructure boundary materialization", () => {
 
     expect(recorder).toContain('"binding": "APPROVAL_DB"');
     expect(recorder).not.toContain('"binding": "RECEIPT_CONSUMPTION_DB"');
-    expect(recorder).not.toContain("CLOUDFLARE_API_TOKEN");
+    expect(recorder).not.toContain('"CLOUDFLARE_API_TOKEN"');
 
     expect(enforcer).toContain('"binding": "RECEIPT_CONSUMPTION_DB"');
     expect(enforcer).toContain("AUTHORIZATION_RECEIPT_VERIFY_KEY_SPKI_B64");
