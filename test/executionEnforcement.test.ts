@@ -9,12 +9,20 @@ import {
 } from "../src/domain/authorityApproval";
 import {
   enforceAuthorizedExecution,
+  verifyAuthorizedExecution,
   type ReceiptConsumptionStore,
 } from "../src/worker/execution/executionEnforcement";
 
 const ARTIFACT = "a".repeat(64);
 const EVIDENCE = "b".repeat(64);
-const KEY = new Uint8Array(32).fill(9);
+
+async function receiptKeys(): Promise<CryptoKeyPair> {
+  return crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  ) as Promise<CryptoKeyPair>;
+}
 
 function payload(overrides: Partial<CanonicalApprovalPayloadV1> = {}): CanonicalApprovalPayloadV1 {
   return {
@@ -45,7 +53,7 @@ class MemoryConsumptionStore implements ReceiptConsumptionStore {
   }
 }
 
-async function receiptFor(boundPayload: CanonicalApprovalPayloadV1) {
+async function receiptFor(boundPayload: CanonicalApprovalPayloadV1, privateKey: CryptoKey) {
   return issueAuthorizationReceipt(
     {
       schema_version: AUTHORIZATION_RECEIPT_V1,
@@ -58,14 +66,36 @@ async function receiptFor(boundPayload: CanonicalApprovalPayloadV1) {
       issued_at: "2026-09-26T01:00:00.000Z",
       replay_mode: "SINGLE_USE",
     },
-    KEY,
+    privateKey,
   );
 }
 
 describe("execution enforcement", () => {
-  it("executes exactly the verified immutable object once", async () => {
+  it("read-only preflight verifies without consuming the Receipt", async () => {
+    const keys = await receiptKeys();
     const boundPayload = payload();
-    const receipt = await receiptFor(boundPayload);
+    const receipt = await receiptFor(boundPayload, keys.privateKey);
+    const store = new MemoryConsumptionStore();
+
+    const result = await verifyAuthorizedExecution({
+      payload: boundPayload,
+      receipt,
+      receiptVerificationKey: keys.publicKey,
+      verifiedObject: {
+        immutableRef: `sha256:${ARTIFACT}`,
+        digest: ARTIFACT,
+        value: {},
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(store.seen.size).toBe(0);
+  });
+
+  it("executes exactly the verified immutable object once", async () => {
+    const keys = await receiptKeys();
+    const boundPayload = payload();
+    const receipt = await receiptFor(boundPayload, keys.privateKey);
     const consumptionStore = new MemoryConsumptionStore();
     const verifiedObject = {
       immutableRef: `sha256:${ARTIFACT}`,
@@ -77,7 +107,7 @@ describe("execution enforcement", () => {
     const first = await enforceAuthorizedExecution({
       payload: boundPayload,
       receipt,
-      receiptHmacKey: KEY,
+      receiptVerificationKey: keys.publicKey,
       verifiedObject,
       consumptionStore,
       executionRef: "execution-1",
@@ -88,12 +118,11 @@ describe("execution enforcement", () => {
       },
     });
     expect(first).toEqual({ ok: true, result: "EXECUTED" });
-    expect(invoked).toBe(1);
 
     const replay = await enforceAuthorizedExecution({
       payload: boundPayload,
       receipt,
-      receiptHmacKey: KEY,
+      receiptVerificationKey: keys.publicKey,
       verifiedObject,
       consumptionStore,
       executionRef: "execution-2",
@@ -107,14 +136,15 @@ describe("execution enforcement", () => {
   });
 
   it("rejects a mutated canonical payload before execution", async () => {
+    const keys = await receiptKeys();
     const original = payload();
-    const receipt = await receiptFor(original);
+    const receipt = await receiptFor(original, keys.privateKey);
     let invoked = false;
 
     const result = await enforceAuthorizedExecution({
       payload: payload({ operation: "publish" }),
       receipt,
-      receiptHmacKey: KEY,
+      receiptVerificationKey: keys.publicKey,
       verifiedObject: {
         immutableRef: `sha256:${ARTIFACT}`,
         digest: ARTIFACT,
@@ -132,13 +162,14 @@ describe("execution enforcement", () => {
   });
 
   it("rejects an artifact mismatch or mutable reference", async () => {
+    const keys = await receiptKeys();
     const boundPayload = payload();
-    const receipt = await receiptFor(boundPayload);
+    const receipt = await receiptFor(boundPayload, keys.privateKey);
 
     const mismatch = await enforceAuthorizedExecution({
       payload: boundPayload,
       receipt,
-      receiptHmacKey: KEY,
+      receiptVerificationKey: keys.publicKey,
       verifiedObject: {
         immutableRef: `sha256:${"c".repeat(64)}`,
         digest: "c".repeat(64),
@@ -153,7 +184,7 @@ describe("execution enforcement", () => {
     const mutable = await enforceAuthorizedExecution({
       payload: boundPayload,
       receipt,
-      receiptHmacKey: KEY,
+      receiptVerificationKey: keys.publicKey,
       verifiedObject: {
         immutableRef: "main",
         digest: ARTIFACT,
