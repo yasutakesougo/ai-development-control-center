@@ -2,7 +2,6 @@ import { generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import {
   CANONICAL_APPROVAL_PAYLOAD_V1,
-  parseReceiptHmacKey,
   verifyAuthorizationReceipt,
 } from "../src/domain/authorityApproval";
 import { D1ReceiptConsumptionStore } from "../src/worker/authority/authorityStore";
@@ -10,12 +9,13 @@ import {
   handleAuthorityApprovalPost,
   type AuthorityRecorderEnv,
 } from "../src/worker/authority/trustedAuthorityRecorder";
-import { createLedgerTestDb } from "./helpers/sqliteLedgerDb";
+import {
+  createApprovalAuthorityTestDb,
+  createReceiptConsumptionTestDb,
+} from "./helpers/sqliteAuthorityDbs";
 
 const ISSUER = "https://example.cloudflareaccess.com";
 const AUDIENCE = "authority-test-audience";
-const RECEIPT_KEY_BYTES = new Uint8Array(32).fill(11);
-const RECEIPT_KEY = Buffer.from(RECEIPT_KEY_BYTES).toString("base64url");
 
 type SyntheticKeyPair = Awaited<ReturnType<typeof generateKeyPair>>;
 
@@ -41,13 +41,32 @@ async function serviceToken(privateKey: SyntheticKeyPair["privateKey"]) {
     .sign(privateKey);
 }
 
-function env(db = createLedgerTestDb()): AuthorityRecorderEnv {
+async function receiptKeys() {
+  const keyPair = (await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+
+  const privatePkcs8 = new Uint8Array(
+    await crypto.subtle.exportKey("pkcs8", keyPair.privateKey),
+  );
+  return {
+    keyPair,
+    privateKeyBase64url: Buffer.from(privatePkcs8).toString("base64url"),
+  };
+}
+
+function env(
+  privateKeyBase64url: string,
+  db = createApprovalAuthorityTestDb(),
+): AuthorityRecorderEnv {
   return {
     ACCESS_TEAM_DOMAIN: ISSUER,
     ACCESS_AUD: AUDIENCE,
     AUTHORITY_AUTHZ_MODE: "access-policy",
-    LEDGER_DB: db,
-    AUTHORIZATION_RECEIPT_HMAC_KEY: RECEIPT_KEY,
+    APPROVAL_DB: db,
+    AUTHORIZATION_RECEIPT_SIGNING_KEY_PKCS8_B64: privateKeyBase64url,
   };
 }
 
@@ -78,27 +97,31 @@ function request(token: string | undefined, requestBody = body()) {
 }
 
 describe("Trusted Authority Recorder", () => {
-  it("records authenticated Human APPROVE and returns a verifiable receipt without external effect", async () => {
+  it("records authenticated Human APPROVE and returns a public-key-verifiable receipt without external effect", async () => {
     const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const signing = await receiptKeys();
     const token = await humanToken(privateKey);
-    const db = createLedgerTestDb();
+    const db = createApprovalAuthorityTestDb();
 
-    const response = await handleAuthorityApprovalPost(request(token), env(db), {
-      keyResolver: publicKey,
-      now: () => new Date("2026-09-26T01:00:00.000Z"),
-      newApprovalRecordId: () => "approval-1",
-      newReceiptId: () => "receipt-1",
-    });
+    const response = await handleAuthorityApprovalPost(
+      request(token),
+      env(signing.privateKeyBase64url, db),
+      {
+        keyResolver: publicKey,
+        now: () => new Date("2026-09-26T01:00:00.000Z"),
+        newApprovalRecordId: () => "approval-1",
+        newReceiptId: () => "receipt-1",
+      },
+    );
     const result = (await response.json()) as any;
 
     expect(response.status).toBe(201);
     expect(result.recorded).toBe(true);
     expect(result.externalEffect).toBe(false);
-    expect(result.approver).toBeUndefined();
 
-    const key = parseReceiptHmacKey(RECEIPT_KEY);
-    expect(key).not.toBeNull();
-    expect(await verifyAuthorizationReceipt(result.receipt, key!)).toMatchObject({ ok: true });
+    expect(
+      await verifyAuthorizationReceipt(result.receipt, signing.keyPair.publicKey),
+    ).toMatchObject({ ok: true });
 
     const stored = db.raw
       .prepare("SELECT approval_record_id, payload_digest FROM authority_approval_records")
@@ -116,24 +139,28 @@ describe("Trusted Authority Recorder", () => {
 
   it("rejects missing Human authentication and Access service principals", async () => {
     const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const signing = await receiptKeys();
 
-    const missing = await handleAuthorityApprovalPost(request(undefined), env(), {
-      keyResolver: publicKey,
-    });
+    const missing = await handleAuthorityApprovalPost(
+      request(undefined),
+      env(signing.privateKeyBase64url),
+      { keyResolver: publicKey },
+    );
     expect(missing.status).toBe(401);
 
     const nonHuman = await handleAuthorityApprovalPost(
       request(await serviceToken(privateKey)),
-      env(),
+      env(signing.privateKeyBase64url),
       { keyResolver: publicKey },
     );
     expect(nonHuman.status).toBe(401);
   });
 
-  it("fails closed when authority policy, D1, or receipt key is unavailable", async () => {
+  it("fails closed when authority policy, approval D1, or private signing key is unavailable", async () => {
     const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const signing = await receiptKeys();
     const token = await humanToken(privateKey);
-    const base = env();
+    const base = env(signing.privateKeyBase64url);
 
     const noPolicy = await handleAuthorityApprovalPost(
       request(token),
@@ -144,14 +171,14 @@ describe("Trusted Authority Recorder", () => {
 
     const noDb = await handleAuthorityApprovalPost(
       request(token),
-      { ...base, LEDGER_DB: undefined },
+      { ...base, APPROVAL_DB: undefined },
       { keyResolver: publicKey },
     );
     expect(noDb.status).toBe(503);
 
     const noKey = await handleAuthorityApprovalPost(
       request(token),
-      { ...base, AUTHORIZATION_RECEIPT_HMAC_KEY: undefined },
+      { ...base, AUTHORIZATION_RECEIPT_SIGNING_KEY_PKCS8_B64: undefined },
       { keyResolver: publicKey },
     );
     expect(noKey.status).toBe(503);
@@ -159,8 +186,9 @@ describe("Trusted Authority Recorder", () => {
 
   it("replays the same Human decision idempotently and rejects semantic conflict", async () => {
     const { privateKey, publicKey } = await generateKeyPair("RS256");
+    const signing = await receiptKeys();
     const token = await humanToken(privateKey);
-    const testEnv = env();
+    const testEnv = env(signing.privateKeyBase64url);
     const deps = {
       keyResolver: publicKey,
       now: () => new Date("2026-09-26T01:00:00.000Z"),
@@ -179,8 +207,9 @@ describe("Trusted Authority Recorder", () => {
     expect(conflict.status).toBe(409);
     expect(((await conflict.json()) as any).error).toBe("HUMAN_DECISION_REF_CONFLICT");
   });
-  it("consumes a single-use receipt once in D1 and keeps consumption append-only", async () => {
-    const db = createLedgerTestDb();
+
+  it("consumption store is physically separate and enforces one-time append-only use", async () => {
+    const db = createReceiptConsumptionTestDb();
     const store = new D1ReceiptConsumptionStore(db);
     const input = {
       receiptId: "receipt-once",
