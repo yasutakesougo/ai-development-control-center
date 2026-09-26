@@ -1,0 +1,35 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "authority-execution-enforcer",
+  "compatibility_date": "2026-08-11",
+  "main": "../../src/workers/authorityExecutionEnforcer/index.ts",
+  "workers_dev": false,
+  "d1_databases": [
+    {
+      "binding": "RECEIPT_CONSUMPTION_DB",
+      "database_name": "authority-receipt-consumption-production",
+      "database_id": "BOOTSTRAP_REQUIRED_RECEIPT_CONSUMPTION_DB_ID",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "vars": {
+    "GITHUB_OIDC_AUDIENCE": "loop-graph-authority-deploy-v1",
+    "GITHUB_OIDC_REPOSITORY": "yasutakesougo/ai-development-control-center",
+    "GITHUB_OIDC_ENVIRONMENT": "production",
+    "GITHUB_OIDC_JOB_WORKFLOW_REF": "yasutakesougo/ai-development-control-center/.github/workflows/main-deployment-gateway.yml@refs/heads/main",
+    "EXECUTION_TARGET_IDENTITY": "cloudflare-worker:ai-development-control-center",
+    "EXECUTION_OPERATION": "deploy",
+    "PRODUCTION_EXECUTION_ENABLED": "false",
+    "CLOUDFLARE_ACCOUNT_ID": "BOOTSTRAP_REQUIRED_ACCOUNT_ID",
+    "TARGET_WORKER_NAME": "ai-development-control-center",
+    "AUTHORIZATION_RECEIPT_VERIFY_KEY_SPKI_B64": "BOOTSTRAP_REQUIRED_PUBLIC_VERIFY_KEY"
+  }
+}
+// Steady-state secret provisioned ONLY on this Worker:
+// CLOUDFLARE_API_TOKEN
+//
+// Token scope after bootstrap:
+// Workers Editor / Individual Worker = ai-development-control-center ONLY
+//
+// No private Receipt signing key.
+// No APPROVAL_DB.
