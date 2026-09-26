@@ -1,0 +1,41 @@
+name: phase1-authority-binding-verify
+
+on:
+  push:
+    branches:
+      - loop-graph-authority-phase1-v1
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/domain/authorityApproval.ts"
+      - "src/worker/authority/**"
+      - "src/worker/execution/**"
+      - "src/worker/index.ts"
+      - "migrations/0002_authority_approval.sql"
+      - "test/authorityApproval.test.ts"
+      - "test/executionEnforcement.test.ts"
+      - "test/trustedAuthorityRecorder.test.ts"
+      - "test/helpers/sqliteLedgerDb.ts"
+      - ".github/workflows/phase1-authority-binding-verify.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Typecheck, tests, build
+        run: npm run verify
