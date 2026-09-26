@@ -1,5 +1,9 @@
 import { resolveHumanAction } from "../domain/humanActionResolver";
 import { handleAuthStatus } from "./auth/authStatus";
+import {
+  handleAuthorityApprovalPost,
+  type AuthorityRecorderEnv,
+} from "./authority/trustedAuthorityRecorder";
 import { handleChatReadbackMcp } from "./chatReadbackMcp";
 import { observeRepository } from "./github/readOnlyAdapter";
 import { handleLedgerRecordPost, handleLedgerRecordsGet, type LedgerApiEnv } from "./ledger/recordsApi";
@@ -7,16 +11,13 @@ import { handleRepositoryDetailGet, handleRepositoryOverviewGet } from "./reposi
 import { buildStatusPayload } from "./statusApi";
 import { handleStatusOverlayGet } from "./statusOverlayApi";
 
-interface Env extends LedgerApiEnv {
-  ASSETS: { fetch(request: Request): Promise<Response> };
-  GITHUB_TOKEN?: string;
-  /** Cloudflare Access team domain / JWT issuer. Optional until Access is configured. */
-  ACCESS_TEAM_DOMAIN?: string;
-  /** Cloudflare Access application audience tag. Optional until Access is configured. */
-  ACCESS_AUD?: string;
-  STATUS_OVERLAY_REPOSITORY?: string;
-  STATUS_OVERLAY_RUNTIME_ENABLED?: string;
-}
+type Env = LedgerApiEnv &
+  AuthorityRecorderEnv & {
+    ASSETS: { fetch(request: Request): Promise<Response> };
+    GITHUB_TOKEN?: string;
+    STATUS_OVERLAY_REPOSITORY?: string;
+    STATUS_OVERLAY_RUNTIME_ENABLED?: string;
+  };
 
 const TARGET_REPOSITORY = "yasutakesougo/severe-behavior-support-spfx";
 
@@ -55,6 +56,13 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/api/status-overlay") {
       return handleStatusOverlayGet(env);
+    }
+
+    if (url.pathname === "/api/authority/approvals") {
+      if (request.method === "POST") {
+        return handleAuthorityApprovalPost(request, env);
+      }
+      return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
     }
 
     if (url.pathname === "/api/ledger/records") {
