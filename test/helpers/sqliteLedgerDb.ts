@@ -44,11 +44,13 @@ export interface SqliteLedgerTestDb extends D1DatabaseLike {
 
 export function createLedgerTestDb(): SqliteLedgerTestDb {
   const db = new DatabaseSync(":memory:");
-  const migration = readFileSync(
-    fileURLToPath(new URL("../../migrations/0001_approval_ledger.sql", import.meta.url)),
-    "utf8",
-  );
-  db.exec(migration);
+  for (const name of ["0001_approval_ledger.sql", "0002_authority_approval.sql"]) {
+    const migration = readFileSync(
+      fileURLToPath(new URL(`../../migrations/${name}`, import.meta.url)),
+      "utf8",
+    );
+    db.exec(migration);
+  }
 
   return {
     raw: db,
